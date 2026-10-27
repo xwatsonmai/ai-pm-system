@@ -1,0 +1,19 @@
+[Unit]
+Description=AI PM restricted read-only worker runner
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+Group=1000
+RuntimeDirectory=ai-pm-sandbox
+RuntimeDirectoryMode=0750
+EnvironmentFile=/etc/ai-pm-sandbox.env
+ExecStart=/usr/local/bin/ai-pm-sandbox-runner -data-root /data/ai-pm/shared/data -socket /run/ai-pm-sandbox/runner.sock -image ${AI_PM_WORKER_IMAGE}
+Restart=on-failure
+TimeoutStopSec=30
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

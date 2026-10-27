@@ -1,0 +1,6 @@
+# Merge explicitly with compose.yaml after starting the host runner.
+services:
+  app:
+    volumes:
+      - /run/ai-pm-sandbox:/run/ai-pm-sandbox:ro
+    command: ["-addr", "0.0.0.0:8090", "-data", "/app/data", "-pi-worker", "/app/runtime/worker.mjs", "-auth-config", "/run/ai-pm/auth.json", "-sandbox-socket", "/run/ai-pm-sandbox/runner.sock"]

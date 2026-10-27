@@ -1,0 +1,457 @@
+{
+  "esbuild": "0.25.12",
+  "entry": "export { Editor } from \"./6324faf0fc42e383.mjs\";\nexport { StarterKit } from \"./8944a89fc466dd18.mjs\";\nexport { Image } from \"./80e98b93a3b027fd.mjs\";\nexport { Placeholder } from \"./367d9473d45b52f8.mjs\";\nexport { TableKit } from \"./94ff4c8d511c64a5.mjs\";\nexport { Markdown } from \"./30ba32cc7febc540.mjs\";",
+  "bundle_sha256": "dc4955b7ff39913d5f260bcb1577435b77e1fff5be35f4ede08420177d81262a",
+  "modules": [
+    {
+      "source": "https://esm.sh/@tiptap/core@3.32.0/es2022/core.mjs",
+      "file": "cd2d5cac1c55618b.mjs",
+      "sha256": "4c036eab13909969803b0fed7923ef3099a05d10edae57f4c1cda33b7d9612fc"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/core@3.32.0/es2022/dist/jsx-runtime/jsx-runtime.mjs",
+      "file": "93b2f2816ae4c331.mjs",
+      "sha256": "a788f03ce224d9599fc46efe18cac66472331192c4f818dc1fd292315187642d"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/core@3.32.0/es2022/jsx-runtime.mjs",
+      "file": "4cf25b544acac5c1.mjs",
+      "sha256": "85d46ea685f9b4b43389a716fbc100739a901fcc20d832654ecdd38c3b27aacf"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/core@3.32.0?target=es2022",
+      "file": "6324faf0fc42e383.mjs",
+      "sha256": "dad02fcde93c45e64413f35178348942654148073bc17a2976f14b18b56910f7"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-blockquote@3.32.0/es2022/extension-blockquote.mjs",
+      "file": "2dc3eaf46c55752c.mjs",
+      "sha256": "ed787272d89e07a596555954d7f1c3831056767f5e18960daff2358a3fd21d0a"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-bold@3.32.0/es2022/extension-bold.mjs",
+      "file": "1cebe356aea44c61.mjs",
+      "sha256": "26233e7a1fcd2e012a1ca582c937fb1869217c4bbd900e5637a454924e26b09d"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-code-block@3.32.0/es2022/extension-code-block.mjs",
+      "file": "f824d63927206878.mjs",
+      "sha256": "28f2fe759b8abe912ccbeaab0e29f59d6ab3cb497812a1cd84c3dbbf4c2962b7"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-code@3.32.0/es2022/extension-code.mjs",
+      "file": "507b40446d90b0dc.mjs",
+      "sha256": "367b713b3e188946fd8f079c3072d02b4a8b86d6fd5a291d6fd6693af9a89ba1"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-document@3.32.0/es2022/extension-document.mjs",
+      "file": "87d7df6a02c54d26.mjs",
+      "sha256": "ba012c0042877cf17f56c6987f9b32356ff3374d2b323c593de57c2123f1083b"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-hard-break@3.32.0/es2022/extension-hard-break.mjs",
+      "file": "b00ff3d75a1b2cec.mjs",
+      "sha256": "9789e2c2a52495424e787fcce4534df5396bfaeae4b7b5dc1b0e63c10a8c861d"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-heading@3.32.0/es2022/extension-heading.mjs",
+      "file": "ed722ae93095c091.mjs",
+      "sha256": "2691ff1bee48f2a1ebec2411779b90184d0393e2f8376c20656f3dd017e1e0a5"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-horizontal-rule@3.32.0/es2022/extension-horizontal-rule.mjs",
+      "file": "55d3fe16a60d0c12.mjs",
+      "sha256": "1b9a7ee97aff855559c0e3cc10639592478f0ddcca07a2a37323b238fc9a0ee8"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-image@3.32.0/es2022/extension-image.mjs",
+      "file": "20b007a7a40b3ac7.mjs",
+      "sha256": "beb8b23066849fc39480894f995fe7eb17f0e17e8b567e89d7a8d3338e2805c8"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-image@3.32.0?target=es2022",
+      "file": "80e98b93a3b027fd.mjs",
+      "sha256": "5a8cf8f9f8c29d253e9dce39c573f630847206884d67ecad149347127eacbb87"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-italic@3.32.0/es2022/extension-italic.mjs",
+      "file": "69101ce2d8e0bf88.mjs",
+      "sha256": "9c2738d9e14d6fa48ee2adb7ba255447f1223ff53d2b8558cbb593e1894cb5f4"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-link@3.32.0/es2022/extension-link.mjs",
+      "file": "6bcd44c6e03ceb0f.mjs",
+      "sha256": "5ceba4364efc6574a33f1dc2e6770ffaa66a4eb2b96cc9324f491628411b67dc"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-list@3.32.0/es2022/extension-list.mjs",
+      "file": "3f2b869504e68951.mjs",
+      "sha256": "a761b539c289aaf3a57d88e7de5943b40666ce9d0ca89285321299e3d509c934"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-paragraph@3.32.0/es2022/extension-paragraph.mjs",
+      "file": "9cf6ddce795cc38f.mjs",
+      "sha256": "d4b4b4b0a920919a2ddc5a7f07c590d746ba97ce84100a654eb2bb396ccaba69"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-placeholder@3.32.0/es2022/extension-placeholder.mjs",
+      "file": "eeaf095ff9fc8001.mjs",
+      "sha256": "bed6c40c80fbe492f2a080092e1b922382b7a5a84294e2e9dbea2e7e9f3782d8"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-placeholder@3.32.0?target=es2022",
+      "file": "367d9473d45b52f8.mjs",
+      "sha256": "d0c428104040be534b7f0ae13cbdbe83fe5ba43698f5364fe1e01cf9ec555e8b"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-strike@3.32.0/es2022/extension-strike.mjs",
+      "file": "18d7a9c853657564.mjs",
+      "sha256": "18cb2c484a2a8d6dc49c34eba4e2137e4bfcaa98fdbb2695679ef21e0d86746f"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-table@3.32.0/es2022/extension-table.mjs",
+      "file": "421a31f26c1914be.mjs",
+      "sha256": "fcdd148bf4cb001cf481bc4ffbc0aa907257f50e49b5a051b2f8ba962c0cf2e1"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-table@3.32.0?target=es2022",
+      "file": "94ff4c8d511c64a5.mjs",
+      "sha256": "6adfbb43c169e4e7e9d008fba49a05462baefb6d68f89192dac170ea38f4efbc"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-text@3.32.0/es2022/extension-text.mjs",
+      "file": "473bda02eaa14c02.mjs",
+      "sha256": "75563a321fd859ae7533522df40a2cb0af03646083a5f6ccf578dda847438bfd"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extension-underline@3.32.0/es2022/extension-underline.mjs",
+      "file": "2843c259e6fd7ede.mjs",
+      "sha256": "92fd2e8095f232c21d5a2d142f5383eb29dc576062bc587684c0385becc1f424"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/extensions@3.32.0/es2022/extensions.mjs",
+      "file": "1ccfa5df2dea1526.mjs",
+      "sha256": "3ef558572763e664f1974e5fd13a576bcd100cb39d9d4014d60c4bf096736c15"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/markdown@3.32.0/es2022/markdown.mjs",
+      "file": "b471478ab693e5a4.mjs",
+      "sha256": "4e22b64f2bccfe423830476e3205ba68a33279befa3443ffdc9d6613092e8537"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/markdown@3.32.0?target=es2022",
+      "file": "30ba32cc7febc540.mjs",
+      "sha256": "bf3065712ec1743c542dfd86af4c79b86b9ab96869058bfef57341a17c292cd2"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/pm@3.32.0/es2022/commands.mjs",
+      "file": "52caaf66090c0f77.mjs",
+      "sha256": "c9484726ed8c0f22870a198b3d148b4fc807733c3a34e299b4f5fc9b0d25c1be"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/pm@3.32.0/es2022/dropcursor.mjs",
+      "file": "dacd3493adf51365.mjs",
+      "sha256": "3b90099658f27aa52eb58cf88baa55a4424229c2ebe5d0517d42ed8ddaa90692"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/pm@3.32.0/es2022/gapcursor.mjs",
+      "file": "a22352b135c7f86d.mjs",
+      "sha256": "f379dc1e32ac9f09cbd1f6ab9ea4230174c79382d298237b224186cc0a0e8bd8"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/pm@3.32.0/es2022/history.mjs",
+      "file": "b8154eb29c757e02.mjs",
+      "sha256": "6b2e8779b53df389f3a8c017c25644586645e5fb25d33710db8017307754313c"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/pm@3.32.0/es2022/keymap.mjs",
+      "file": "f8a370ff8b28651b.mjs",
+      "sha256": "95a32fab711d55dd3f39e92451d9438fe873bb6e70096fbeaba8ef9f5cb3c513"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/pm@3.32.0/es2022/model.mjs",
+      "file": "1c115208dff35e31.mjs",
+      "sha256": "66382a66fdeb4a487052c585172aa3688d142a40f37c8444afb7d6f2d20652a2"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/pm@3.32.0/es2022/schema-list.mjs",
+      "file": "7dd16401835d7182.mjs",
+      "sha256": "52436d38214afadc9c00a644bddd397fca885e430071838858782eff28ff195a"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/pm@3.32.0/es2022/state.mjs",
+      "file": "1732b4c9025efc8c.mjs",
+      "sha256": "a251fd0a0d851ad911d3c50c36bfc4e848bd24eb6934634c476a89bbd35ab4a5"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/pm@3.32.0/es2022/tables.mjs",
+      "file": "ebf3f650b8e49fb4.mjs",
+      "sha256": "3e800e07d62cd0027b4052591e2c90b04dbb403547480ff05fe9abc72b4ecc66"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/pm@3.32.0/es2022/transform.mjs",
+      "file": "4149e7ad53239743.mjs",
+      "sha256": "bb4c7c3ce886585dfd5bdaa4e07a52ad96baa3db4cb9d53faf9cac8a5ea90f8e"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/pm@3.32.0/es2022/view.mjs",
+      "file": "2e8555911b6781e6.mjs",
+      "sha256": "da1d67d185098d522f422cb5cb378c246839d3e7043a812cf9695f5515434399"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/starter-kit@3.32.0/es2022/starter-kit.mjs",
+      "file": "b7a803ca677da6e6.mjs",
+      "sha256": "7f4e1c5130811edf0dd05fd8982b160474b0afd3d2349b50dd3dfa1630151b3d"
+    },
+    {
+      "source": "https://esm.sh/@tiptap/starter-kit@3.32.0?target=es2022",
+      "file": "8944a89fc466dd18.mjs",
+      "sha256": "d9de202beb9e01e916d86ba299d88fabca0e76596ddd8b83a17753397d3c9f0c"
+    },
+    {
+      "source": "https://esm.sh/linkifyjs@4.3.3/es2022/linkifyjs.mjs",
+      "file": "4f7f6b78c5a9dbbb.mjs",
+      "sha256": "61dc0221cb0b6970183e55ab6ca3e4371efa56aa053e3d2542475ed54b3fd198"
+    },
+    {
+      "source": "https://esm.sh/linkifyjs@^4.3.3?target=es2022",
+      "file": "bd1ecc3c83be41ed.mjs",
+      "sha256": "a52808697d062c694e475bdec4104bc702d87d778b4dcd25e5f60b323bdecf3f"
+    },
+    {
+      "source": "https://esm.sh/marked@17.0.6/es2022/marked.mjs",
+      "file": "c1a8930addc745a6.mjs",
+      "sha256": "ec155bba288692463862ae544744f00eb8584f7725d4b124897aa0bfa99084c3"
+    },
+    {
+      "source": "https://esm.sh/marked@^17.0.1?target=es2022",
+      "file": "2f038ac903bdd8ac.mjs",
+      "sha256": "cb426efcadd01f1c2ff0b98bc99dbf7b4137b9facf6281b194064953b53b5943"
+    },
+    {
+      "source": "https://esm.sh/node/async_hooks.mjs",
+      "file": "5a6b2a422712fc8f.mjs",
+      "sha256": "b7862dbfba8bbbca956f19e4e08280b529e4b27468779775a9093aef8c92dc1d"
+    },
+    {
+      "source": "https://esm.sh/node/events.mjs",
+      "file": "4482af8fc17462a7.mjs",
+      "sha256": "84ec52e99ce5049ed4c63f8fdc621342022f9ceca0030bb031345fffaffa37e6"
+    },
+    {
+      "source": "https://esm.sh/node/process.mjs",
+      "file": "9d3493270fc89c07.mjs",
+      "sha256": "f15a68f9266c70d3bc54e926df1508aa987dcab8de158e491243c8eae2b4b0f1"
+    },
+    {
+      "source": "https://esm.sh/node/tty.mjs",
+      "file": "54186365b6107d9b.mjs",
+      "sha256": "c66ff4b406bad449bfb2ced355f15badf16f4d9e035d2d300e33b5aeee64e3be"
+    },
+    {
+      "source": "https://esm.sh/orderedmap@2.1.1/es2022/orderedmap.mjs",
+      "file": "3c1dada2446477c2.mjs",
+      "sha256": "aa27393bc0402b0994c073b949d710bbe2b44fac7182986e3db8fc9b5d148308"
+    },
+    {
+      "source": "https://esm.sh/orderedmap@^2.0.0?target=es2022",
+      "file": "11e9a6b5c9630ba6.mjs",
+      "sha256": "ed385fd51b66370be7fc4f8d326540b932413621b1c2a20c9bacd49958cff54b"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-commands@1.7.2/es2022/prosemirror-commands.mjs",
+      "file": "50b7b29ddb62d500.mjs",
+      "sha256": "f8a2131ebc822f2a63068744b9b6da7e17a9638e33faad5ccd25747692884f98"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-commands@^1.7.2?target=es2022",
+      "file": "1b46a1e980319187.mjs",
+      "sha256": "bf44aaca5d5b00ce5d7a90510dc8925af42a7df206fffcb9658abfcb7ee53ebb"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-dropcursor@1.8.4/es2022/prosemirror-dropcursor.mjs",
+      "file": "6d3de0a16dd5e4b1.mjs",
+      "sha256": "e3a756b75a94080120f73fe60d4a701744e0c3b072d04234ce314a68c4d5f769"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-dropcursor@^1.8.4?target=es2022",
+      "file": "534dee344e006fa3.mjs",
+      "sha256": "9ec91c91545f5c44e507e01aa7187c7a59deb9761a50b4fa92fe1bbf02f0caaf"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-gapcursor@1.4.1/es2022/prosemirror-gapcursor.mjs",
+      "file": "8bdf657d2c91bb0a.mjs",
+      "sha256": "0a0ec20a49728a03f674c91795ab5b59d83cf34e47a1b4fe59575748361379e8"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-gapcursor@^1.4.1?target=es2022",
+      "file": "76df1180f80cecf5.mjs",
+      "sha256": "d15d7ed973c0d28bf776fb8a201e59e716b6d89f0cdc80d5d8b5e44883554d66"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-history@1.5.1/es2022/prosemirror-history.mjs",
+      "file": "0f4ca287161ef7e8.mjs",
+      "sha256": "956044fec354e5b7c0e7fffc19282267a8de91914b789e4a055452da184e8617"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-history@^1.5.1?target=es2022",
+      "file": "8ed8822f4ffef8df.mjs",
+      "sha256": "207867fb8228405e9220ff6516d3d5bda934bdbf11d8d4eb3eb264eb76121c56"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-keymap@1.2.3/es2022/prosemirror-keymap.mjs",
+      "file": "545c05f5a314e030.mjs",
+      "sha256": "97f20be9a3d0d7ed74368d1aed92d67cb063bfa8801401613b5394d8a15e07d8"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-keymap@^1.0.0?target=es2022",
+      "file": "3114ea5a8cebd7ef.mjs",
+      "sha256": "282aa1abbdca5c0433f9bf6da242b6f9b6c399b1526e896ccbe1a509d4083f55"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-keymap@^1.2.3?target=es2022",
+      "file": "faabbc6ddd0c7e0a.mjs",
+      "sha256": "282aa1abbdca5c0433f9bf6da242b6f9b6c399b1526e896ccbe1a509d4083f55"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-model@1.25.12/es2022/prosemirror-model.mjs",
+      "file": "bfc6bcad296343cc.mjs",
+      "sha256": "82f68c0e0e533f6066c687f6404f0278bd47c2bd761dc3142fe180f4cb7883ef"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-model@^1.0.0?target=es2022",
+      "file": "c532e11bc812622d.mjs",
+      "sha256": "18ab138b0cf1d00dfbbdd225a5cc4b08dffc6a1f88c2f85e51e27efc80960df2"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-model@^1.21.0?target=es2022",
+      "file": "f36df37b721e5685.mjs",
+      "sha256": "18ab138b0cf1d00dfbbdd225a5cc4b08dffc6a1f88c2f85e51e27efc80960df2"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-model@^1.25.12?target=es2022",
+      "file": "e9a23ffc758fd842.mjs",
+      "sha256": "18ab138b0cf1d00dfbbdd225a5cc4b08dffc6a1f88c2f85e51e27efc80960df2"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-model@^1.25.4?target=es2022",
+      "file": "76ec96a24c98e65b.mjs",
+      "sha256": "18ab138b0cf1d00dfbbdd225a5cc4b08dffc6a1f88c2f85e51e27efc80960df2"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-schema-list@1.5.1/es2022/prosemirror-schema-list.mjs",
+      "file": "416f28d0006f2fa9.mjs",
+      "sha256": "cc5df9a5a21e915f625cbfc03da046cecfbd815a901f9be17bf10a40b73462a6"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-schema-list@^1.5.1?target=es2022",
+      "file": "f2c436c3156fc25e.mjs",
+      "sha256": "e52d55b233ed91386c2937a011d52e23b4417c53dc53e128f945c54c397dc68f"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-state@1.4.4/es2022/prosemirror-state.mjs",
+      "file": "644e98ee5a694e89.mjs",
+      "sha256": "c90a5b7a046ce59d8ca63f733e3d5243da3e3c4d5c707648fe1ec4be30be7da1"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-state@^1.0.0?target=es2022",
+      "file": "a01c04b80c031c15.mjs",
+      "sha256": "3a3a9e275e7fdbd405131c7c90918323e30cb7342928551111c90ef2196d1ba4"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-state@^1.2.2?target=es2022",
+      "file": "d74d33a533dc215f.mjs",
+      "sha256": "3a3a9e275e7fdbd405131c7c90918323e30cb7342928551111c90ef2196d1ba4"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-state@^1.4.4?target=es2022",
+      "file": "ba46c06f5ffd3590.mjs",
+      "sha256": "3a3a9e275e7fdbd405131c7c90918323e30cb7342928551111c90ef2196d1ba4"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-tables@1.8.5/es2022/prosemirror-tables.mjs",
+      "file": "c25816694dfcf3e3.mjs",
+      "sha256": "b93d4287ca194f04a727b836d9c2a40e14bbc9c1c33af66e59b80b1065cee0a1"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-tables@^1.8.5?target=es2022",
+      "file": "c9f00fd2eeb08e4e.mjs",
+      "sha256": "b731943fd6f99107730e6a599ac0a8fe9395e5e6d7e8cdd65c6be85aa1449b74"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-transform@1.12.2/es2022/prosemirror-transform.mjs",
+      "file": "3331a9ea9fcaa7be.mjs",
+      "sha256": "a1ba99147d493c71fee75dfa0fc99b73d7bcac75e2eb3e066f1df934bc7c43a5"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-transform@^1.0.0?target=es2022",
+      "file": "5360573e4b3bdb4f.mjs",
+      "sha256": "7a3e9affd4d2a21358340efb9eb3f550c1c7af531dfe0a2436c6706e5bbeb4e1"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-transform@^1.1.0?target=es2022",
+      "file": "0168cd98cbe9cd1c.mjs",
+      "sha256": "7a3e9affd4d2a21358340efb9eb3f550c1c7af531dfe0a2436c6706e5bbeb4e1"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-transform@^1.10.2?target=es2022",
+      "file": "ec364d2f7a21b5b5.mjs",
+      "sha256": "7a3e9affd4d2a21358340efb9eb3f550c1c7af531dfe0a2436c6706e5bbeb4e1"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-transform@^1.10.5?target=es2022",
+      "file": "8b1a7f720f2004c7.mjs",
+      "sha256": "7a3e9affd4d2a21358340efb9eb3f550c1c7af531dfe0a2436c6706e5bbeb4e1"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-transform@^1.12.2?target=es2022",
+      "file": "918a7a19a0eb1959.mjs",
+      "sha256": "7a3e9affd4d2a21358340efb9eb3f550c1c7af531dfe0a2436c6706e5bbeb4e1"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-transform@^1.7.3?target=es2022",
+      "file": "cb41350dcb5c23eb.mjs",
+      "sha256": "7a3e9affd4d2a21358340efb9eb3f550c1c7af531dfe0a2436c6706e5bbeb4e1"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-view@1.42.6/es2022/prosemirror-view.mjs",
+      "file": "356e9a0cbc5bb4cf.mjs",
+      "sha256": "1a60b5c734d5276fb15947c77058c99d34f3a8b130b33c3e69e6d24304ce6598"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-view@^1.0.0?target=es2022",
+      "file": "1296608f84c73e68.mjs",
+      "sha256": "068dc25aed3babb74a2563f5d6849a82783629468579f1a60538acb0b97e5b41"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-view@^1.41.4?target=es2022",
+      "file": "66207c0565755f99.mjs",
+      "sha256": "068dc25aed3babb74a2563f5d6849a82783629468579f1a60538acb0b97e5b41"
+    },
+    {
+      "source": "https://esm.sh/prosemirror-view@^1.42.6?target=es2022",
+      "file": "48d42fb3e9510282.mjs",
+      "sha256": "068dc25aed3babb74a2563f5d6849a82783629468579f1a60538acb0b97e5b41"
+    },
+    {
+      "source": "https://esm.sh/rope-sequence@1.3.4/es2022/rope-sequence.mjs",
+      "file": "bb035683e5b45f8f.mjs",
+      "sha256": "6404e224ececaecd3f25d15254943b050f75d54882b44b0443866a454caec30a"
+    },
+    {
+      "source": "https://esm.sh/rope-sequence@^1.3.0?target=es2022",
+      "file": "eca19df82125cc16.mjs",
+      "sha256": "0687ecd392b226ba690bd4a395fd99223637c7235ebc58354274fffb57f06845"
+    },
+    {
+      "source": "https://esm.sh/w3c-keyname@2.2.8/es2022/w3c-keyname.mjs",
+      "file": "89387f2a81053eff.mjs",
+      "sha256": "99a47c27230eb51799d1b8dc53b17f50b46aae275423c9a19e5a1dbb0cce787a"
+    },
+    {
+      "source": "https://esm.sh/w3c-keyname@^2.2.0?target=es2022",
+      "file": "6cd32d4507788086.mjs",
+      "sha256": "9d53f81b2694eebc1b7e959ff1341d939b45f62de7a7a2e37d8339910045f8e2"
+    }
+  ]
+}

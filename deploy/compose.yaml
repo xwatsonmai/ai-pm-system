@@ -1,0 +1,30 @@
+services:
+  app:
+    image: ${AI_PM_IMAGE:?Set AI_PM_IMAGE to a release image tag}
+    container_name: ai-pm
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${AI_PM_BIND_IP:-127.0.0.1}:8090:8090"
+    volumes:
+      - ./shared/data:/app/data
+      - ./shared/auth.json:/run/ai-pm/auth.json:ro
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=256m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8090/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

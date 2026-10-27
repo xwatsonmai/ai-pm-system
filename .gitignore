@@ -1,0 +1,12 @@
+/data/
+/bin/
+/runtime/node_modules/
+/.env
+/.env.*
+!/.env.example
+.DS_Store
+*.db
+*.db-shm
+*.db-wal
+/test-results/
+/deploy/__pycache__/
