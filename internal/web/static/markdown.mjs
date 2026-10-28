@@ -1,5 +1,6 @@
 import { Marked } from "./vendor/marked.mjs";
 import DOMPurify from "./vendor/dompurify.mjs";
+import { displayLinks } from "./base.mjs";
 
 const escapeHTML = (text) => String(text).replace(/[&<>"']/g, (char) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
@@ -26,9 +27,9 @@ export function documentMarkdown(source) {
 export const renderDocumentMarkdown = source => renderMarkdown(documentMarkdown(source));
 
 export function renderMarkdown(source) {
-  return DOMPurify.sanitize(markdownHTML(source), {
+  return displayLinks(DOMPurify.sanitize(markdownHTML(source), {
     USE_PROFILES: { html: true },
     FORBID_TAGS: ["form", "input", "button", "select", "textarea", "style"],
     FORBID_ATTR: ["style"],
-  });
+  }));
 }

@@ -1,4 +1,5 @@
 import { createID as id } from "./id.mjs";
+import { BASE, appURL } from "./base.mjs";
 import { chatConversations, conversationID } from "./conversations.mjs";
 import { renderMarkdown } from "./markdown.mjs";
 import { patchHTML, mergeRunRefresh } from "./dom-update.mjs";
@@ -212,7 +213,7 @@ function toast(message) {
   toastTimer = setTimeout(() => el.classList.remove("show"), 4500);
 }
 async function api(path, body, method) {
-  const response = await fetch("/api" + path, {
+  const response = await fetch(appURL("/api" + path), {
     method: method || (body ? "POST" : "GET"),
     headers: body ? { "Content-Type": "application/json" } : {},
     body: body ? JSON.stringify(body) : undefined,
@@ -259,7 +260,7 @@ function signInBody(detail) {
   const label = escape(auth.login_label || "统一账号");
   const query = returnTo() ? "?" + new URLSearchParams({ return_to: returnTo() }) : "";
   return ["登录智驱", `使用${label}，继续项目协作。`,
-    `<a class="login-link" href="/auth/login${escape(query)}">使用${label}登录 ${icon("arrow")}</a>${detail ? error : ""}<p class="login-note">将在统一身份认证页面完成登录。</p>`];
+    `<a class="login-link" href="${escape(appURL("/auth/login"))}${escape(query)}">使用${label}登录 ${icon("arrow")}</a>${detail ? error : ""}<p class="login-note">将在统一身份认证页面完成登录。</p>`];
 }
 function renderLogin(message = "") {
   closeModal();
@@ -764,7 +765,7 @@ function sentAttachments(run) {
   if (!run.attachments?.length) return "";
   return `<div class="sent-attachments">${run.attachments
     .map((a) => {
-      const url = `/api/projects/${encodeURIComponent(run.project_id)}/attachments/${encodeURIComponent(a.id)}`;
+      const url = `${BASE}/api/projects/${encodeURIComponent(run.project_id)}/attachments/${encodeURIComponent(a.id)}`;
       return `<a class="sent-attachment" href="${url}" download="${escape(a.name)}" title="下载 ${escape(a.name)}">${a.kind === "image" ? `<img src="${url}?preview=1" alt="${escape(a.name)}" loading="lazy">` : icon("paperclip")}<span>${escape(a.name)}<small>${fileSize(a.size)}${a.truncated ? " · 正文已截取" : ""}</small></span></a>`;
     })
     .join("")}</div>`;
@@ -867,7 +868,7 @@ async function submitChat() {
       const body = new FormData();
       body.append("file", item.file, item.file.name);
       try {
-        const response = await fetch(`/api/projects/${projectID}/attachments`, {
+        const response = await fetch(`${BASE}/api/projects/${projectID}/attachments`, {
           method: "POST",
           body,
         });
@@ -1042,7 +1043,7 @@ async function loadProjectMembers(projectID, target = "#project-members") {
   } catch (e) { if ($(target)) $(target).textContent = e.message; }
 }
 function mcpPage() {
-  return `<div class="page">${heading("我的 MCP", "使用自己的账号授权 Codex、Claude Code 等 Agent 客户端。")}<div class="settings-grid"><section class="settings-section"><div class="row between"><h2>个人接入</h2><span id="mcp-status" class="badge">读取中</span></div><p>开通后，在 Agent 客户端添加下方地址，通过浏览器登录并确认授权项目。</p><pre class="code-block">${escape(location.origin + "/mcp")}</pre>${action("copy-mcp-url", icon("copy") + " 复制地址")}${action("toggle-mcp", "开通个人 MCP", "primary", 'id="mcp-toggle" disabled')}<p class="hint">每次授权仅访问所选项目，权限随项目成员关系生效。服务端无需联网读取客户端元数据。</p><details class="mcp-instructions"><summary>接入方式与协作顺序</summary><pre class="code-block">${escape(JSON.stringify({mcpServers:{"ai-pm":{url:location.origin+"/mcp"}}},null,2))}</pre><p>在客户端选择 OAuth 登录。授权时选择项目；另一个项目需要另建连接并授权。</p><p>产品可以在客户端对话中创建需求、上传截图和文档、补充或确认评审、管理当前里程碑、查看项目时间线，无需认领开发任务。修改或推进前需由你明确提出要求，操作会保留本人身份和历史。</p><p class="hint">开发前先用 work_list 查看需求及协同任务。开发协作顺序：task_list → task_get_context → task_claim → task_report_work → task_submit_result。保留 claim_id，提交前读取最新修订。</p></details></section><section class="settings-section"><h2>已授权客户端</h2><p>撤销单个连接，或关闭个人 MCP 以撤销全部连接。</p><div id="mcp-grants"><p class="hint">正在读取授权…</p></div></section></div></div>`;
+  return `<div class="page">${heading("我的 MCP", "使用自己的账号授权 Codex、Claude Code 等 Agent 客户端。")}<div class="settings-grid"><section class="settings-section"><div class="row between"><h2>个人接入</h2><span id="mcp-status" class="badge">读取中</span></div><p>开通后，在 Agent 客户端添加下方地址，通过浏览器登录并确认授权项目。</p><pre class="code-block">${escape(location.origin + appURL("/mcp"))}</pre>${action("copy-mcp-url", icon("copy") + " 复制地址")}${action("toggle-mcp", "开通个人 MCP", "primary", 'id="mcp-toggle" disabled')}<p class="hint">每次授权仅访问所选项目，权限随项目成员关系生效。服务端无需联网读取客户端元数据。</p><details class="mcp-instructions"><summary>接入方式与协作顺序</summary><pre class="code-block">${escape(JSON.stringify({mcpServers:{"ai-pm":{url:location.origin+appURL("/mcp")}}},null,2))}</pre><p>在客户端选择 OAuth 登录。授权时选择项目；另一个项目需要另建连接并授权。</p><p>产品可以在客户端对话中创建需求、上传截图和文档、补充或确认评审、管理当前里程碑、查看项目时间线，无需认领开发任务。修改或推进前需由你明确提出要求，操作会保留本人身份和历史。</p><p class="hint">开发前先用 work_list 查看需求及协同任务。开发协作顺序：task_list → task_get_context → task_claim → task_report_work → task_submit_result。保留 claim_id，提交前读取最新修订。</p></details></section><section class="settings-section"><h2>已授权客户端</h2><p>撤销单个连接，或关闭个人 MCP 以撤销全部连接。</p><div id="mcp-grants"><p class="hint">正在读取授权…</p></div></section></div></div>`;
 }
 async function loadMCP() {
   try {
@@ -1547,7 +1548,7 @@ document.addEventListener("click", async (event) => {
       modal("移除权限", `<p>确认移除 ${escape(button.dataset.name)} 的${a === "remove-member" ? "项目访问" : "平台管理"}权限？</p><form id="remove-access-form" data-user="${escape(button.dataset.user)}" data-project="${escape(button.dataset.project || "")}" data-platform="${a === "remove-platform-admin"}"><div class="form-error"></div><div class="modal-actions">${action("close", "取消")}<button type="submit" class="danger">确认移除</button></div></form>`);return;
     }
     if (a === "sync-directory") {button.disabled = true;try {const result = await api("/platform/directory/sync", {});toast(`${state.auth?.directory?.label || "通讯录"}已同步，共 ${result.total} 人`);}finally{button.disabled = false;}return;}
-    if (a === "copy-mcp-url") {await navigator.clipboard.writeText(location.origin + "/mcp");toast("MCP 地址已复制");return;}
+    if (a === "copy-mcp-url") {await navigator.clipboard.writeText(location.origin + appURL("/mcp"));toast("MCP 地址已复制");return;}
     if (a === "toggle-mcp") {
       if (button.dataset.enabled === "true") {modal("关闭个人 MCP", '<p>关闭后将撤销所有客户端授权。重新开通时需重新授权。</p><form id="disable-mcp-form"><div class="form-error"></div><div class="modal-actions">'+ action("close", "取消") + '<button type="submit" class="danger">确认关闭</button></div></form>');return;}
       await api("/mcp", {enabled:true}, "PUT");await loadMCP();toast("个人 MCP 已开通");return;
@@ -1586,7 +1587,7 @@ document.addEventListener("click", async (event) => {
     }
     if (a === "logout") {
       await api("/auth/logout", {});
-      location.assign("/");
+      location.assign(appURL("/"));
       return;
     }
     if (a === "attach-files") {
@@ -2014,7 +2015,7 @@ document.addEventListener("submit", async (event) => {
         : await api("/auth/password", {current_password:data.current_password, new_password:data.new_password, return_to:returnTo()});
       if (form.dataset.modal) { closeModal(); toast("密码已更新"); return; }
       if (result.must_change_password) location.reload();
-      else location.assign(result.redirect || "/");
+      else location.assign(result.redirect || appURL("/"));
       return;
     } else if (form.id === "account-form") {await api("/platform/accounts", {username:data.username, name:data.name, password:data.password});toast("账号已创建，请把用户名和初始密码告知成员");
     } else if (form.id === "account-reset-form") {await api(`/platform/accounts/${encodeURIComponent(form.dataset.user)}`, {password:data.password}, "PATCH");toast("密码已重置，请把新的初始密码告知成员");

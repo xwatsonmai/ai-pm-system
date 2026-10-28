@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 )
@@ -345,12 +346,24 @@ func (s *Server) Handler() http.Handler {
 		protection.AddInsecureBypassPattern(path)
 	}
 	protected := protection.Handler(s.requireLogin(mux))
+	base := s.appPath("")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A proxy forwards the mounted path whole; routes below never see the
+		// prefix. Unprefixed paths still serve local and container health checks.
+		if base != "" && r.URL.Path == base {
+			http.Redirect(w, r, base+"/", http.StatusFound)
+			return
+		}
+		if base != "" && strings.HasPrefix(r.URL.Path, base+"/") {
+			r = stripBase(r, base)
+		}
 		host := r.Host
 		if h, _, e := net.SplitHostPort(host); e == nil {
 			host = h
 		}
-		if host != "localhost" && host != "127.0.0.1" && host != "::1" && !(s.Auth != nil && r.Host == s.Auth.PublicHost()) {
+		// Deployment tools probe health at the container address, which is not
+		// the public host behind a proxy; health reveals nothing else.
+		if host != "localhost" && host != "127.0.0.1" && host != "::1" && !(s.Auth != nil && r.Host == s.Auth.PublicHost()) && r.URL.Path != "/api/health" {
 			fail(w, domain.ErrForbidden)
 			return
 		}
@@ -365,7 +378,7 @@ func (s *Server) Handler() http.Handler {
 			}
 			r.Body = http.MaxBytesReader(w, r.Body, limit)
 		}
-		if r.URL.Path == "/mcp" || r.URL.Path == "/oauth/register" || r.URL.Path == "/oauth/token" || r.URL.Path == "/oauth/revoke" || strings.HasPrefix(r.URL.Path, "/.well-known/oauth-") {
+		if r.URL.Path == "/mcp" || r.URL.Path == "/oauth/register" || r.URL.Path == "/oauth/token" || r.URL.Path == "/oauth/revoke" || strings.HasPrefix(r.URL.Path, "/.well-known/oauth-") || r.URL.Path == "/.well-known/openid-configuration" {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, MCP-Protocol-Version, MCP-Session-Id")
@@ -377,4 +390,23 @@ func (s *Server) Handler() http.Handler {
 		}
 		protected.ServeHTTP(w, r)
 	})
+}
+
+// appPath turns an app-relative path into one a browser can follow when the
+// workspace is mounted under a path.
+func (s *Server) appPath(p string) string {
+	if s.Auth == nil {
+		return p
+	}
+	return s.Auth.Base() + p
+}
+
+func stripBase(r *http.Request, base string) *http.Request {
+	out := new(http.Request)
+	*out = *r
+	out.URL = new(url.URL)
+	*out.URL = *r.URL
+	out.URL.Path = strings.TrimPrefix(r.URL.Path, base)
+	out.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, base)
+	return out
 }

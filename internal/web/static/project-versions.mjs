@@ -1,5 +1,6 @@
 import { createID } from "./id.mjs";
 import { renderMarkdown } from "./markdown.mjs";
+import { BASE } from "./base.mjs";
 const esc = (v) =>
   String(v ?? "").replace(
     /[&<>"']/g,
@@ -161,7 +162,7 @@ export function projectVersionDetail(view) {
       .reverse()
       .map(
         (r) =>
-          `<details class="pv-release"><summary>${esc(r.environment)} · ${date(r.at)} · ${r.tasks.length} 项</summary><p class="prewrap">${esc(r.body)}</p>${r.tasks.map((t) => `<details class="pv-release-task"><summary>${esc(t.title)} · R${t.revision}</summary><p class="mono small">${esc(t.submission?.sha)}</p><div class="markdown-content">${renderMarkdown(t.description)}</div><ul>${t.acceptance.map((a) => `<li>${esc(a)}</li>`).join("")}</ul>${t.attachments?.length ? `<p class="small muted">附件：${t.attachments.map((a) => `<a href="/api/projects/${encodeURIComponent(t.project_id)}/attachments/${encodeURIComponent(a.id)}" target="_blank" rel="noopener">${esc(a.name)}</a>`).join("、")}</p>` : ""}</details>`).join("")}<p class="small muted">${esc(r.actor)} · 上线时的范围快照，后续修订不会改写。</p></details>`,
+          `<details class="pv-release"><summary>${esc(r.environment)} · ${date(r.at)} · ${r.tasks.length} 项</summary><p class="prewrap">${esc(r.body)}</p>${r.tasks.map((t) => `<details class="pv-release-task"><summary>${esc(t.title)} · R${t.revision}</summary><p class="mono small">${esc(t.submission?.sha)}</p><div class="markdown-content">${renderMarkdown(t.description)}</div><ul>${t.acceptance.map((a) => `<li>${esc(a)}</li>`).join("")}</ul>${t.attachments?.length ? `<p class="small muted">附件：${t.attachments.map((a) => `<a href="${BASE}/api/projects/${encodeURIComponent(t.project_id)}/attachments/${encodeURIComponent(a.id)}" target="_blank" rel="noopener">${esc(a.name)}</a>`).join("、")}</p>` : ""}</details>`).join("")}<p class="small muted">${esc(r.actor)} · 上线时的范围快照，后续修订不会改写。</p></details>`,
       )
       .join("") ||
     '<p class="context-note">开发完成后，实际发布成功再登记环境、结果与本次包含的需求。</p>'

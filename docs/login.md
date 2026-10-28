@@ -20,7 +20,7 @@
 }
 ```
 
-- `public_url`：浏览器实际访问的站点根地址，不含路径。为 HTTPS 地址时 Cookie 自动加 Secure。
+- `public_url`：浏览器实际访问的地址。挂在代理子路径下时带上路径，例如 `https://example.com/workspace`，见 [自托管部署](self-hosting.md#挂在子路径下)。为 HTTPS 地址时 Cookie 自动加 Secure。
 - `platform_admin_login_ids`：可选。这里列出的用户名登录后自动成为平台管理员，且只能通过修改配置撤销。
 - 不接受其他字段，拼写错误会在启动时报出。
 

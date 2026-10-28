@@ -54,7 +54,7 @@ docker build -t ai-pm:20261027-v1 .
 }
 ```
 
-`public_url` 必须是浏览器实际访问的站点根地址，不能带路径。可选的 `platform_admin_login_ids` 和接入外部登录的方式见 [登录方式](login.md)。
+`public_url` 是浏览器实际访问的地址。服务挂在反向代理的子路径下时，把路径一起写上，例如 `https://example.com/workspace`，见下文。可选的 `platform_admin_login_ids` 和接入外部登录的方式见 [登录方式](login.md)。
 
 `.env`：
 
@@ -79,7 +79,7 @@ docker compose logs app | grep 初始化口令
 2. 在「平台设置 → 模型配置」添加模型，再选为平台默认模型。
 3. 创建项目，连接 Git 仓库，分配项目成员。
 
-检查服务：`curl --fail http://your-host:8090/api/health` 应返回 200，匿名访问 `/api/projects` 应返回 401。
+检查服务：`curl --fail http://your-host:8090/api/health` 应返回 200，匿名访问 `/api/projects` 应返回 401。健康检查不带子路径，从任何地址访问都会响应，方便部署工具直接探测容器。
 
 ## HTTPS 和反向代理
 
@@ -88,7 +88,34 @@ docker compose logs app | grep 初始化口令
 - `public_url` 填 `https://` 地址，登录 Cookie 会自动加上 Secure。
 - 代理要原样转发 `Host` 头（例如 nginx 的 `proxy_set_header Host $host;`）。服务只接受本机地址和 `public_url` 主机的请求。
 - 回答通过 SSE 实时推送，代理需要关闭响应缓冲（例如 `proxy_buffering off;`）。
-- 不支持把服务挂在子路径下。
+
+### 挂在子路径下
+
+服务可以挂在代理的某个路径下，例如 `https://example.com/workspace/`：
+
+- `public_url` 写成 `https://example.com/workspace`（不带结尾斜杠）。登录回调、MCP 地址和 OAuth 发现地址都会带上这个路径；接入外部登录时，回调要按新地址登记。
+- 代理原样转发完整路径，不要去掉前缀，由服务自己处理。访问 `/workspace` 会跳到 `/workspace/`。
+- 登录 Cookie 只对这个路径生效，不会和同一域名下的其他应用混用。
+- 需求正文里的附件链接按 `/api/...` 保存，页面显示时自动加上路径，所以以后改挂载位置不需要改数据。
+- MCP 客户端按 OAuth 规范发现授权服务器时，会先访问站点根下的 `/.well-known/...`，代理返回 404 即可；客户端随后会在 `/workspace/.well-known/openid-configuration` 找到元数据。
+
+nginx 示例：
+
+```nginx
+location ^~ /workspace/ {
+    proxy_pass http://127.0.0.1:8090;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_http_version 1.1;
+    proxy_buffering off;
+    proxy_read_timeout 1h;
+    client_max_body_size 12m;  # 附件上限 10 MB
+}
+location = /workspace { return 302 /workspace/; }
+```
+
+`proxy_pass` 后面不要加路径，这样转发时会保留 `/workspace/` 前缀。
 
 ## 更新
 
