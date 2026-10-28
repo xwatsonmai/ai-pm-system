@@ -204,6 +204,29 @@ func (s *Server) requireLogin(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// The desktop client downloads originals into its private worktree
+		// context. Its project-scoped MCP grant authorizes only this GET route;
+		// it is not a web session and cannot upload or access other web APIs.
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if r.Method == http.MethodGet && len(parts) == 5 && parts[0] == "api" && parts[1] == "projects" && parts[3] == "attachments" && r.Header.Get("Authorization") != "" {
+			raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+			grant, err := s.App.Store.FindOAuthGrant(r.Context(), app.Hash(raw), false)
+			if err != nil || raw == r.Header.Get("Authorization") || grant.AccessExpiresAt <= domain.Now() || grant.Resource != s.origin(r)+"/mcp" {
+				s.oauthError(w, http.StatusUnauthorized, "invalid_token", "请重新授权个人 MCP")
+				return
+			}
+			actor, err := s.grantActor(r, grant)
+			if err != nil {
+				s.oauthError(w, http.StatusUnauthorized, "invalid_token", "个人 MCP 授权已失效")
+				return
+			}
+			if actor.ProjectID != parts[2] {
+				fail(w, domain.ErrForbidden)
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), actorKey{}, actor)))
+			return
+		}
 		user, err := s.Auth.User(r)
 		if err != nil {
 			loginRequired(w)
