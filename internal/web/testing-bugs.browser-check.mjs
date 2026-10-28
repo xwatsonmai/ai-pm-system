@@ -48,6 +48,9 @@ const browser=await chromium.launch({headless:true}),page=await browser.newPage(
 page.on('pageerror',e=>errors.push(e.message));
 let seq=0;
 async function api(path,body,method){const r=await fetch(base+'/api'+path,{method:method||(body?'POST':'GET'),headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});const v=await r.json();assert(r.ok,JSON.stringify(v));return v;}
+// Claiming is development work, so it only happens through the developer MCP.
+let mcpSeq=0;
+async function claim(token,args){const r=await fetch(base+'/mcp',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',Accept:'application/json, text/event-stream','MCP-Protocol-Version':'2025-11-25'},body:JSON.stringify({jsonrpc:'2.0',id:++mcpSeq,method:'tools/call',params:{name:'task_claim',arguments:args}})});const v=await r.json();assert(r.ok&&!v.error&&!v.result.isError,JSON.stringify(v));return JSON.parse(v.result.content[0].text);}
 const task=id=>api(`/tasks/${id}`).then(v=>v.task);
 async function waitTask(id,status){for(let n=0;n<160;n++){const t=await task(id);if(t.status===status)return t;await new Promise(r=>setTimeout(r,75));}const review=await api(`/tasks/${id}/requirement-review`);assert.fail(`task never reached ${status}; review=${review.status}: ${review.error}; source=${JSON.stringify(review.source?.bug_context)}`)}
 async function open(id){await page.goto(base);await page.getByRole('button',{name:'需求池',exact:true}).click();await page.locator(`.task-table tr[data-id="${id}"]`).click();await page.locator('.detail-title').waitFor();}
@@ -59,12 +62,13 @@ try{
  await api(`/projects/${project.id}/sync`,{});
  let {task:parent}=await api(`/projects/${project.id}/tasks`,{title:'订单退款需求',kind:'requirement',description:'订单退款测试',acceptance:['重复点击不得重复退款'],request_id:'parent'});
  await api(`/tasks/${parent.id}/actions`,{action:'ready',request_id:'ready'});
- await api(`/tasks/${parent.id}/actions`,{action:'claim',branch:'feature/testing',request_id:'claim'});
+ const developer=(await api(`/projects/${project.id}/tokens`,{name:'开发客户端'})).secret;
+ await claim(developer,{task_id:parent.id,branch:'feature/testing',request_id:'claim'});
  await api(`/tasks/${parent.id}/actions`,{action:'submit',revision:1,request_id:'submit',submission:{summary:'退款功能完成',sha:baseline,environment:'测试环境',tests:'本地检查通过'}});
  // Independent platform Bugs must also be able to fail product testing.
  let {task:platformBug}=await api(`/projects/${project.id}/tasks`,{title:'独立平台异常',kind:'bug',description:'平台功能异常',acceptance:['恢复正常'],request_id:'platform-bug'});
  await api(`/tasks/${platformBug.id}/actions`,{action:'ready',request_id:'platform-ready'});
- await api(`/tasks/${platformBug.id}/actions`,{action:'claim',branch:'feature/testing',request_id:'platform-claim'});
+ await claim(developer,{task_id:platformBug.id,branch:'feature/testing',request_id:'platform-claim'});
  await api(`/tasks/${platformBug.id}/actions`,{action:'submit',revision:1,request_id:'platform-submit',submission:{summary:'修复平台异常',sha:baseline,environment:'测试环境',tests:'自测通过'}});
  await open(platformBug.id);await page.getByRole('button',{name:'修复无效，退回 Bug',exact:true}).click();
  await page.locator('#testing-form [name=note]').fill('原操作仍会触发异常');await page.locator('#testing-form button[type=submit]').click();await waitTask(platformBug.id,'doing');
@@ -92,7 +96,7 @@ try{
  await api(`/tasks/${question.id}/actions`,{action:'close',request_id:'duplicate-close',body:'重复问题，已有对应 Bug 跟进'});
  // Create actual fix in the requirement branch; the review baseline stays pinned.
  await writeFile(join(repo,'behavior.txt'),'FIXED FEATURE');git('commit','-am','fix duplicate');const fixed=git('rev-parse','HEAD');await api(`/projects/${project.id}/sync`,{});
- await api(`/tasks/${bug.id}/actions`,{action:'claim',request_id:'fix-claim',branch:'feature/testing'});
+ await claim(developer,{task_id:bug.id,request_id:'fix-claim',branch:'feature/testing'});
  bug=await task(bug.id);await api(`/tasks/${bug.id}/actions`,{action:'submit',revision:bug.revision,request_id:'fix-submit',submission:{summary:'重复请求已去重',sha:fixed,environment:'测试环境',tests:'本地回归通过'}});
  assert.equal((await task(parent.id)).status,'fixing');await open(bug.id);await page.getByRole('button',{name:'确认修复有效',exact:true}).click();await page.locator('#testing-form [name=note]').fill('实际复现步骤回归通过');await page.locator('#testing-form button[type=submit]').click();await waitTask(bug.id,'resolved');assert.equal((await task(parent.id)).status,'retest');
  await open(parent.id);await page.getByRole('button',{name:'开始复测',exact:true}).click();await page.locator('#testing-form [name=sha]').fill(fixed);await page.locator('#testing-form [name=note]').fill('全部修复已合入，开始复测');await page.locator('#testing-form button[type=submit]').click();await waitTask(parent.id,'testing');

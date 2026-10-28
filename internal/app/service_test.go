@@ -74,6 +74,10 @@ func TestLifecycleRevisionAndAuthority(t *testing.T) {
 	s, p := setup(t)
 	c := context.Background()
 	task := create(t, s, p.ID)
+	// Only development agents claim, through MCP; web members cannot.
+	if _, e := s.Act(c, app.Human(), task.ID, app.Action{Action: "claim", RequestID: "web-claim"}); !errors.Is(e, domain.ErrForbidden) {
+		t.Fatal("web member claimed:", e)
+	}
 	dev := developer(p.ID, "dev1")
 	claim, e := s.Act(c, dev, task.ID, app.Action{Action: "claim", RequestID: "claim-1"})
 	if e != nil {

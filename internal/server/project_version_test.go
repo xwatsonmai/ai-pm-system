@@ -173,7 +173,11 @@ func TestProductManagementPersonalMCP(t *testing.T) {
 		if stage == "accept" {
 			in.Review = &domain.Review{Revision: source.Revision, SHA: "source-sha", Environment: "fixture", Checks: []string{"passed"}}
 		}
-		m, e := s.Act(c, app.Human(), source.ID, in)
+		actor := app.Human()
+		if stage == "claim" {
+			actor = domain.Actor{ID: "dev", Name: "dev", Kind: "developer", ProjectID: p.ID}
+		}
+		m, e := s.Act(c, actor, source.ID, in)
 		if e != nil {
 			t.Fatal(e)
 		}
