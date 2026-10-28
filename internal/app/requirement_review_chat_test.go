@@ -257,8 +257,10 @@ func TestReviewRetryNamesRecheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := app.RequirementReviewSubmission{Reply: "请确认范围。", Decision: "clarify", Agenda: []domain.RequirementTopic{reviewTopic("scope", "direction", "open")}, Ask: &app.RequirementAskInput{TopicID: "scope", Kind: "direction", Question: "覆盖哪些商家？"}}.Result()
-	// The catalog moved on since this round read it, so confirmation needs a recheck.
-	if err := s.FinishRequirementReview(c, id, v.Generation, "r1", &result, "", &domain.RequirementReviewEvidence{CatalogFingerprint: "stale"}); err != nil {
+	// A requirement this round read changed afterwards, so confirmation needs a recheck.
+	read, _ := s.CreateTask(c, a, p.ID, app.TaskInput{Title: "参考", RequestID: "read"})
+	stale := domain.RequirementReviewReference{TaskID: read.Task.ID, Revision: read.Task.Revision - 1}
+	if err := s.FinishRequirementReview(c, id, v.Generation, "r1", &result, "", &domain.RequirementReviewEvidence{References: []domain.RequirementReviewReference{stale}}); err != nil {
 		t.Fatal(err)
 	}
 	v, err := s.SaveRequirementReview(c, a, id, app.RequirementReviewInput{Action: "retry", RequestID: "recheck"})

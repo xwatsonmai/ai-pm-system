@@ -3,8 +3,6 @@ package app
 import (
 	"ai-pm-system/internal/domain"
 	"context"
-	"encoding/json"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -35,50 +33,11 @@ func ReviewSource(t domain.Task) domain.Task {
 	return t
 }
 
-type reviewScope struct {
-	ID                 string
-	Revision           int
-	Title, Description string
-	Acceptance         []string
-	Ended              bool
-}
-
-func (s *Service) reviewScopes(c context.Context, project, exclude string) ([]reviewScope, error) {
-	tasks, err := s.Store.ListTasks(c, project)
-	if err != nil {
-		return nil, err
-	}
-	items := []reviewScope{}
-	for _, t := range tasks {
-		if t.ID != exclude {
-			items = append(items, reviewScope{t.ID, t.Revision, t.Title, t.Description, t.Acceptance, domain.TaskTerminated(t.Status)})
-		}
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
-	return items, nil
-}
-
-func reviewCatalog(items []reviewScope) (string, []domain.RequirementCatalogEntry) {
-	entries := make([]domain.RequirementCatalogEntry, len(items))
-	for i, v := range items {
-		b, _ := json.Marshal(v)
-		entries[i] = domain.RequirementCatalogEntry{TaskID: v.ID, Scope: Hash(string(b))[:16], Ended: v.Ended}
-	}
-	b, _ := json.Marshal(items)
-	return Hash(string(b)), entries
-}
-
-// A catalog change means that potentially conflicting scope must be checked
-// again. Development progress alone must not invalidate a product review.
-func (s *Service) ReviewCatalog(c context.Context, project, exclude string) (string, []domain.RequirementCatalogEntry, error) {
-	items, err := s.reviewScopes(c, project, exclude)
-	if err != nil {
-		return "", nil, err
-	}
-	fp, entries := reviewCatalog(items)
-	return fp, entries, nil
-}
-
+// Reviews run one at a time per project, and each review checks itself against
+// the requirements before it. An earlier review therefore stays fixed when
+// requirements are added or changed later; it is only rechecked when a
+// requirement it actually read changes or ends, or a later review reports a
+// conflict with it.
 func (s *Service) ReviewRecheckReason(c context.Context, v domain.RequirementReview) (string, error) {
 	_, conflicts, err := s.ReviewIncomingRelations(c, v)
 	if err != nil {
@@ -94,75 +53,30 @@ func (s *Service) ReviewRecheckReason(c context.Context, v domain.RequirementRev
 	if v.Evidence == nil {
 		return "", nil // Legacy assessments remain readable and confirmable.
 	}
-	items, err := s.reviewScopes(c, v.ProjectID, v.TaskID)
-	if err != nil {
-		return "", err
-	}
-	if fp, entries := reviewCatalog(items); fp != v.Evidence.CatalogFingerprint {
-		return catalogChangeReason(v.Evidence.Catalog, items, entries), nil
-	}
+	var edited, ended []string
 	for _, ref := range v.Evidence.References {
 		t, err := s.Store.GetTask(c, ref.TaskID)
 		if err != nil {
 			return "", err
 		}
-		if t.ProjectID != v.ProjectID || t.Revision != ref.Revision {
-			return "评审参考的需求「" + t.Title + "」已修改，请重新核对。", nil
-		}
-		r, err := s.Store.GetRequirementReview(c, ref.TaskID)
-		if err != nil && err != domain.ErrNotFound {
-			return "", err
-		}
-		if r.Version != ref.ReviewVersion {
-			return "评审参考的需求「" + t.Title + "」有新的评审或用户补充，请重新核对。", nil
-		}
-	}
-	return "", nil
-}
-
-// Evidence from before per-requirement digests, or a requirement that left the
-// project, can only be reported in general terms.
-func catalogChangeReason(before []domain.RequirementCatalogEntry, items []reviewScope, entries []domain.RequirementCatalogEntry) string {
-	const general = "项目中有需求新增、修改或结束，请重新核查需求之间的交叉与冲突。"
-	if before == nil {
-		return general
-	}
-	seen := map[string]domain.RequirementCatalogEntry{}
-	for _, e := range before {
-		seen[e.TaskID] = e
-	}
-	var added, edited, ended, reopened []string
-	for i, v := range items {
-		old, ok := seen[v.ID]
 		switch {
-		case !ok:
-			added = append(added, v.Title)
-		case old.Scope == entries[i].Scope: // unchanged
-		case v.Ended && !old.Ended:
-			ended = append(ended, v.Title)
-		case !v.Ended && old.Ended:
-			reopened = append(reopened, v.Title)
-		default:
-			edited = append(edited, v.Title)
+		case t.ProjectID != v.ProjectID || t.Revision != ref.Revision:
+			edited = append(edited, t.Title)
+		case domain.TaskTerminated(t.Status) && !ref.Ended:
+			ended = append(ended, t.Title)
 		}
 	}
 	changes := []string{}
-	if len(added) > 0 {
-		changes = append(changes, "新增需求"+quoteTitles(added))
-	}
 	if len(edited) > 0 {
-		changes = append(changes, "需求"+quoteTitles(edited)+"有修改")
+		changes = append(changes, quoteTitles(edited)+"有修改")
 	}
 	if len(ended) > 0 {
-		changes = append(changes, "需求"+quoteTitles(ended)+"已结束")
-	}
-	if len(reopened) > 0 {
-		changes = append(changes, "需求"+quoteTitles(reopened)+"已重新打开")
+		changes = append(changes, quoteTitles(ended)+"已结束")
 	}
 	if len(changes) == 0 {
-		return general
+		return "", nil
 	}
-	return strings.Join(changes, "；") + "。确认前需要重新核查与本需求的交叉与冲突。"
+	return "评审参考的需求" + strings.Join(changes, "、") + "，确认前需要重新核对。", nil
 }
 
 func quoteTitles(titles []string) string {
