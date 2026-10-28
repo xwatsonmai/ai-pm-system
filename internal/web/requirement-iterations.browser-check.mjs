@@ -77,6 +77,16 @@ async function api(path, body, method) {
   assert(r.ok, JSON.stringify(v));
   return v;
 }
+
+// Claiming is development work, so it only happens through the developer MCP.
+const developers = new Map();
+async function mcpClaim(task) {
+  if (!developers.has(task.project_id)) developers.set(task.project_id, (await api(`/projects/${task.project_id}/tokens`, { name: "开发客户端" })).secret);
+  const r = await fetch(base + "/mcp", { method: "POST", headers: { Authorization: `Bearer ${developers.get(task.project_id)}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream", "MCP-Protocol-Version": "2025-11-25" }, body: JSON.stringify({ jsonrpc: "2.0", id: developers.size + Date.now(), method: "tools/call", params: { name: "task_claim", arguments: { task_id: task.id, request_id: `claim-${task.id}` } } }) });
+  const v = await r.json();
+  assert(r.ok && !v.error && !v.result.isError, JSON.stringify(v));
+  return JSON.parse(v.result.content[0].text);
+}
 const close = () => page.locator("#overlays [data-action=close]").click();
 const current = async (task) => (await api(`/tasks/${task.id}`)).task;
 async function finish(task) {
@@ -113,7 +123,7 @@ async function finish(task) {
         checks: task.acceptance.map(() => "passed"),
         note: "本轮业务验收通过",
       };
-    task = (await api(`/tasks/${task.id}/actions`, input)).task;
+    task = (stage === "claim" ? await mcpClaim(task) : await api(`/tasks/${task.id}/actions`, input)).task;
   }
   return task;
 }

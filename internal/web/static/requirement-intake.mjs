@@ -1,4 +1,5 @@
 import {renderMarkdown} from './markdown.mjs';
+import {BASE} from './base.mjs';
 import {reviewAttention} from './requirement-review-state.mjs';
 const esc = value => String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export function mergeIntakes(incoming,current) {
@@ -13,7 +14,7 @@ export function requirementIntakeCards(items, runID, busy=new Set(), context={})
   const review=task && reviewAttention(task,context.requirement_reviews?.find(r=>r.task_id===task.id));
   const reviewBadge=review ? `<span class="badge ${review.attention?'review-attention '+(review.label==='待确认'?'pending':'failed'):''}">${review.label}</span>` : '';
   const button=(action,text,cls='')=>`<button type="button" class="${cls}" data-action="${action}" data-id="${esc(v.id)}" ${disabled}>${text}</button>`;
-  const files=v.attachments?.length?`<div class="intake-files">${v.attachments.map(f=>`<a href="/api/projects/${encodeURIComponent(v.project_id)}/attachments/${encodeURIComponent(f.id)}" download="${esc(f.name)}">${esc(f.name)}</a>`).join('')}</div>`:'';
+  const files=v.attachments?.length?`<div class="intake-files">${v.attachments.map(f=>`<a href="${BASE}/api/projects/${encodeURIComponent(v.project_id)}/attachments/${encodeURIComponent(f.id)}" download="${esc(f.name)}">${esc(f.name)}</a>`).join('')}</div>`:'';
   const createdActions=bug
    ? `<p class="hint">Bug 与附件已保存，可在详情中查看处理进度。</p><div class="intake-actions"><button type="button" class="primary" data-action="open-task" data-id="${esc(v.task_id)}">查看 Bug</button></div>`
    : `${reviewBadge}<p class="hint">需求与附件已保存，评审在后台进行。有结论后在需求池标记待确认，也可随时进入评审补充说明。</p><div class="intake-actions"><button type="button" data-action="requirement-review" data-id="${esc(v.task_id)}">进入需求评审</button><button type="button" data-action="open-task" data-id="${esc(v.task_id)}">查看需求</button></div>`;

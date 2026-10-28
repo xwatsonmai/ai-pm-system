@@ -90,11 +90,11 @@ func (s *Server) authRoutes(mux *http.ServeMux) {
 			if returnTo != "/" {
 				to += "?" + url.Values{"return_to": {returnTo}}.Encode()
 			}
-			http.Redirect(w, r, to, http.StatusSeeOther)
+			http.Redirect(w, r, s.appPath(to), http.StatusSeeOther)
 			return
 		}
 		if err := s.Auth.Redirect.Begin(w, r, returnTo); err != nil {
-			authFailure(w, r, err)
+			s.authFailure(w, r, err)
 		}
 	})
 	mux.HandleFunc("GET /auth/callback", func(w http.ResponseWriter, r *http.Request) {
@@ -107,10 +107,10 @@ func (s *Server) authRoutes(mux *http.ServeMux) {
 			err = s.Auth.Issue(r.Context(), w, r, id)
 		}
 		if err != nil {
-			authFailure(w, r, err)
+			s.authFailure(w, r, err)
 			return
 		}
-		http.Redirect(w, r, auth.ReturnTo(id.ReturnTo), http.StatusSeeOther)
+		http.Redirect(w, r, s.appPath(auth.ReturnTo(id.ReturnTo)), http.StatusSeeOther)
 	})
 	mux.HandleFunc("POST /api/auth/login", s.withAccounts(func(w http.ResponseWriter, r *http.Request, accounts *auth.Accounts) {
 		var in struct {
@@ -165,12 +165,12 @@ func (s *Server) authRoutes(mux *http.ServeMux) {
 	})
 }
 
-func authFailure(w http.ResponseWriter, r *http.Request, err error) {
+func (s *Server) authFailure(w http.ResponseWriter, r *http.Request, err error) {
 	code := "session_unavailable"
 	if f := auth.Failure(""); errors.As(err, &f) {
 		code = string(f)
 	}
-	http.Redirect(w, r, "/?auth_error="+code, http.StatusSeeOther)
+	http.Redirect(w, r, s.appPath("/?auth_error="+code), http.StatusSeeOther)
 }
 
 // withAccounts serves endpoints that exist only for built-in accounts.
@@ -194,7 +194,7 @@ func (s *Server) signIn(w http.ResponseWriter, r *http.Request, returnTo string)
 			fail(w, err)
 			return
 		}
-		respond(w, map[string]any{"redirect": returnTo, "must_change_password": id.MustChangePassword})
+		respond(w, map[string]any{"redirect": s.appPath(returnTo), "must_change_password": id.MustChangePassword})
 	}
 }
 

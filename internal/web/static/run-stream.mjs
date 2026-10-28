@@ -1,3 +1,5 @@
+import { BASE } from "./base.mjs";
+
 const active = (run) => ["running", "queued"].includes(run.status);
 
 // Each connection starts with a full snapshot. Append events are relative to
@@ -5,7 +7,7 @@ const active = (run) => ["running", "queued"].includes(run.status);
 export function streamRun(runID, onRun, signal, Source = globalThis.EventSource) {
   return new Promise((resolve, reject) => {
     if (signal.aborted) { resolve(); return; }
-    const source = new Source(`/api/runs/${encodeURIComponent(runID)}/events`);
+    const source = new Source(`${BASE}/api/runs/${encodeURIComponent(runID)}/events`);
     let previous, timer, finished = false;
     const finish = (error) => {
       if (finished) return;

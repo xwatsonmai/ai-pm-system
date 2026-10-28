@@ -1,6 +1,7 @@
 import { iterationContextHTML } from './requirement-iterations.mjs';
 import { createID } from './id.mjs';
 import { renderMarkdown, renderDocumentMarkdown } from './markdown.mjs';
+import { BASE } from './base.mjs';
 import { answerRows, askIsOpen, chatTimeline, currentTopic, hasAnswerDraft, hasReviewDraft, hasQuestionNotes, lineDiff, proposalStates, questionCardStatus, questionIsActive, questionReplies, sameAnswerSheet, sameQuestionNotes, taskActive, taskTerminated } from './requirement-review-state.mjs';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -50,7 +51,7 @@ export function requirementReviewHTML(task) {
 
 function attachments(files, project) {
   return files?.length ? `<div class="review-attachments">${files.map(file => {
-    const url = `/api/projects/${encodeURIComponent(project)}/attachments/${encodeURIComponent(file.id)}`;
+    const url = `${BASE}/api/projects/${encodeURIComponent(project)}/attachments/${encodeURIComponent(file.id)}`;
     return `<a href="${url}" download="${esc(file.name)}">${file.kind==='image'?`<img src="${url}?preview=1" alt="${esc(file.name)}">`:''}<span>${esc(file.name)}</span></a>`;
   }).join('')}</div>` : '';
 }
@@ -115,7 +116,7 @@ export function mountRequirementReview(root, {task,api,userID,onDetails,onConfir
   }
   function noteFileList(container,messageID) {
     const note=notes[messageID]?.[container.dataset.questionId];
-    container.querySelector('.review-note-files').innerHTML=(note?.files || []).map(file=>`<div class="review-note-image"><a href="/api/projects/${encodeURIComponent(task.project_id)}/attachments/${encodeURIComponent(file.id)}?preview=1" target="_blank" rel="noopener"><img src="/api/projects/${encodeURIComponent(task.project_id)}/attachments/${encodeURIComponent(file.id)}?preview=1" alt="${esc(file.name)}"></a><button type="button" data-review-action="remove-note-file" data-file="${esc(file.id)}" aria-label="移除 ${esc(file.name)}">×</button></div>`).join('');
+    container.querySelector('.review-note-files').innerHTML=(note?.files || []).map(file=>`<div class="review-note-image"><a href="${BASE}/api/projects/${encodeURIComponent(task.project_id)}/attachments/${encodeURIComponent(file.id)}?preview=1" target="_blank" rel="noopener"><img src="${BASE}/api/projects/${encodeURIComponent(task.project_id)}/attachments/${encodeURIComponent(file.id)}?preview=1" alt="${esc(file.name)}"></a><button type="button" data-review-action="remove-note-file" data-file="${esc(file.id)}" aria-label="移除 ${esc(file.name)}">×</button></div>`).join('');
   }
   function restoreForm(form,message) {
     const saved = answers[message.id] || {};
@@ -469,7 +470,7 @@ export function mountRequirementReview(root, {task,api,userID,onDetails,onConfir
         if (allFiles.reduce((size,item)=>size+item.size,0)+file.size > 20*1048576) throw Error('附件总大小不能超过 20 MB');
         notice(`正在上传 ${file.name}…`);
         const body = new FormData(); body.append('file',file,file.name || '截图.png');
-        const response = await fetch(`/api/projects/${encodeURIComponent(task.project_id)}/attachments`,{method:'POST',body});
+        const response = await fetch(`${BASE}/api/projects/${encodeURIComponent(task.project_id)}/attachments`,{method:'POST',body});
         const data = await response.json(); if (!response.ok) throw Error(data.error || '上传失败');
         if (target && data.kind!=='image') throw Error('逐题说明只支持图片');
         list.push(data); saveDraft();

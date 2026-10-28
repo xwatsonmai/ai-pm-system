@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"slices"
 	"strings"
 	"time"
@@ -36,8 +37,9 @@ func (s *Settings) Validate() error {
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return errors.New("登录配置的 public_url 必须为有效的 HTTP(S) 地址")
 	}
-	if u.Path != "" {
-		return errors.New("当前 public_url 请填写站点根地址，不包含路径")
+	// A path mounts the workspace under that prefix, behind a reverse proxy.
+	if u.Path != "" && (u.RawPath != "" || path.Clean(u.Path) != u.Path) {
+		return errors.New("public_url 的路径须为规范的绝对路径，例如 https://example.com/workspace")
 	}
 	return nil
 }
@@ -193,6 +195,9 @@ func Open(ctx context.Context, f *File, store storage.Store) (*Manager, error) {
 
 func (m *Manager) PublicURL() string  { return m.settings.PublicURL }
 func (m *Manager) PublicHost() string { u, _ := url.Parse(m.settings.PublicURL); return u.Host }
+
+// Base is the path the workspace is mounted under, empty at a site root.
+func (m *Manager) Base() string { u, _ := url.Parse(m.settings.PublicURL); return u.Path }
 func (m *Manager) BootstrapAdmin(loginID string) bool {
 	return loginID != "" && slices.Contains(m.settings.PlatformAdminLoginIDs, loginID)
 }
@@ -202,7 +207,7 @@ func (m *Manager) cookie(w http.ResponseWriter, value string, ttl time.Duration)
 	if ttl < 0 {
 		maxAge = -1
 	}
-	http.SetCookie(w, &http.Cookie{Name: m.SessionCookie, Value: value, Path: "/", MaxAge: maxAge, Expires: time.Now().Add(ttl), HttpOnly: true, Secure: strings.HasPrefix(m.settings.PublicURL, "https://"), SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: m.SessionCookie, Value: value, Path: m.Base() + "/", MaxAge: maxAge, Expires: time.Now().Add(ttl), HttpOnly: true, Secure: strings.HasPrefix(m.settings.PublicURL, "https://"), SameSite: http.SameSiteLaxMode})
 }
 
 // Issue starts a workspace session for a signed-in person and replaces the

@@ -1,5 +1,6 @@
 import { Editor, StarterKit, Image, Placeholder, TableKit, Markdown } from './vendor/requirement-editor.mjs';
 import { renderMarkdown } from './markdown.mjs';
+import { BASE, savedLinks } from './base.mjs';
 import DOMPurify from './vendor/dompurify.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
@@ -73,7 +74,7 @@ export function mountRequirementEditor(form, { task = {}, projectID, userID, onD
     onTransaction: ({transaction}) => { for (const position of positions) position.pos = transaction.mapping.map(position.pos); },
   });
   function snapshot() {
-    return {title:form.elements.title.value, kind:form.elements.kind.value, priority:form.elements.priority.value, reviewer:form.elements.reviewer.value, acceptance:form.elements.acceptance.value.split('\n'), description:descriptionChanged ? editor.getMarkdown() : (initial.description || ''), attachments:files, version:Number(form.dataset.version), ...(sourceVersion != null ? {source_version:draft?.source_version ?? sourceVersion} : {}), ...(parentRequirement ? {parent_requirement_id:parentRequirement.id,parent_version:draft?.parent_version ?? parentRequirement.version} : {})};
+    return {title:form.elements.title.value, kind:form.elements.kind.value, priority:form.elements.priority.value, reviewer:form.elements.reviewer.value, acceptance:form.elements.acceptance.value.split('\n'), description:descriptionChanged ? savedLinks(editor.getMarkdown()) : (initial.description || ''), attachments:files, version:Number(form.dataset.version), ...(sourceVersion != null ? {source_version:draft?.source_version ?? sourceVersion} : {}), ...(parentRequirement ? {parent_requirement_id:parentRequirement.id,parent_version:draft?.parent_version ?? parentRequirement.version} : {})};
   }
   function saveDraft() {
     if (disposed || completed) return;
@@ -97,7 +98,7 @@ export function mountRequirementEditor(form, { task = {}, projectID, userID, onD
     }
     $('.document-table-tools').hidden = !editor.isActive('table') || !$('.document-preview').hidden;
   }
-  function url(file) { return `/api/projects/${encodeURIComponent(projectID)}/attachments/${encodeURIComponent(file.id)}`; }
+  function url(file) { return `${BASE}/api/projects/${encodeURIComponent(projectID)}/attachments/${encodeURIComponent(file.id)}`; }
   function showFiles() {
     $('.attachment-count').textContent = files.length;
     $('.requirement-file-list').innerHTML = files.length ? files.map(file => `<div class="requirement-file"><a href="${url(file)}" download="${esc(file.name)}" class="requirement-file-info">${file.kind === 'image' ? `<img src="${url(file)}?preview=1" alt="">` : '<span class="file-glyph">DOC</span>'}<span><strong>${esc(file.name)}</strong><small>${size(file.size)}${file.truncated ? ' · 分析时仅提取部分正文' : ''}</small></span></a><button type="button" class="ghost" data-editor-action="insert-file" data-file="${esc(file.id)}" aria-label="插入正文：${esc(file.name)}">插入正文</button><button type="button" class="ghost" data-editor-action="remove-file" data-file="${esc(file.id)}" aria-label="移除 ${esc(file.name)}">×</button></div>`).join('') : '<p class="attachment-empty">还没有附件。截图可插入正文，与对应说明放在一起。</p>';
@@ -121,7 +122,7 @@ export function mountRequirementEditor(form, { task = {}, projectID, userID, onD
       $('.upload-status').textContent = `正在上传 ${file.name}…`;
       try {
         const data = new FormData(); data.append('file',file,file.name || '截图.png');
-        const response = await fetch(`/api/projects/${encodeURIComponent(projectID)}/attachments`, {method:'POST', body:data});
+        const response = await fetch(`${BASE}/api/projects/${encodeURIComponent(projectID)}/attachments`, {method:'POST', body:data});
         if (response.status === 401) { onUnauthorized?.(); throw new Error('登录已过期，请重新登录'); }
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || '上传失败，请重试');

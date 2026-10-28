@@ -1,4 +1,5 @@
 import { renderMarkdown } from "./markdown.mjs";
+import { BASE } from './base.mjs';
 const esc = (v) =>
   String(v ?? "").replace(
     /[&<>"']/g,
@@ -34,7 +35,7 @@ function files(task) {
   return (task.attachments || [])
     .map(
       (f) =>
-        `<a class="iteration-file" href="/api/projects/${encodeURIComponent(task.project_id)}/attachments/${encodeURIComponent(f.id)}" target="_blank" rel="noopener">${esc(f.name)}</a>`,
+        `<a class="iteration-file" href="${BASE}/api/projects/${encodeURIComponent(task.project_id)}/attachments/${encodeURIComponent(f.id)}" target="_blank" rel="noopener">${esc(f.name)}</a>`,
     )
     .join("");
 }

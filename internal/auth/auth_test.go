@@ -23,11 +23,11 @@ func TestLoadRejectsInvalidFilesAndUnknownProviders(t *testing.T) {
 	}
 	for data, want := range map[string]string{
 		`not json`: "有效配置",
-		`{"provider":"local","public_url":"http://127.0.0.1:8090"} {}`: "一个 JSON 对象",
-		`{"public_url":"http://127.0.0.1:8090"}`:                       "需要填写 provider",
-		`{"provider":"oa","public_url":"http://127.0.0.1:8090"}`:       "不可用",
-		`{"provider":"local","public_url":"http://127.0.0.1:8090/ai"}`: "根地址",
-		`{"provider":"local","public_url":"https://u:p@example.com"}`:  "public_url",
+		`{"provider":"local","public_url":"http://127.0.0.1:8090"} {}`:      "一个 JSON 对象",
+		`{"public_url":"http://127.0.0.1:8090"}`:                            "需要填写 provider",
+		`{"provider":"oa","public_url":"http://127.0.0.1:8090"}`:            "不可用",
+		`{"provider":"local","public_url":"http://127.0.0.1:8090/a/../ai"}`: "规范",
+		`{"provider":"local","public_url":"https://u:p@example.com"}`:       "public_url",
 	} {
 		if e := os.WriteFile(p, []byte(data), 0600); e != nil {
 			t.Fatal(e)

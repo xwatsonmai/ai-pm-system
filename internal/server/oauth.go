@@ -59,10 +59,16 @@ func (s *Server) oauthRoutes(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", resource)
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", resource)
-	mux.HandleFunc("GET /.well-known/oauth-authorization-server", func(w http.ResponseWriter, r *http.Request) {
+	metadata := func(w http.ResponseWriter, r *http.Request) {
 		origin := s.origin(r)
 		respond(w, map[string]any{"issuer": origin, "authorization_endpoint": origin + "/oauth/authorize", "token_endpoint": origin + "/oauth/token", "registration_endpoint": origin + "/oauth/register", "revocation_endpoint": origin + "/oauth/revoke", "response_types_supported": []string{"code"}, "grant_types_supported": []string{"authorization_code", "refresh_token"}, "code_challenge_methods_supported": []string{"S256"}, "token_endpoint_auth_methods_supported": []string{"none"}, "scopes_supported": []string{"mcp"}, "client_id_metadata_document_supported": false})
-	})
+	}
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server", metadata)
+	// An issuer with a path is discovered under that path, the only part a
+	// proxy forwards here (RFC 8414 path insertion lands on the proxy's root).
+	if s.appPath("") != "" {
+		mux.HandleFunc("GET /.well-known/openid-configuration", metadata)
+	}
 	mux.HandleFunc("POST /oauth/register", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Name            string   `json:"client_name"`
@@ -149,7 +155,7 @@ func (s *Server) oauthRoutes(mux *http.ServeMux) {
 	})
 }
 
-var consentPage = template.Must(template.New("consent").Parse(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MCP 授权 · 智驱</title><link rel="stylesheet" href="/style.css"></head><body><main class="oauth-page"><div class="brand-mark">H</div><h1>授权开发 MCP</h1><p>{{.Name}}，客户端将以你的身份访问所选项目。</p><p class="hint">客户端：{{.Client}}<br>回调：{{.Redirect}}</p>{{if .Enabled}}<form method="post" action="/oauth/authorize">{{range $key,$value:=.Fields}}<input type="hidden" name="{{$key}}" value="{{$value}}">{{end}}<div class="field"><label for="oauth-project">授权项目</label><select id="oauth-project" name="project_id" required>{{range .Projects}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></div><p class="hint">可查询、认领及提交事项。移除项目成员或撤销授权后停止访问。</p><div class="row"><button type="submit" name="decision" value="allow" class="primary">确认授权</button><button type="submit" name="decision" value="deny">取消</button></div></form>{{else}}{{if .HasProjects}}<p>请先在工作台的「我的 MCP」中开通个人 MCP，再回到客户端重新授权。</p>{{else}}<p>你尚未加入项目，请联系项目或平台管理员分配项目后重新授权。</p>{{end}}<a href="/">打开工作台</a>{{end}}</main></body></html>`))
+var consentPage = template.Must(template.New("consent").Parse(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MCP 授权 · 智驱</title><link rel="stylesheet" href="{{.Base}}/style.css"></head><body><main class="oauth-page"><div class="brand-mark">H</div><h1>授权开发 MCP</h1><p>{{.Name}}，客户端将以你的身份访问所选项目。</p><p class="hint">客户端：{{.Client}}<br>回调：{{.Redirect}}</p>{{if .Enabled}}<form method="post" action="{{.Base}}/oauth/authorize">{{range $key,$value:=.Fields}}<input type="hidden" name="{{$key}}" value="{{$value}}">{{end}}<div class="field"><label for="oauth-project">授权项目</label><select id="oauth-project" name="project_id" required>{{range .Projects}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></div><p class="hint">可查询、认领及提交事项。移除项目成员或撤销授权后停止访问。</p><div class="row"><button type="submit" name="decision" value="allow" class="primary">确认授权</button><button type="submit" name="decision" value="deny">取消</button></div></form>{{else}}{{if .HasProjects}}<p>请先在工作台的「我的 MCP」中开通个人 MCP，再回到客户端重新授权。</p>{{else}}<p>你尚未加入项目，请联系项目或平台管理员分配项目后重新授权。</p>{{end}}<a href="{{.Base}}/">打开工作台</a>{{end}}</main></body></html>`))
 
 func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
@@ -194,7 +200,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 				s.oauthError(w, 401, "login_required", "请重新发起授权并登录")
 				return
 			}
-			http.Redirect(w, r, "/auth/login?"+url.Values{"return_to": {r.URL.RequestURI()}}.Encode(), 303)
+			http.Redirect(w, r, s.appPath("/auth/login?"+url.Values{"return_to": {r.URL.RequestURI()}}.Encode()), 303)
 			return
 		}
 		a, e = s.userActor(r.Context(), u)
@@ -264,7 +270,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	// The POST response keeps no-referrer for the external OAuth callback.
 	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = consentPage.Execute(w, map[string]any{"Name": a.Name, "Client": client, "Redirect": redirect, "Enabled": account.Enabled && len(projects) > 0, "Fields": fields, "Projects": projects, "HasProjects": len(projects) > 0})
+	_ = consentPage.Execute(w, map[string]any{"Base": s.appPath(""), "Name": a.Name, "Client": client, "Redirect": redirect, "Enabled": account.Enabled && len(projects) > 0, "Fields": fields, "Projects": projects, "HasProjects": len(projects) > 0})
 }
 
 func (s *Server) grantActor(r *http.Request, g domain.OAuthGrant) (domain.Actor, error) {
