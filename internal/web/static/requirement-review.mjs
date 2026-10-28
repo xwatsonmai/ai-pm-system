@@ -360,7 +360,7 @@ export function mountRequirementReview(root, {task,api,userID,onDetails,onConfir
     for (const element of root.querySelectorAll('.review-question-form :is(input,textarea,select)')) element.disabled = saving || readOnly();
     for (const button of root.querySelectorAll('.rc-form-submit')) button.disabled = saving || uploading || readOnly();
     for (const tip of root.querySelectorAll('.review-question-form .rc-card-tip')) tip.textContent = input.value.trim() ? '会一并发送输入框里的文字' : '可以只填一部分，也可以直接在下方输入框说明';
-    const blocked = hasDraft() ? '输入框或表单里还有没发送的内容，先发送，让 Agent 按最新说明评审后再确认' : v?.needs_recheck ? '关联需求有更新，先重新核对再确认' : '';
+    const blocked = hasDraft() ? '输入框或表单里还有没发送的内容，先发送，让 Agent 按最新说明评审后再确认' : v?.needs_recheck ? '其他需求有变化，点下方「重新核对」后再确认' : '';
     for (const button of root.querySelectorAll('[data-review-action=confirm], [data-review-action=confirm_rejection]')) {
       button.disabled = saving || uploading || Boolean(blocked);
       const tip = button.parentElement.querySelector('.rc-confirm-tip');

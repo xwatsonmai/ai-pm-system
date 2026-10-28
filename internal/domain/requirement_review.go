@@ -124,8 +124,17 @@ type RequirementReviewResult struct {
 
 // Evidence records what was actually read, independently of the model's memory.
 type RequirementReviewEvidence struct {
-	CatalogFingerprint string                       `json:"catalog_fingerprint"`
-	References         []RequirementReviewReference `json:"references"`
+	CatalogFingerprint string `json:"catalog_fingerprint"`
+	// Catalog lets a recheck name the requirement that changed. It is nil only
+	// in older evidence, which has just the fingerprint.
+	Catalog    []RequirementCatalogEntry    `json:"catalog"`
+	References []RequirementReviewReference `json:"references"`
+}
+
+type RequirementCatalogEntry struct {
+	TaskID string `json:"task_id"`
+	Scope  string `json:"scope"` // short digest of revision, title, description and acceptance
+	Ended  bool   `json:"ended,omitempty"`
 }
 
 type RequirementReviewReference struct {
