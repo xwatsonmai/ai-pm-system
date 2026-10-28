@@ -27,7 +27,7 @@ func TestLostRefreshResponseCanBeRetriedOnlyInsideTheGraceWindow(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	p.Memberships = []domain.ProjectMember{{UserID: "employee", Role: "developer"}}
+	p.Memberships = []domain.ProjectMember{{UserID: "employee", Roles: []string{"developer"}}}
 	if e = db.PutProject(ctx, p); e != nil {
 		t.Fatal(e)
 	}

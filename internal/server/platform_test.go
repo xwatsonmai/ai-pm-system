@@ -39,7 +39,7 @@ func TestPlatformAndProjectRoleBoundaries(t *testing.T) {
 		a    domain.Actor
 		role string
 	}{{developer, "developer"}, {product, "product"}} {
-		if _, e = svc.SetProjectMember(c, owner, p.ID, entry.a.ID, entry.role, false); e != nil {
+		if _, e = svc.SetProjectMember(c, owner, p.ID, entry.a.ID, []string{entry.role}, false); e != nil {
 			t.Fatal(e)
 		}
 	}
@@ -72,6 +72,14 @@ func TestPlatformAndProjectRoleBoundaries(t *testing.T) {
 	call(admin, "GET", "/api/projects/"+p.ID+"/context", "", 403)
 	call(admin, "PUT", "/api/projects/"+p.ID+"/members/eve", `{"role":"product"}`, 200)
 	call(outsider, "GET", "/api/projects/"+p.ID+"/context", "", 200)
+	// A member can hold several roles; unknown roles or an empty list are rejected.
+	call(admin, "PUT", "/api/projects/"+p.ID+"/members/eve", `{"roles":["tester","product","tester"]}`, 200)
+	for _, body := range []string{`{"roles":[]}`, `{"roles":["owner","product"]}`} {
+		call(admin, "PUT", "/api/projects/"+p.ID+"/members/eve", body, 400)
+	}
+	if members := call(admin, "GET", "/api/projects/"+p.ID+"/members", "", 200); !strings.Contains(members, `"roles":["product","tester"]`) {
+		t.Fatal("roles not kept in display order", members)
+	}
 	call(owner, "PUT", "/api/projects/"+p.ID+"/members/bob", `{"role":"admin"}`, 200)
 	call(developer, "DELETE", "/api/projects/"+p.ID+"/members/alice", "", 200)
 	call(owner, "GET", "/api/projects/"+p.ID+"/context", "", 403)

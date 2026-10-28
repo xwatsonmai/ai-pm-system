@@ -31,7 +31,7 @@ func TestMCPExplicitRequirementDecisions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.Memberships = []domain.ProjectMember{{UserID: "employee", Role: "developer"}}
+	p.Memberships = []domain.ProjectMember{{UserID: "employee", Roles: []string{"developer"}}}
 	if err = db.PutProject(ctx, p); err != nil {
 		t.Fatal(err)
 	}

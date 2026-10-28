@@ -138,20 +138,9 @@ func (s *Server) platformRoutes(mux *http.ServeMux) {
 			fail(w, e)
 			return
 		}
-		memberships := p.Memberships
-		if len(memberships) == 0 {
-			if p.OwnerID != "" {
-				memberships = append(memberships, domain.ProjectMember{UserID: p.OwnerID, Role: "admin"})
-			}
-			for _, id := range p.AccessMembers {
-				if id != p.OwnerID {
-					memberships = append(memberships, domain.ProjectMember{UserID: id, Role: "developer"})
-				}
-			}
-		}
 		out := []map[string]any{}
 		snapshot, _ := s.App.Store.GetDirectory(r.Context())
-		for _, m := range memberships {
+		for _, m := range domain.ProjectMembers(p) {
 			u := domain.User{ID: m.UserID, Name: m.UserID}
 			for _, v := range users {
 				if v.ID == m.UserID {
@@ -167,13 +156,14 @@ func (s *Server) platformRoutes(mux *http.ServeMux) {
 					department = v.DepartmentName
 				}
 			}
-			out = append(out, map[string]any{"user": u, "role": m.Role, "department_name": department})
+			out = append(out, map[string]any{"user": u, "roles": m.Roles, "department_name": department})
 		}
 		respond(w, map[string]any{"items": out, "can_manage": app.CanManage(s.actor(r), p)})
 	})))
 	member := func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
-			Role string `json:"role"`
+			Roles []string `json:"roles"`
+			Role  string   `json:"role"` // single role from older clients
 		}
 		if r.Method != "DELETE" {
 			if e := read(r, &in); e != nil {
@@ -187,7 +177,10 @@ func (s *Server) platformRoutes(mux *http.ServeMux) {
 				return
 			}
 		}
-		p, e := s.App.SetProjectMember(r.Context(), s.actor(r), r.PathValue("id"), r.PathValue("user"), in.Role, r.Method == "DELETE")
+		if in.Roles == nil && in.Role != "" {
+			in.Roles = []string{in.Role}
+		}
+		p, e := s.App.SetProjectMember(r.Context(), s.actor(r), r.PathValue("id"), r.PathValue("user"), in.Roles, r.Method == "DELETE")
 		if e != nil {
 			fail(w, e)
 			return

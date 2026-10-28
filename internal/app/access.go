@@ -8,22 +8,19 @@ import (
 	"slices"
 )
 
-func ProjectRole(a domain.Actor, p domain.Project) string {
+func ProjectRoles(a domain.Actor, p domain.Project) []string {
 	if a.ID == "local-owner" {
-		return "admin"
+		return []string{"admin"}
 	}
-	for _, m := range p.Memberships {
+	if a.ID == "" {
+		return nil
+	}
+	for _, m := range domain.ProjectMembers(p) {
 		if m.UserID == a.ID {
-			return m.Role
+			return m.Roles
 		}
 	}
-	if len(p.Memberships) == 0 && p.OwnerID == a.ID && a.ID != "" {
-		return "admin"
-	}
-	if len(p.Memberships) == 0 && slices.Contains(p.AccessMembers, a.ID) {
-		return "developer"
-	}
-	return ""
+	return nil
 }
 func CanRead(a domain.Actor, p domain.Project) bool {
 	if a.Kind != "human" {
@@ -31,14 +28,14 @@ func CanRead(a domain.Actor, p domain.Project) bool {
 			return false
 		}
 		if a.Kind == "developer" && a.UserID != "" {
-			return ProjectRole(domain.Actor{ID: a.UserID, Kind: "human", PlatformAdmin: a.PlatformAdmin}, p) != ""
+			return len(ProjectRoles(domain.Actor{ID: a.UserID, Kind: "human", PlatformAdmin: a.PlatformAdmin}, p)) > 0
 		}
 		return true
 	}
-	return a.ID != "" && ProjectRole(a, p) != ""
+	return len(ProjectRoles(a, p)) > 0
 }
 func CanManage(a domain.Actor, p domain.Project) bool {
-	return a.Kind == "human" && (a.PlatformAdmin || ProjectRole(a, p) == "admin")
+	return a.Kind == "human" && (a.PlatformAdmin || slices.Contains(ProjectRoles(a, p), "admin"))
 }
 func (s *Service) CheckProject(c context.Context, a domain.Actor, id string, manage bool) error {
 	p, e := s.Store.GetProject(c, id)
@@ -83,7 +80,7 @@ func (s *Service) SaveProjectAs(c context.Context, a domain.Actor, p domain.Proj
 		if len(p.AccessMembers) > 0 || len(p.Memberships) > 0 {
 			return p, errors.New("请先创建项目，再通过项目成员管理分配员工")
 		}
-		p.Memberships = []domain.ProjectMember{{UserID: a.ID, Role: "admin"}}
+		p.Memberships = []domain.ProjectMember{{UserID: a.ID, Roles: []string{"admin"}}}
 		p.AccessMembers = []string{a.ID}
 		p.Members = []string{a.Name}
 	}
@@ -97,7 +94,9 @@ func (s *Service) SaveProfileAs(c context.Context, a domain.Actor, p domain.Prof
 	return s.SaveProfile(c, p, key)
 }
 
-func (s *Service) SetProjectMember(c context.Context, a domain.Actor, project, user, role string, remove bool) (domain.Project, error) {
+// SetProjectMember adds a member or replaces their roles; roles keep the
+// order of domain.ProjectRoles and a member keeps their place in the list.
+func (s *Service) SetProjectMember(c context.Context, a domain.Actor, project, user string, roles []string, remove bool) (domain.Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, e := s.Store.GetProject(c, project)
@@ -107,8 +106,14 @@ func (s *Service) SetProjectMember(c context.Context, a domain.Actor, project, u
 	if !CanManage(a, p) {
 		return p, domain.ErrForbidden
 	}
-	if !remove && role != "admin" && role != "product" && role != "developer" {
-		return p, errors.New("请选择开发者、产品或管理员")
+	picked := []string{}
+	for _, r := range domain.ProjectRoles {
+		if slices.Contains(roles, r) {
+			picked = append(picked, r)
+		}
+	}
+	if !remove && (len(picked) == 0 || len(picked) != len(slices.Compact(slices.Sorted(slices.Values(roles))))) {
+		return p, errors.New("请为成员选择至少一个角色：产品、开发、测试或管理员")
 	}
 	users, e := s.Store.ListUsers(c)
 	if e != nil {
@@ -117,26 +122,20 @@ func (s *Service) SetProjectMember(c context.Context, a domain.Actor, project, u
 	if !remove && !slices.ContainsFunc(users, func(u domain.User) bool { return u.ID == user }) && user != "local-owner" {
 		return p, errors.New("成员不存在，请刷新成员目录后重试")
 	}
-	if len(p.Memberships) == 0 {
-		if p.OwnerID != "" {
-			p.Memberships = append(p.Memberships, domain.ProjectMember{UserID: p.OwnerID, Role: "admin"})
-		}
-		for _, id := range p.AccessMembers {
-			if id != p.OwnerID {
-				p.Memberships = append(p.Memberships, domain.ProjectMember{UserID: id, Role: "developer"})
-			}
-		}
-	}
 	out := []domain.ProjectMember{}
-	for _, m := range p.Memberships {
+	found := false
+	for _, m := range domain.ProjectMembers(p) {
 		if m.UserID != user {
 			out = append(out, m)
+		} else if !remove {
+			out = append(out, domain.ProjectMember{UserID: user, Roles: picked})
+			found = true
 		}
 	}
-	if !remove {
-		out = append(out, domain.ProjectMember{UserID: user, Role: role})
+	if !remove && !found {
+		out = append(out, domain.ProjectMember{UserID: user, Roles: picked})
 	}
-	if !slices.ContainsFunc(out, func(m domain.ProjectMember) bool { return m.Role == "admin" }) {
+	if !slices.ContainsFunc(out, func(m domain.ProjectMember) bool { return m.Has("admin") }) {
 		return p, errors.New("项目至少保留一位管理员")
 	}
 	// Owner is retained as the project creator, not an implicit membership after migration.

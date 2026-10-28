@@ -48,7 +48,7 @@ func testMCPWorkSubscription(t *testing.T, personal bool) {
 	defer srv.Close()
 	var grant domain.OAuthGrant
 	if personal {
-		p.Memberships = []domain.ProjectMember{{UserID: app.Human().ID, Role: "admin"}, {UserID: "employee", Role: "developer"}}
+		p.Memberships = []domain.ProjectMember{{UserID: app.Human().ID, Roles: []string{"admin"}}, {UserID: "employee", Roles: []string{"developer"}}}
 		if err = db.PutProject(ctx, p); err != nil {
 			t.Fatal(err)
 		}

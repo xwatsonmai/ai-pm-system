@@ -6,6 +6,7 @@ import (
 	"ai-pm-system/internal/auth"
 	"ai-pm-system/internal/credential"
 	"ai-pm-system/internal/gitrepo"
+	"ai-pm-system/internal/notify"
 	"ai-pm-system/internal/server"
 	"ai-pm-system/internal/storage/sqlite"
 	"context"
@@ -63,11 +64,12 @@ func main() {
 	defer db.Close()
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	service := &app.Service{Store: db}
 	vault, e := credential.Open(filepath.Join(root, "repository.key"), db)
 	if e != nil {
 		log.Fatal(e)
 	}
+	hub := &notify.Hub{Store: db, Data: db, Vault: vault}
+	service := &app.Service{Store: notify.Observed{Store: db, Hub: hub}}
 	repos := &gitrepo.Repositories{Root: filepath.Join(root, "repos"), App: service, Vault: vault}
 	manager := agent.New(ctx, service, repos, workerPath, root)
 	manager.SandboxSocket = *sandboxSocket
@@ -77,17 +79,20 @@ func main() {
 	}
 	service.OnChange = manager.Changed
 	manager.StartReplyWorker()
-	api := &server.Server{App: service, Git: repos, Agent: manager}
+	api := &server.Server{App: service, Git: repos, Agent: manager, Notify: hub}
 	if authFile != nil {
 		api.Auth, e = auth.Open(ctx, authFile, db)
 		if e != nil {
 			log.Fatal(e)
 		}
+		hub.PublicURL = api.Auth.PublicURL()
 		log.Printf("登录已启用 · 访问地址: %s", api.Auth.PublicURL())
 		if api.Auth.Accounts != nil && api.Auth.Accounts.SetupToken() != "" {
 			log.Printf("尚无平台账号：打开访问地址，用初始化口令 %s 创建首位平台管理员（口令每次启动更新，用后失效）", api.Auth.Accounts.SetupToken())
 		}
 	}
+	hub.Act = api.IMAct
+	hub.Start(ctx)
 	httpServer := &http.Server{Addr: *addr, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second}
 	if *interval > 0 {
 		go func() {

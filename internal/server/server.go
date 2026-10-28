@@ -7,6 +7,7 @@ import (
 	"ai-pm-system/internal/auth"
 	"ai-pm-system/internal/domain"
 	"ai-pm-system/internal/gitrepo"
+	"ai-pm-system/internal/notify"
 	"ai-pm-system/internal/web"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -23,6 +25,8 @@ type Server struct {
 	Git   *gitrepo.Repositories
 	Agent *agent.Manager
 	Auth  *auth.Manager
+	// Notify keeps to-dos and IM channels; nil turns both off.
+	Notify *notify.Hub
 }
 
 func number(v string) int { n, _ := strconv.Atoi(v); return n }
@@ -72,6 +76,7 @@ func (s *Server) Handler() http.Handler {
 	s.authRoutes(mux)
 	s.accountRoutes(mux)
 	s.platformRoutes(mux)
+	s.notifyRoutes(mux)
 	s.oauthRoutes(mux)
 	s.repositoryRoutes(mux)
 	s.collaborationRoutes(mux)
@@ -341,7 +346,7 @@ func (s *Server) Handler() http.Handler {
 	fileServer := http.FileServer(http.FS(assets))
 	mux.Handle("/", fileServer)
 	protection := http.NewCrossOriginProtection()
-	for _, path := range []string{"/oauth/register", "/oauth/token", "/oauth/revoke", "/mcp"} {
+	for _, path := range []string{"/oauth/register", "/oauth/token", "/oauth/revoke", "/mcp", "/integrations/{name}/callback"} {
 		protection.AddInsecureBypassPattern(path)
 	}
 	protected := protection.Handler(s.requireLogin(mux))
@@ -350,7 +355,7 @@ func (s *Server) Handler() http.Handler {
 		if h, _, e := net.SplitHostPort(host); e == nil {
 			host = h
 		}
-		if host != "localhost" && host != "127.0.0.1" && host != "::1" && !(s.Auth != nil && r.Host == s.Auth.PublicHost()) {
+		if host != "localhost" && host != "127.0.0.1" && host != "::1" && !(s.Auth != nil && r.Host == s.Auth.PublicHost()) && !(s.Notify != nil && slices.Contains(s.Notify.Hosts(), r.Host)) {
 			fail(w, domain.ErrForbidden)
 			return
 		}

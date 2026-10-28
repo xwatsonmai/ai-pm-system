@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -151,9 +152,13 @@ type Failure string
 
 func (f Failure) Error() string { return string(f) }
 
+// returnPages are the other local pages a sign-in may continue to: the to-do
+// pages and finishing an IM account binding.
+var returnPages = regexp.MustCompile(`^/(todo(/td_[0-9a-f]+(_[0-9]+)?)?|integrations/[a-z0-9]+/(complete|bind))$`)
+
 // ReturnTo keeps only the local pages a sign-in may continue to.
 func ReturnTo(raw string) string {
-	if strings.HasPrefix(raw, "/oauth/authorize?") {
+	if strings.HasPrefix(raw, "/oauth/authorize?") || returnPages.MatchString(raw) {
 		return raw
 	}
 	return "/"
@@ -233,6 +238,32 @@ func (m *Manager) Issue(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	}
 	m.cookie(w, raw, time.Until(id.ExpiresAt))
 	return nil
+}
+
+// IssueFor signs in a platform user who proved who they are another way,
+// such as through an IM account bound to them. A built-in account must still
+// be enabled; other providers need a user who has signed in before.
+func (m *Manager) IssueFor(ctx context.Context, w http.ResponseWriter, r *http.Request, userID string) error {
+	if m.Accounts != nil {
+		account, err := m.store.GetAccount(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if account.Disabled {
+			return errors.New("账号已停用，请联系平台管理员")
+		}
+		return m.Issue(ctx, w, r, identity(account))
+	}
+	users, err := m.store.ListUsers(ctx)
+	if err != nil {
+		return err
+	}
+	for _, u := range users {
+		if u.ID == userID {
+			return m.Issue(ctx, w, r, Identity{User: u, ExpiresAt: time.Now().Add(accountSession)})
+		}
+	}
+	return domain.ErrNotFound
 }
 
 // Session returns the browser's current session, including one that may only

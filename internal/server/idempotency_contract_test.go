@@ -42,7 +42,7 @@ func newContractHarness(t *testing.T) *contractHarness {
 	if e != nil {
 		t.Fatal(e)
 	}
-	p.Memberships = []domain.ProjectMember{{UserID: app.Human().ID, Role: "admin"}, {UserID: "employee", Role: "developer"}}
+	p.Memberships = []domain.ProjectMember{{UserID: app.Human().ID, Roles: []string{"admin"}}, {UserID: "employee", Roles: []string{"developer"}}}
 	if e = db.PutProject(c, p); e != nil {
 		t.Fatal(e)
 	}
