@@ -55,7 +55,7 @@ func TestProjectMembershipAndCredentialBoundaries(t *testing.T) {
 	if p.OwnerID != "alice" || p.CredentialID == "" {
 		t.Fatal("owner/credential not bound")
 	}
-	p, e = svc.SetProjectMember(c, owner, p.ID, "bob", "developer", false)
+	p, e = svc.SetProjectMember(c, owner, p.ID, "bob", []string{"developer"}, false)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -149,7 +149,7 @@ func TestLegacyProjectAdoption(t *testing.T) {
 	if e = db.PutUser(c, domain.User{ID: a.ID, Name: a.Name}); e != nil {
 		t.Fatal(e)
 	}
-	p, e = svc.SetProjectMember(c, a, p.ID, a.ID, "admin", false)
+	p, e = svc.SetProjectMember(c, a, p.ID, a.ID, []string{"admin"}, false)
 	if e != nil {
 		t.Fatal(e)
 	}

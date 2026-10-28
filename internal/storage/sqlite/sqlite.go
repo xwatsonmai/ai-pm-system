@@ -111,6 +111,21 @@ func (d *DB) migrate() error {
  CREATE TABLE IF NOT EXISTS accounts (user_id TEXT PRIMARY KEY,username TEXT UNIQUE NOT NULL,name TEXT NOT NULL,password_hash TEXT NOT NULL,disabled INTEGER NOT NULL,must_change_password INTEGER NOT NULL,version INTEGER NOT NULL,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
  INSERT OR IGNORE INTO schema_migrations(version) VALUES(13);
  `)
+	if err != nil {
+		return err
+	}
+	// Version 14 adds to-dos, their IM deliveries and account bindings.
+	_, err = d.db.Exec(`
+ CREATE TABLE IF NOT EXISTS notify_todos (id TEXT PRIMARY KEY,task_id TEXT NOT NULL,open INTEGER NOT NULL,created_at INTEGER NOT NULL,payload TEXT NOT NULL);
+ CREATE INDEX IF NOT EXISTS notify_todos_task ON notify_todos(task_id,open);
+ CREATE TABLE IF NOT EXISTS notify_recipients (todo_id TEXT NOT NULL,user_id TEXT NOT NULL,PRIMARY KEY(todo_id,user_id));
+ CREATE INDEX IF NOT EXISTS notify_recipients_user ON notify_recipients(user_id);
+ CREATE TABLE IF NOT EXISTS notify_deliveries (id TEXT PRIMARY KEY,todo_id TEXT NOT NULL,state TEXT NOT NULL,next_at INTEGER NOT NULL,payload TEXT NOT NULL);
+ CREATE INDEX IF NOT EXISTS notify_deliveries_due ON notify_deliveries(state,next_at);
+ CREATE INDEX IF NOT EXISTS notify_deliveries_todo ON notify_deliveries(todo_id);
+ CREATE TABLE IF NOT EXISTS channel_bindings (channel TEXT NOT NULL,user_id TEXT NOT NULL,external_id TEXT NOT NULL,at INTEGER NOT NULL,PRIMARY KEY(channel,user_id),UNIQUE(channel,external_id));
+ INSERT OR IGNORE INTO schema_migrations(version) VALUES(14);
+ `)
 	return err
 }
 func decode[T any](s string) (T, error) { var v T; err := json.Unmarshal([]byte(s), &v); return v, err }

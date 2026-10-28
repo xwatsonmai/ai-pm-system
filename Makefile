@@ -24,3 +24,4 @@ test:
 	node --check internal/web/static/project-versions.mjs
 	node --check internal/web/static/project-timeline.mjs
 	node --check internal/web/static/requirement-iterations.mjs
+	node --check internal/web/static/todo.mjs

@@ -29,7 +29,7 @@ func TestProductManagementPersonalMCP(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	p.Memberships = []domain.ProjectMember{{UserID: "employee", Role: "product"}}
+	p.Memberships = []domain.ProjectMember{{UserID: "employee", Roles: []string{"product"}}}
 	db.PutProject(c, p)
 	db.PutMCPAccount(c, domain.MCPAccount{UserID: "employee", Enabled: true})
 	site := httptest.NewServer((&server.Server{App: s}).Handler())

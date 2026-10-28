@@ -71,6 +71,43 @@ try{
  assert.match(await page.locator('#page').innerText(),new RegExp(`${site}/mcp`));
  report.mcp='我的 MCP 显示 /zhiqu/mcp';
 
+ // The notification branch must preserve the mount in its own pages too.
+ await page.getByRole('link',{name:'我的待办',exact:true}).click();
+ await page.locator('.todo-title').waitFor();
+ assert.equal(new URL(page.url()).pathname,mount+'/todo');
+ assert.equal(await page.getByRole('link',{name:'进入工作台',exact:true}).getAttribute('href'),mount+'/');
+ await page.screenshot({path:join(output,'todo-desktop.png')});
+ await page.setViewportSize({width:390,height:844});
+ assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'mobile todo overflow');
+ await page.screenshot({path:join(output,'todo-mobile.png')});
+ await page.setViewportSize({width:1440,height:1050});
+ // Isolated UI fixture: Go integration tests separately exercise real task/card actions.
+ const todoID='td_abcdef123456', detailPath='/todo/'+todoID;
+ const fixtureTask={...task,status:'testing',version:7,submission:{sha:'abc123456789',environment:'staging'}};
+ let done=false,submitted=false;
+ const fixtureTodo={id:todoID,project:project.name,title:'待测试',kind:'test',subject:task.title,created_at:Date.now(),fields:[],open:true};
+ await page.route(site+'/api/todos/'+todoID,route=>route.fulfill({json:{todo:{...fixtureTodo,open:!done,done:done?'已确认测试通过':''},task:fixtureTask,recipient:true}}));
+ await page.route(site+'/api/tasks/'+task.id+'/actions',async route=>{
+  const body=route.request().postDataJSON();
+  assert.equal(body.action,'test_pass');assert.equal(body.version,7);
+  assert.equal(body.test_verification.sha,'abc123456789');
+  assert.equal(body.test_verification.note,'已验证重复操作');
+  done=true;submitted=true;await route.fulfill({json:{task:{...fixtureTask,status:'pending_release'}}});
+ });
+ await page.goto(site+detailPath);await page.locator('[data-form=test_pass]').waitFor();
+ await page.locator('[name=note]').fill('已验证重复操作');
+ await page.getByRole('button',{name:'测试通过',exact:true}).click();
+ await page.getByText('这项待办已经结束。',{exact:true}).waitFor();assert(submitted);
+ assert.equal(new URL(page.url()).pathname,mount+detailPath);
+ await page.getByRole('link',{name:'进入工作台',exact:true}).click();
+ await page.getByRole('button',{name:'平台设置',exact:true}).click();
+ await page.locator('[data-action=configure-channel][data-name=wecom]').click();
+ await page.locator('#channel-form').waitFor();
+ assert.match(await page.locator('.channel-setup').innerText(),new RegExp(site+'/integrations/wecom/callback'));
+ await page.screenshot({path:join(output,'wecom-config.png')});
+ await page.getByRole('button',{name:'关闭',exact:true}).click();
+ report.notifications='真实登录下待办入口、桌面/手机布局及企微配置正常；隔离测试表单保留版本和证据，所有请求保留子路径';
+
  await page.getByRole('button',{name:'退出登录',exact:true}).first().click();await page.locator('#login-form').waitFor();
  assert.equal(new URL(page.url()).pathname,mount+'/');
  report.logout='退出后回到 /zhiqu/ 登录页';

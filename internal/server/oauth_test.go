@@ -41,7 +41,7 @@ func TestPersonalOAuthDiscoveryPKCERefreshAndLiveMembership(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = svc.SetProjectMember(ctx, owner, p.ID, bob.ID, "developer", false); e != nil {
+	if _, e = svc.SetProjectMember(ctx, owner, p.ID, bob.ID, []string{"developer"}, false); e != nil {
 		t.Fatal(e)
 	}
 	other, e := svc.SaveProjectAs(ctx, owner, domain.Project{Name: "Unassigned project"})
@@ -170,7 +170,7 @@ func TestPersonalOAuthDiscoveryPKCERefreshAndLiveMembership(t *testing.T) {
 	}
 	refresh.Set("refresh_token", lost.Refresh)
 	request("POST", "/oauth/token", refresh.Encode(), "application/x-www-form-urlencoded", "", 400)
-	if _, e = svc.SetProjectMember(ctx, owner, p.ID, bob.ID, "", true); e != nil {
+	if _, e = svc.SetProjectMember(ctx, owner, p.ID, bob.ID, nil, true); e != nil {
 		t.Fatal(e)
 	}
 	request("GET", "/api/projects/"+p.ID+"/context", "", "", "", 403)

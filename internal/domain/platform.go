@@ -1,8 +1,74 @@
 package domain
 
+import (
+	"encoding/json"
+	"slices"
+)
+
+// ProjectRoles lists the roles a project member can hold, in display order.
+// Roles decide who receives which to-dos; only admin grants extra permissions.
+var ProjectRoles = []string{"product", "developer", "tester", "admin"}
+
 type ProjectMember struct {
-	UserID string `json:"user_id"`
-	Role   string `json:"role"`
+	UserID string   `json:"user_id"`
+	Roles  []string `json:"roles"`
+}
+
+// UnmarshalJSON also reads the single role stored before members could hold several.
+func (m *ProjectMember) UnmarshalJSON(b []byte) error {
+	var v struct {
+		UserID string   `json:"user_id"`
+		Roles  []string `json:"roles"`
+		Role   string   `json:"role"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	if v.Roles == nil && v.Role != "" {
+		v.Roles = []string{v.Role}
+	}
+	*m = ProjectMember{UserID: v.UserID, Roles: v.Roles}
+	return nil
+}
+
+// MarshalJSON retains a legacy role so existing clients and a rolled-back
+// server can still read memberships. New readers use the complete role set.
+func (m ProjectMember) MarshalJSON() ([]byte, error) {
+	role := ""
+	for _, candidate := range []string{"admin", "product", "developer"} {
+		if m.Has(candidate) {
+			role = candidate
+			break
+		}
+	}
+	if role == "" && len(m.Roles) > 0 {
+		role = "developer"
+	}
+	return json.Marshal(struct {
+		UserID string   `json:"user_id"`
+		Roles  []string `json:"roles"`
+		Role   string   `json:"role,omitempty"`
+	}{m.UserID, m.Roles, role})
+}
+
+func (m ProjectMember) Has(role string) bool { return slices.Contains(m.Roles, role) }
+
+// ProjectMembers lists memberships, deriving them for projects created
+// before roles existed: the owner administers and other members develop.
+func ProjectMembers(p Project) []ProjectMember {
+	if len(p.Memberships) > 0 {
+		return p.Memberships
+	}
+	out := []ProjectMember{}
+	if p.OwnerID != "" {
+		out = append(out, ProjectMember{UserID: p.OwnerID, Roles: []string{"admin"}})
+	}
+	for _, id := range p.AccessMembers {
+		if id != p.OwnerID {
+			out = append(out, ProjectMember{UserID: id, Roles: []string{"developer"}})
+		}
+	}
+	return out
 }
 
 type PlatformSettings struct {

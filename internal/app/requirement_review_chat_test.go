@@ -123,7 +123,7 @@ func TestReviewSubmissionRules(t *testing.T) {
 func TestReviewConversationRecordsWhoDidWhat(t *testing.T) {
 	s, p := setup(t)
 	c := context.Background()
-	p.Memberships = []domain.ProjectMember{{UserID: "u_lin", Role: "product"}, {UserID: "u_zhou", Role: "product"}}
+	p.Memberships = []domain.ProjectMember{{UserID: "u_lin", Roles: []string{"product"}}, {UserID: "u_zhou", Roles: []string{"product"}}}
 	if err := s.Store.PutProject(c, p); err != nil {
 		t.Fatal(err)
 	}

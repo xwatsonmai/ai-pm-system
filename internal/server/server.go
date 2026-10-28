@@ -7,6 +7,7 @@ import (
 	"ai-pm-system/internal/auth"
 	"ai-pm-system/internal/domain"
 	"ai-pm-system/internal/gitrepo"
+	"ai-pm-system/internal/notify"
 	"ai-pm-system/internal/web"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -24,6 +26,8 @@ type Server struct {
 	Git   *gitrepo.Repositories
 	Agent *agent.Manager
 	Auth  *auth.Manager
+	// Notify keeps to-dos and IM channels; nil turns both off.
+	Notify *notify.Hub
 }
 
 func number(v string) int { n, _ := strconv.Atoi(v); return n }
@@ -73,6 +77,7 @@ func (s *Server) Handler() http.Handler {
 	s.authRoutes(mux)
 	s.accountRoutes(mux)
 	s.platformRoutes(mux)
+	s.notifyRoutes(mux)
 	s.oauthRoutes(mux)
 	s.repositoryRoutes(mux)
 	s.collaborationRoutes(mux)
@@ -342,7 +347,7 @@ func (s *Server) Handler() http.Handler {
 	fileServer := http.FileServer(http.FS(assets))
 	mux.Handle("/", fileServer)
 	protection := http.NewCrossOriginProtection()
-	for _, path := range []string{"/oauth/register", "/oauth/token", "/oauth/revoke", "/mcp"} {
+	for _, path := range []string{"/oauth/register", "/oauth/token", "/oauth/revoke", "/mcp", "/integrations/{name}/callback"} {
 		protection.AddInsecureBypassPattern(path)
 	}
 	protected := protection.Handler(s.requireLogin(mux))
@@ -363,7 +368,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		// Deployment tools probe health at the container address, which is not
 		// the public host behind a proxy; health reveals nothing else.
-		if host != "localhost" && host != "127.0.0.1" && host != "::1" && !(s.Auth != nil && r.Host == s.Auth.PublicHost()) && r.URL.Path != "/api/health" {
+		if host != "localhost" && host != "127.0.0.1" && host != "::1" && !(s.Auth != nil && r.Host == s.Auth.PublicHost()) && !(s.Notify != nil && slices.Contains(s.Notify.Hosts(), r.Host)) && r.URL.Path != "/api/health" {
 			fail(w, domain.ErrForbidden)
 			return
 		}

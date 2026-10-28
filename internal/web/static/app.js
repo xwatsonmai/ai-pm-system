@@ -286,7 +286,7 @@ function accountHTML() {
   if (!state.auth?.enabled)
     return '<div class="avatar" title="本地项目负责人">我</div>';
   const user = state.auth.user;
-  return `<div class="account"><div class="avatar" title="${escape(user.name)}${user.login_id ? " · " + escape(user.login_id) : ""}">${escape([...user.name][0] || "我")}</div><span class="account-name">${escape(user.name)}</span>${state.auth.login === "password" ? action("change-password", "改密", "ghost", 'aria-label="修改密码"') : ""}${action("logout", "退出", "ghost", 'aria-label="退出登录"')}</div>`;
+  return `<div class="account"><div class="avatar" title="${escape(user.name)}${user.login_id ? " · " + escape(user.login_id) : ""}">${escape([...user.name][0] || "我")}</div><span class="account-name">${escape(user.name)}</span><a class="account-link" href="${escape(appURL("/todo"))}">我的待办</a>${state.auth.login === "password" ? action("change-password", "改密", "ghost", 'aria-label="修改密码"') : ""}${action("logout", "退出", "ghost", 'aria-label="退出登录"')}</div>`;
 }
 function closeModal() {
   if (requirementEditor?.busy || requirementReview?.busy) { toast("正在上传附件或保存需求，请稍候"); return; }
@@ -329,7 +329,7 @@ async function refresh() {
   state.platform = await api("/agent/status");
   state.profiles = isPlatformAdmin() ? await api("/profiles") : [];
   if (state.page === "platform" && isPlatformAdmin()) {
-    [state.platformProjects, state.admins, state.accounts] = await Promise.all([api("/platform/projects"), api("/platform/admins"), state.auth?.login === "password" ? api("/platform/accounts") : []]);
+    [state.platformProjects, state.admins, state.accounts, state.channels] = await Promise.all([api("/platform/projects"), api("/platform/admins"), state.auth?.login === "password" ? api("/platform/accounts") : [], api("/platform/channels").then((r) => r.items).catch(() => [])]);
   }
   const saved = localStorage.getItem("pm-project");
   state.project =
@@ -908,7 +908,7 @@ function isPlatformAdmin() { return !state.auth?.enabled || state.auth?.platform
 function canManageProject(p = state.project) {
   if (isPlatformAdmin()) return true;
   const user = state.auth?.user?.id;
-  return p?.memberships?.length ? p.memberships.some((m) => m.user_id === user && m.role === "admin") : p?.owner_id === user;
+  return p?.memberships?.length ? p.memberships.some((m) => m.user_id === user && memberRoles(m).includes("admin")) : p?.owner_id === user;
 }
 function repositoryFields(p) {
   const mode = p.auth_mode || (p.id ? "server" : "none");
@@ -1029,17 +1029,18 @@ async function repositoryAction(a, button) {
     button.disabled = false;
   }
 }
-const roleNames = { developer: "开发者", product: "产品", admin: "管理员" };
-function roleOptions(selected = "developer") { return Object.entries(roleNames).map(([role, name]) => `<option value="${role}" ${selected === role ? "selected" : ""}>${name}</option>`).join(""); }
+const roleNames = { product: "产品", developer: "开发", tester: "测试", admin: "管理员" };
+function memberRoles(m) { return m.roles || (m.role ? [m.role] : []); }
+function roleChecks(selected = ["developer"], label = "项目角色") { return `<fieldset class="role-checks"><legend class="sr-only">${escape(label)}</legend>${Object.entries(roleNames).map(([role, name]) => `<label><input type="checkbox" name="roles" value="${role}" ${selected.includes(role) ? "checked" : ""}><span>${name}</span></label>`).join("")}</fieldset>`; }
 function settingsPage() {
-  return `<div class="page">${heading("项目设置", "管理项目资料、仓库和成员角色。")}<div class="settings-grid"><section class="settings-section"><h2>项目资料</h2><p>仓库用于读取和分析，发布由原有开发流程完成。</p><form id="project-form" data-id="${state.project.id}">${projectFields(state.project)}<div class="form-error"></div><button class="primary" type="submit">保存设置</button></form></section><section class="settings-section"><div class="row between"><h2>项目成员</h2>${canManageProject() ? action("invite-member", icon("plus") + " 添加成员", "ghost", `data-project="${escape(state.project.id)}"`) : ""}</div><p>开发者、产品和管理员拥有相同的业务协作能力。管理员还可以分配角色、添加和移除成员。</p><div id="project-members"><p class="hint">正在读取成员…</p></div><p class="hint">只有被分配到项目的成员可以访问。平台 Agent 由平台管理员统一配置；个人接入请进入「我的 MCP」。</p></section></div></div>`;
+  return `<div class="page">${heading("项目设置", "管理项目资料、仓库和成员角色。")}<div class="settings-grid"><section class="settings-section"><h2>项目资料</h2><p>仓库用于读取和分析，发布由原有开发流程完成。</p><form id="project-form" data-id="${state.project.id}">${projectFields(state.project)}<div class="form-error"></div><button class="primary" type="submit">保存设置</button></form></section><section class="settings-section"><div class="row between"><h2>项目成员</h2>${canManageProject() ? action("invite-member", icon("plus") + " 添加成员", "ghost", `data-project="${escape(state.project.id)}"`) : ""}</div><p>一位成员可以同时担任多个角色。角色决定谁收到哪类待办：评审和验收给产品，认领和上线给开发，测试和 Bug 验证给测试（项目里没有测试时给产品）。各角色的业务协作能力相同，管理员还可以添加、移除成员和分配角色。</p><div id="project-members"><p class="hint">正在读取成员…</p></div><p class="hint">只有被分配到项目的成员可以访问。平台 Agent 由平台管理员统一配置；个人接入请进入「我的 MCP」。</p></section></div></div>`;
 }
 async function loadProjectMembers(projectID, target = "#project-members") {
   try {
     const root = $(target); if (!root) return;
     const data = await api(`/projects/${encodeURIComponent(projectID)}/members`);
     if (!root.isConnected) return;
-    root.innerHTML = data.items.length ? `<div class="member-list">${data.items.map((m) => `<div class="member-row"><div class="grow"><strong>${escape(m.user.name)}</strong><p class="hint">${escape([m.user.login_id, m.department_name].filter(Boolean).join(" · "))}</p></div>${data.can_manage ? `<select class="member-role" data-user="${escape(m.user.id)}" aria-label="${escape(m.user.name)}的项目角色">${roleOptions(m.role)}</select>${action("save-member-role", "保存", "ghost", `data-project="${escape(projectID)}" data-user="${escape(m.user.id)}"`)}${action("remove-member", "移除", "ghost danger", `data-project="${escape(projectID)}" data-user="${escape(m.user.id)}" data-name="${escape(m.user.name)}"`)}` : `<span class="badge">${roleNames[m.role]}</span>`}</div>`).join("")}</div>` : '<p class="context-note">尚未分配成员。请先添加一位项目管理员。</p>';
+    root.innerHTML = data.items.length ? `<div class="member-list">${data.items.map((m) => `<div class="member-row"><div class="grow"><strong>${escape(m.user.name)}</strong><p class="hint">${escape([m.user.login_id, m.department_name].filter(Boolean).join(" · "))}</p></div>${data.can_manage ? `${roleChecks(memberRoles(m), `${m.user.name}的项目角色`)}${action("save-member-role", "保存", "ghost", `data-project="${escape(projectID)}" data-user="${escape(m.user.id)}"`)}${action("remove-member", "移除", "ghost danger", `data-project="${escape(projectID)}" data-user="${escape(m.user.id)}" data-name="${escape(m.user.name)}"`)}` : `<span class="member-badges">${memberRoles(m).map((r) => `<span class="badge">${roleNames[r] || escape(r)}</span>`).join("")}</span>`}</div>`).join("")}</div>` : '<p class="context-note">尚未分配成员。请先添加一位项目管理员。</p>';
   } catch (e) { if ($(target)) $(target).textContent = e.message; }
 }
 function mcpPage() {
@@ -1054,7 +1055,18 @@ async function loadMCP() {
   } catch (e) { if ($("#mcp-grants")) $("#mcp-grants").textContent = e.message; }
 }
 function platformPage() {
-  return `<div class="page">${heading("平台设置", "统一配置平台 Agent，管理平台管理员和成员项目授权。")}<div class="settings-grid"><section class="settings-section"><h2>平台 Agent</h2><p>所有项目使用同一平台 Agent 模型配置。</p><form id="platform-form">${field("默认模型", `<select name="profile_id"><option value="">暂不启用 Agent</option>${state.profiles.map((p) => `<option value="${escape(p.id)}" ${state.platform.profile_id === p.id ? "selected" : ""}>${escape(p.name)} · ${escape(p.model)}</option>`).join("")}</select>`)}<div class="form-error"></div><button type="submit" class="primary">保存平台配置</button></form><div class="divider"></div><div class="row between"><h3>模型配置</h3>${action("new-profile", icon("plus") + " 添加", "ghost")}</div>${state.profiles.map((p) => `<div class="profile-row"><span class="dot ${p.has_key ? "live" : ""}"></span><div class="grow">${escape(p.name)}<p class="hint">${escape(p.provider)} / ${escape(p.model)}</p></div>${action("edit-profile", "编辑", "ghost", `data-id="${escape(p.id)}"`)}</div>`).join("") || '<p class="hint">先添加模型配置，再选为默认模型。</p>'}<p class="hint">API Key 仅保存在服务器，不会回显。</p></section><div><section class="settings-section"><div class="row between"><h2>成员项目授权</h2>${state.auth?.directory?.syncable ? action("sync-directory", icon("refresh") + ` 同步 ${escape(state.auth.directory.label)}`, "ghost") : ""}</div><p>选择项目，搜索成员并分配开发者、产品或管理员角色。</p>${state.platformProjects.map((p) => `<div class="profile-row"><div class="grow"><strong>${escape(p.name)}</strong><p class="hint">${escape(p.description)}</p></div>${action("manage-project-members", "管理成员", "", `data-project="${escape(p.id)}"`)}</div>`).join("") || '<p class="hint">还没有项目。</p>'}</section>${accountsSection()}<section class="settings-section"><div class="row between"><h2>平台管理员</h2>${action("add-platform-admin", icon("plus") + " 添加", "ghost")}</div><p>平台管理员可进入此页面、配置 Agent 并管理所有项目成员。</p>${state.admins.map((u) => `<div class="profile-row"><div class="grow">${escape(u.name)}<p class="hint">${escape(u.login_id)}</p></div>${u.id !== "local-owner" ? action("remove-platform-admin", "移除", "ghost danger", `data-user="${escape(u.id)}" data-name="${escape(u.name)}"`) : ""}</div>`).join("")}</section></div></div></div>`;
+  return `<div class="page">${heading("平台设置", "统一配置平台 Agent，管理平台管理员和成员项目授权。")}<div class="settings-grid"><section class="settings-section"><h2>平台 Agent</h2><p>所有项目使用同一平台 Agent 模型配置。</p><form id="platform-form">${field("默认模型", `<select name="profile_id"><option value="">暂不启用 Agent</option>${state.profiles.map((p) => `<option value="${escape(p.id)}" ${state.platform.profile_id === p.id ? "selected" : ""}>${escape(p.name)} · ${escape(p.model)}</option>`).join("")}</select>`)}<div class="form-error"></div><button type="submit" class="primary">保存平台配置</button></form><div class="divider"></div><div class="row between"><h3>模型配置</h3>${action("new-profile", icon("plus") + " 添加", "ghost")}</div>${state.profiles.map((p) => `<div class="profile-row"><span class="dot ${p.has_key ? "live" : ""}"></span><div class="grow">${escape(p.name)}<p class="hint">${escape(p.provider)} / ${escape(p.model)}</p></div>${action("edit-profile", "编辑", "ghost", `data-id="${escape(p.id)}"`)}</div>`).join("") || '<p class="hint">先添加模型配置，再选为默认模型。</p>'}<p class="hint">API Key 仅保存在服务器，不会回显。</p></section><div><section class="settings-section"><div class="row between"><h2>成员项目授权</h2>${state.auth?.directory?.syncable ? action("sync-directory", icon("refresh") + ` 同步 ${escape(state.auth.directory.label)}`, "ghost") : ""}</div><p>选择项目，搜索成员并分配产品、开发、测试或管理员角色，可多选。</p>${state.platformProjects.map((p) => `<div class="profile-row"><div class="grow"><strong>${escape(p.name)}</strong><p class="hint">${escape(p.description)}</p></div>${action("manage-project-members", "管理成员", "", `data-project="${escape(p.id)}"`)}</div>`).join("") || '<p class="hint">还没有项目。</p>'}</section>${accountsSection()}${channelsSection()}<section class="settings-section"><div class="row between"><h2>平台管理员</h2>${action("add-platform-admin", icon("plus") + " 添加", "ghost")}</div><p>平台管理员可进入此页面、配置 Agent 并管理所有项目成员。</p>${state.admins.map((u) => `<div class="profile-row"><div class="grow">${escape(u.name)}<p class="hint">${escape(u.login_id)}</p></div>${u.id !== "local-owner" ? action("remove-platform-admin", "移除", "ghost danger", `data-user="${escape(u.id)}" data-name="${escape(u.name)}"`) : ""}</div>`).join("")}</section></div></div></div>`;
+}
+function channelsSection() {
+  if (!state.channels?.length) return "";
+  return `<section class="settings-section"><h2>消息推送</h2><p>把待办推送给对应的产品、开发和测试。通过、确认这类操作可以在卡片里直接完成，需要填写内容时会打开待办页面，电脑和手机都能用。成员在「我的待办」里绑定自己的账号。</p>${state.channels.map((c) => `<div class="profile-row"><span class="dot ${c.running ? "live" : ""}"></span><div class="grow">${escape(c.label)}<p class="hint">${c.running ? "已启用" : c.error ? "未能启用：" + escape(c.error) : "未启用"}</p></div>${action("configure-channel", "配置", "ghost", `data-name="${escape(c.name)}"`)}</div>`).join("")}</section>`;
+}
+function channelForm(name) {
+  const c = state.channels.find((v) => v.name === name);
+  if (!c) return;
+  const inputs = c.fields.map((f) => field(f.required ? f.label : `${f.label}（可选）`, f.secret ? `<input type="password" name="v_${escape(f.key)}" autocomplete="new-password" placeholder="${c.secrets[f.key] ? "已配置，留空保留" : escape(f.placeholder || "")}">` : `<input name="v_${escape(f.key)}" value="${escape(c.values[f.key] || "")}" placeholder="${escape(f.placeholder || "")}" autocomplete="off" spellcheck="false">`, f.hint || "")).join("");
+  const setup = c.setup?.length ? `<div class="channel-setup"><h3>在${escape(c.label)}管理后台填写</h3>${c.setup.map((s) => `<div class="channel-setup-row"><span>${escape(s.label)}</span><code>${escape(s.value)}</code></div>`).join("")}<p class="hint">修改公网地址并保存后，这里的地址会随之更新。</p></div>` : "";
+  modal(`配置${escape(c.label)}`, `<form id="channel-form" data-name="${escape(name)}"><label class="check-row"><input type="checkbox" name="enabled" ${c.enabled ? "checked" : ""}> 启用${escape(c.label)}推送</label>${field("公网地址", `<input name="public_url" value="${escape(c.public_url)}" placeholder="${escape(c.default_url || "https://pm.example.com")}" autocomplete="off" spellcheck="false">`, `${c.label}的服务器回调和成员打开待办都使用这个地址，需要能从外网访问，且是${c.label}后台登记的可信域名。留空时使用平台访问地址${c.default_url ? " " + c.default_url : ""}。`)}${inputs}<label class="check-row"><input type="checkbox" name="sign_in" ${c.sign_in ? "checked" : ""}> 已绑定的成员从${escape(c.label)}打开时免登录</label>${setup}<div class="form-error" role="alert"></div><div class="modal-actions">${action("test-channel", "发送测试消息", "", `data-name="${escape(name)}"`)}<button type="submit" class="primary">保存</button></div></form>`);
 }
 function accountsSection() {
   if (state.auth?.login !== "password") return "";
@@ -1067,7 +1079,7 @@ function departmentOptions(roots, prefix = "") {
 }
 async function employeeDialog(projectID, platform = false) {
   const project = state.projects.find((p) => p.id === projectID) || state.platformProjects.find((p) => p.id === projectID);
-  modal(platform ? "添加平台管理员" : `添加项目成员 · ${escape(project?.name || "项目")}`, `<form id="employee-search" data-project="${escape(projectID || "")}" data-platform="${platform}"><div class="row employee-search-row"><input name="q" placeholder="搜索姓名、账号或部门" aria-label="搜索成员"><button type="submit">搜索</button></div><select id="department-filter" name="department_id" aria-label="按部门筛选"><option value="">全部部门</option></select></form><p class="hint" id="directory-status" role="status">正在读取成员目录…</p><div id="employee-results"></div><form id="member-form" data-project="${escape(projectID || "")}" data-platform="${platform}" hidden><div class="selected-employee" id="selected-employee"></div>${platform ? '<p class="notice">该成员将可以配置平台 Agent，并管理所有项目的成员授权。</p>' : field("项目角色", `<select name="role">${roleOptions()}</select>`)}<div class="form-error"></div><div class="modal-actions"><button type="submit" class="primary">确认${platform ? "授予平台管理权限" : "加入项目"}</button></div></form>`);
+  modal(platform ? "添加平台管理员" : `添加项目成员 · ${escape(project?.name || "项目")}`, `<form id="employee-search" data-project="${escape(projectID || "")}" data-platform="${platform}"><div class="row employee-search-row"><input name="q" placeholder="搜索姓名、账号或部门" aria-label="搜索成员"><button type="submit">搜索</button></div><select id="department-filter" name="department_id" aria-label="按部门筛选"><option value="">全部部门</option></select></form><p class="hint" id="directory-status" role="status">正在读取成员目录…</p><div id="employee-results"></div><form id="member-form" data-project="${escape(projectID || "")}" data-platform="${platform}" hidden><div class="selected-employee" id="selected-employee"></div>${platform ? '<p class="notice">该成员将可以配置平台 Agent，并管理所有项目的成员授权。</p>' : field("项目角色", roleChecks(), "可多选。")}<div class="form-error"></div><div class="modal-actions"><button type="submit" class="primary">确认${platform ? "授予平台管理权限" : "加入项目"}</button></div></form>`);
   await searchEmployees(1);
 }
 async function searchEmployees(page = 1) {
@@ -1171,6 +1183,13 @@ async function openTask(taskID) {
       .join("")}</section>`,
     { drawer: true },
   );
+}
+// Links such as /?task=<id> from the to-do page open that task in its project.
+async function openLinkedTask(taskID) {
+  history.replaceState(null, "", "/");
+  const { task } = await api(`/tasks/${encodeURIComponent(taskID)}`);
+  if (state.project?.id !== task.project_id) await switchProject(task.project_id);
+  if (state.project?.id === task.project_id) await openTask(task.id);
 }
 async function openRequirementReview(taskID, savedTask, stillCurrent = () => true) {
  const task = savedTask || (await api(`/tasks/${taskID}`)).task;
@@ -1540,8 +1559,8 @@ document.addEventListener("click", async (event) => {
     if (a === "directory-page" || a === "retry-directory") { await searchEmployees(Number(button.dataset.page) || 1);return; }
     if (a === "save-member-role") {
       button.disabled = true;
-      const role = $("select", button.closest(".member-row")).value;
-      try { const p = await api(`/projects/${encodeURIComponent(button.dataset.project)}/members/${encodeURIComponent(button.dataset.user)}`, {role}, "PUT");if (state.project?.id === p.id) state.project = p;if (!$("dialog")) render();await loadProjectMembers(button.dataset.project);toast("成员角色已更新"); }
+      const roles = $$("input[name=roles]:checked", button.closest(".member-row")).map((v) => v.value);
+      try { const p = await api(`/projects/${encodeURIComponent(button.dataset.project)}/members/${encodeURIComponent(button.dataset.user)}`, {roles}, "PUT");if (state.project?.id === p.id) state.project = p;if (!$("dialog")) render();await loadProjectMembers(button.dataset.project);toast("成员角色已更新"); }
       finally {button.disabled = false;} return;
     }
     if (a === "remove-member" || a === "remove-platform-admin") {
@@ -1561,6 +1580,14 @@ document.addEventListener("click", async (event) => {
     }
     if (a === "switch-project") {
       await switchProject(button.dataset.id);
+      return;
+    }
+    if (a === "configure-channel") { channelForm(button.dataset.name); return; }
+    if (a === "test-channel") {
+      button.disabled = true;
+      try { await api(`/platform/channels/${encodeURIComponent(button.dataset.name)}/test`, {}); toast("测试消息已发送，请在手机或电脑上查看"); }
+      catch (e) { const error = $("#channel-form .form-error"); if (error) error.textContent = e.message; else toast(e.message); }
+      finally { button.disabled = false; }
       return;
     }
     if (a === "change-password") {
@@ -2002,7 +2029,7 @@ document.addEventListener("submit", async (event) => {
     } else if (form.id === "member-form") {
       if (!form.dataset.user) throw new Error("请先选择成员");
       if (form.dataset.platform === "true") await api(`/platform/admins/${encodeURIComponent(form.dataset.user)}`, {enabled:true}, "PUT");
-      else await api(`/projects/${encodeURIComponent(form.dataset.project)}/members/${encodeURIComponent(form.dataset.user)}`, {role:data.role}, "PUT");
+      else await api(`/projects/${encodeURIComponent(form.dataset.project)}/members/${encodeURIComponent(form.dataset.user)}`, {roles:new FormData(form).getAll("roles")}, "PUT");
       toast(form.dataset.platform === "true" ? "平台管理员已添加" : "成员已加入项目");
     } else if (form.id === "remove-access-form") {
       if (form.dataset.platform === "true") await api(`/platform/admins/${encodeURIComponent(form.dataset.user)}`, {enabled:false}, "PUT");
@@ -2021,6 +2048,10 @@ document.addEventListener("submit", async (event) => {
     } else if (form.id === "account-reset-form") {await api(`/platform/accounts/${encodeURIComponent(form.dataset.user)}`, {password:data.password}, "PATCH");toast("密码已重置，请把新的初始密码告知成员");
     } else if (form.id === "account-disable-form") {await api(`/platform/accounts/${encodeURIComponent(form.dataset.user)}`, {disabled:true}, "PATCH");toast("账号已停用");
     } else if (form.id === "platform-form") {await api("/platform/settings", {profile_id:data.profile_id}, "PUT");toast("平台 Agent 配置已保存");
+    } else if (form.id === "channel-form") {
+      const values = Object.fromEntries(Object.entries(data).filter(([k]) => k.startsWith("v_")).map(([k, v]) => [k.slice(2), v]));
+      await api(`/platform/channels/${encodeURIComponent(form.dataset.name)}`, {enabled:data.enabled === "on", sign_in:data.sign_in === "on", public_url:data.public_url, values}, "PUT");
+      toast("消息推送配置已保存");
     } else if (form.id === "disable-mcp-form") {await api("/mcp", {enabled:false}, "PUT");closeModal();await loadMCP();toast("个人 MCP 已关闭，授权已撤销");return;
     } else if (form.id === "project-form") {
       const project = {
@@ -2165,6 +2196,8 @@ try {
     await refresh();
     render();
     pollActiveRuns();
+    const linked = new URLSearchParams(location.search).get("task");
+    if (linked) openLinkedTask(linked).catch((e) => toast(e.message));
   }
 } catch (e) {
   if (signInPending()) renderLogin(e.message);

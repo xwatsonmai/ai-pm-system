@@ -34,7 +34,7 @@ func TestDesktopAttachmentOAuthIsReadOnlyProjectScopedAndRevocable(t *testing.T)
 				t.Fatal(err)
 			}
 			for _, p := range []*domain.Project{&project, &other} {
-				p.Memberships = []domain.ProjectMember{{UserID: "local-owner", Role: "admin"}, {UserID: "employee", Role: "developer"}}
+				p.Memberships = []domain.ProjectMember{{UserID: "local-owner", Roles: []string{"admin"}}, {UserID: "employee", Roles: []string{"developer"}}}
 				if err = db.PutProject(ctx, *p); err != nil {
 					t.Fatal(err)
 				}
@@ -115,7 +115,7 @@ func TestDesktopAttachmentOAuthIsReadOnlyProjectScopedAndRevocable(t *testing.T)
 				t.Fatal(err)
 			}
 			request("GET", path, "valid", 401)
-			project.Memberships = append(project.Memberships, domain.ProjectMember{UserID: "employee", Role: "developer"})
+			project.Memberships = append(project.Memberships, domain.ProjectMember{UserID: "employee", Roles: []string{"developer"}})
 			if err = db.PutProject(ctx, project); err != nil {
 				t.Fatal(err)
 			}
