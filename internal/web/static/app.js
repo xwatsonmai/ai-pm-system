@@ -1121,8 +1121,6 @@ async function openTask(taskID) {
   if (t.status === "done") buttons += action("iterate-task", "追加迭代", "primary", `data-id="${t.id}"`);
   if (t.status === "clarify")
     buttons += action("requirement-review", "继续需求评审", "primary", `data-id="${t.id}"`);
-  if (t.status === "ready" && t.alignment?.status !== "replied")
-    buttons += action("claim", "开始处理", "primary", `data-id="${t.id}"`);
   if (t.status === "aligning") buttons += action("requirement-review", "回复开发对齐", "primary", `data-id="${t.id}"`);
   if (t.status === "ready" && t.alignment?.status === "replied") buttons += action("requirement-review", "查看对齐回复", "primary", `data-id="${t.id}"`) + action("reopen-claim", "重新开放领取", "", `data-id="${t.id}" data-version="${t.version}" data-revision="${t.revision}"`);
   if (t.status === "doing")
@@ -1664,16 +1662,6 @@ document.addEventListener("click", async (event) => {
         await refresh();render();await openTask(button.dataset.id);
         toast("已追加对齐内容并重新开放领取");
       } finally { if (button.isConnected) button.disabled=false; }
-      return;
-    }
-    if (a === "ready" || a === "claim") {
-      await api(`/tasks/${button.dataset.id}/actions`, {
-        action: a,
-        request_id: id(),
-      });
-      await refresh();
-      render();
-      await openTask(button.dataset.id);
       return;
     }
     if (a === "release") {

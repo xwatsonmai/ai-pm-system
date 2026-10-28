@@ -22,7 +22,7 @@ func testingRequirement(t *testing.T, s *app.Service, p string) domain.Task {
 	t.Helper()
 	c := context.Background()
 	task := create(t, s, p)
-	m, e := s.Act(c, app.Human(), task.ID, app.Action{Action: "claim", RequestID: domain.ID("claim_"), Branch: "feature/refund"})
+	m, e := s.Act(c, developer(p, "dev"), task.ID, app.Action{Action: "claim", RequestID: domain.ID("claim_"), Branch: "feature/refund"})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -112,7 +112,7 @@ func TestTestingBugReviewRepairAndRetest(t *testing.T) {
 	if _, e := s.SaveRequirementReview(c, app.Human(), second.ID, app.RequirementReviewInput{Action: "confirm_rejection", Generation: reject.Generation, RequestID: "close-bug"}); e != nil {
 		t.Fatal(e)
 	}
-	m, e := s.Act(c, app.Human(), first.ID, app.Action{Action: "claim", RequestID: "bug-claim", Branch: "fix/duplicate"})
+	m, e := s.Act(c, developer(p.ID, "dev"), first.ID, app.Action{Action: "claim", RequestID: "bug-claim", Branch: "fix/duplicate"})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -305,7 +305,11 @@ func TestPlatformBugTestingCanReturnWithoutReturningRequirement(t *testing.T) {
 		{Action: "claim", Branch: "fix/platform", RequestID: "platform-claim"},
 		{Action: "submit", Revision: m.Task.Revision, RequestID: "platform-submit", Submission: &domain.Submission{SHA: strings.Repeat("b", 40), Summary: "修复", Tests: "自测"}},
 	} {
-		m, err = s.Act(c, app.Human(), m.Task.ID, a)
+		actor := app.Human()
+		if a.Action == "claim" {
+			actor = developer(p.ID, "dev")
+		}
+		m, err = s.Act(c, actor, m.Task.ID, a)
 		if err != nil {
 			t.Fatal(err)
 		}

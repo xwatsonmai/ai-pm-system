@@ -87,7 +87,8 @@ try {
   await page.setViewportSize({width:1440,height:1000});
   await page.locator('[data-review-action=details]').first().click();
   await page.getByRole('button',{name:'重新开放领取',exact:true}).click();
-  await page.getByRole('button',{name:'开始处理',exact:true}).waitFor();
+  await page.getByRole('button',{name:'重新开放领取',exact:true}).waitFor({state:'detached'});
+  assert.equal(await page.getByRole('button',{name:'开始处理',exact:true}).count(),0);
   context=await api(`/tasks/${made.task.id}`);
   assert.equal(context.task.status,'ready');assert.equal(context.task.alignment,undefined);
   assert.match(context.task.description,/需求评审对齐补充/);assert.match(context.task.description,/这一轮不用表单/);

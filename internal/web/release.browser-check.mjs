@@ -18,6 +18,9 @@ const server=process.env.AI_PM_QA_BASE_URL ? null : spawn(resolve(process.env.AI
 const browser=await chromium.launch({headless:true}),page=await browser.newPage({viewport:{width:1440,height:1000},reducedMotion:'reduce'}),errors=[];
 page.on('pageerror',e=>errors.push(e.message));
 async function api(path,body,method){const r=await fetch(base+'/api'+path,{method:method||(body?'POST':'GET'),headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});const v=await r.json();assert(r.ok,JSON.stringify(v));return v;}
+// Claiming is development work, so it only happens through the developer MCP.
+let mcpSeq=0;
+async function claim(token,args){const r=await fetch(base+'/mcp',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',Accept:'application/json, text/event-stream','MCP-Protocol-Version':'2025-11-25'},body:JSON.stringify({jsonrpc:'2.0',id:++mcpSeq,method:'tools/call',params:{name:'task_claim',arguments:args}})});const v=await r.json();assert(r.ok&&!v.error&&!v.result.isError,JSON.stringify(v));return JSON.parse(v.result.content[0].text);}
 const report={};
 try {
  for(let n=0;n<100;n++){try{if((await fetch(base+'/api/health')).ok)break;}catch{}await new Promise(done=>setTimeout(done,50));}
@@ -27,7 +30,11 @@ try {
  await api(path+'/actions',{action:'ready',request_id:'ready'});
  const current=async()=> (await api(path)).task;
  await page.goto(base);await page.getByRole('button',{name:'需求池',exact:true}).click();
- await page.locator('.task-table tbody tr').click();await page.getByRole('button',{name:'开始处理',exact:true}).click();
+ await page.locator('.task-table tbody tr').click();await page.locator('.detail-title').waitFor();
+ assert.equal(await page.getByRole('button',{name:'开始处理',exact:true}).count(),0,'web must not offer claiming');
+ const developer=await api(`/projects/${project.id}/tokens`,{name:'开发客户端'});
+ await claim(developer.secret,{task_id:task.id,request_id:'claim'});
+ await page.goto(base);await page.getByRole('button',{name:'需求池',exact:true}).click();await page.locator('.task-table tbody tr').click();
  const submit=async version=>{
   await page.getByRole('button',{name:'提交开发结果',exact:true}).click();
   await page.locator('#submit-form [name=branch]').fill('feature/release');

@@ -84,7 +84,8 @@ func TestRealRepositorySyncAndVersionReads(t *testing.T) {
 	if _, e = s.Act(c, app.Human(), m.Task.ID, app.Action{Action: "ready", RequestID: "ready-feature"}); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = s.Act(c, app.Human(), m.Task.ID, app.Action{Action: "claim", RequestID: "claim-feature", Branch: "feature/refund"}); e != nil {
+	dev := domain.Actor{ID: "dev", Name: "dev", Kind: "developer", ProjectID: p.ID}
+	if _, e = s.Act(c, dev, m.Task.ID, app.Action{Action: "claim", RequestID: "claim-feature", Branch: "feature/refund"}); e != nil {
 		t.Fatal(e)
 	}
 	changes := 0

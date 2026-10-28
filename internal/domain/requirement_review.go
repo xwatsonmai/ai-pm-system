@@ -124,15 +124,14 @@ type RequirementReviewResult struct {
 
 // Evidence records what was actually read, independently of the model's memory.
 type RequirementReviewEvidence struct {
-	CatalogFingerprint string                       `json:"catalog_fingerprint"`
-	References         []RequirementReviewReference `json:"references"`
+	References []RequirementReviewReference `json:"references"`
 }
 
 type RequirementReviewReference struct {
-	Title         string `json:"title,omitempty"`
-	TaskID        string `json:"task_id"`
-	Revision      int    `json:"revision"`
-	ReviewVersion int    `json:"review_version"`
+	Title    string `json:"title,omitempty"`
+	TaskID   string `json:"task_id"`
+	Revision int    `json:"revision"`
+	Ended    bool   `json:"ended,omitempty"` // closing does not change the revision
 }
 
 type RequirementRelation struct {

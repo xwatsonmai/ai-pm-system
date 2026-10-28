@@ -485,12 +485,7 @@ func (m *Manager) execute(ctx context.Context, r domain.Run, profile domain.Prof
 	_ = m.saveRun(r)
 	actor := domain.Actor{ID: "platform", Name: "平台 Agent", Kind: "platform", ProjectID: r.ProjectID}
 	if r.Kind == "requirement_review" {
-		fp, err := m.App.ReviewCatalogFingerprint(ctx, r.ProjectID, r.TaskID)
-		if err != nil {
-			m.fail(ctx, r, err)
-			return
-		}
-		r.ReviewEvidence = &domain.RequirementReviewEvidence{CatalogFingerprint: fp, References: []domain.RequirementReviewReference{}}
+		r.ReviewEvidence = &domain.RequirementReviewEvidence{References: []domain.RequirementReviewReference{}}
 	}
 	contextData, e := m.initialContext(ctx, actor, r)
 	if e != nil {

@@ -153,7 +153,9 @@ test('derived states appear at the end: current failure, recheck, closure and a 
   assert.equal(legacyFailure.at(-1).text,'评审没有完成：模型未配置');assert.equal(legacyFailure.at(-1).button.label,'重试评审');
   const recorded=chatTimeline({...base,status:'failed',messages:[...base.messages,{id:'f',role:'system',action:'review_failed',body:'评审没有完成：超时',at:2}]});
   assert.equal(recorded.length,2);assert.equal(recorded.at(-1).button.action,'retry');
-  assert.equal(chatTimeline({...base,status:'needs_input',needs_recheck:true,recheck_reason:'关联需求有更新'}).at(-1).button.label,'重新核对');
+  const recheck = chatTimeline({...base,status:'needs_input',needs_recheck:true,recheck_reason:'需求「模板积分」有修改。确认前需要重新核查与本需求的交叉与冲突。'}).at(-1);
+  assert.equal(recheck.text,'需求「模板积分」有修改。确认前需要重新核查与本需求的交叉与冲突。');
+  assert.equal(recheck.button.label,'重新核对');
   assert.equal(chatTimeline({...base,status:'running'}).at(-1).text,'Agent 正在评审');
   assert.equal(chatTimeline({...base,status:'queued'}).at(-1).type,'typing');
   const closed=chatTimeline({...base,status:'closed',source:{status:'closed'},messages:[...base.messages,{id:'x',role:'system',action:'task_closed',body:'周航 关闭了需求：并入其他需求',at:2}]});

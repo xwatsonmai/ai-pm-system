@@ -37,7 +37,11 @@ func acceptIterationTask(t *testing.T, s *app.Service, task domain.Task) domain.
 			}
 			in.Review = &domain.Review{Revision: task.Revision, SHA: task.Submission.SHA, Environment: "生产", Checks: checks, Note: "业务验收通过"}
 		}
-		next, e := s.Act(c, app.Human(), task.ID, in)
+		actor := app.Human()
+		if stage == "claim" {
+			actor = developer(task.ProjectID, "dev")
+		}
+		next, e := s.Act(c, actor, task.ID, in)
 		if e != nil {
 			t.Fatal(stage, e)
 		}

@@ -509,8 +509,10 @@ func (s *Service) actTask(c context.Context, a domain.Actor, id string, in Actio
 		t.Status = "ready"
 		body = "确认范围，进入待认领"
 	case "claim":
-		if a.Kind == "platform" {
-			return domain.Mutation{}, domain.ErrForbidden
+		// Development happens in an MCP client; the web confirms requirements and
+		// can hand work back, but never claims it.
+		if a.Kind != "developer" {
+			return domain.Mutation{}, fmt.Errorf("%w: 需求只能由开发代理通过 MCP 领取", domain.ErrForbidden)
 		}
 		if alignmentReserved(t) {
 			return domain.Mutation{}, fmt.Errorf("%w: 仅原 MCP 客户端可阅读对齐回复后调用 task_resume_development；无法继续时由产品重新开放领取", domain.ErrConflict)

@@ -32,13 +32,9 @@ func TestReviewDependenciesRequireRecheckWithoutRewritingOtherTasks(t *testing.T
 		return v
 	}
 	av, bv := start(first.ID, "start-a"), start(second.ID, "start-b")
-	fp, e := s.ReviewCatalogFingerprint(c, p.ID, first.ID)
-	if e != nil {
-		t.Fatal(e)
-	}
 	ready := &domain.RequirementReviewResult{Body: "已确认范围", Decision: "ready", Questions: []domain.RequirementQuestion{}, Proposal: &domain.RequirementProposal{Description: "显示像素宽高", Acceptance: []string{"可见宽高"}}}
-	evidence := &domain.RequirementReviewEvidence{CatalogFingerprint: fp, References: []domain.RequirementReviewReference{{TaskID: second.ID, Revision: second.Revision, ReviewVersion: bv.Version}}}
-	if e = s.FinishRequirementReview(c, first.ID, av.Generation, "", ready, "", evidence); e != nil {
+	evidence := &domain.RequirementReviewEvidence{References: []domain.RequirementReviewReference{{TaskID: second.ID, Revision: second.Revision}}}
+	if e := s.FinishRequirementReview(c, first.ID, av.Generation, "", ready, "", evidence); e != nil {
 		t.Fatal(e)
 	}
 	av, _ = s.RequirementReview(c, a, first.ID)
@@ -47,12 +43,15 @@ func TestReviewDependenciesRequireRecheckWithoutRewritingOtherTasks(t *testing.T
 	}
 	time.Sleep(2 * time.Millisecond)
 	conflict := &domain.RequirementReviewResult{Body: "导出单位存在冲突", Decision: "clarify", Relations: []domain.RequirementRelation{{TaskID: first.ID, Kind: "conflict", Reason: "一个要求像素，一个要求毫米，需确认统一口径"}}}
-	if e = s.FinishRequirementReview(c, second.ID, bv.Generation, "", conflict, ""); e != nil {
+	if e := s.FinishRequirementReview(c, second.ID, bv.Generation, "", conflict, ""); e != nil {
 		t.Fatal(e)
 	}
-	av, e = s.RequirementReview(c, a, first.ID)
+	av, e := s.RequirementReview(c, a, first.ID)
 	if e != nil || !av.NeedsRecheck || len(av.IncomingRelations) != 1 || av.IncomingRelations[0].TaskID != second.ID {
 		t.Fatal(av, e)
+	}
+	if !strings.Contains(av.RecheckReason, "「导出尺寸」") {
+		t.Fatal("conflict source not named:", av.RecheckReason)
 	}
 	_, e = s.SaveRequirementReview(c, a, first.ID, app.RequirementReviewInput{Action: "confirm", RequestID: "stale-confirm", Generation: av.Generation})
 	if !errors.Is(e, domain.ErrConflict) {
@@ -66,8 +65,6 @@ func TestReviewDependenciesRequireRecheckWithoutRewritingOtherTasks(t *testing.T
 	if e != nil {
 		t.Fatal(e)
 	}
-	currentB, _ := s.Store.GetRequirementReview(c, second.ID)
-	evidence.References[0].ReviewVersion = currentB.Version
 	if e = s.FinishRequirementReview(c, first.ID, av.Generation, "", ready, "", evidence); e != nil {
 		t.Fatal(e)
 	}
@@ -76,13 +73,29 @@ func TestReviewDependenciesRequireRecheckWithoutRewritingOtherTasks(t *testing.T
 	}
 }
 
-func TestReviewCatalogIgnoresDevelopmentProgressButDetectsNewScope(t *testing.T) {
+// Later requirements check themselves against earlier ones, so new
+// requirements, unread edits, development progress and other reviews moving on
+// leave an earlier review confirmable.
+func TestEarlierReviewStaysFixedAsLaterRequirementsArrive(t *testing.T) {
 	s, p := setup(t)
 	c := context.Background()
 	a := app.Human()
 	x, _ := s.CreateTask(c, a, p.ID, app.TaskInput{Title: "本需求", RequestID: "x"})
-	y, _ := s.CreateTask(c, a, p.ID, app.TaskInput{Title: "另一个需求", Description: strings.Repeat("范围", 1000), RequestID: "y"})
-	before, _ := s.ReviewCatalogFingerprint(c, p.ID, x.Task.ID)
+	y, _ := s.CreateTask(c, a, p.ID, app.TaskInput{Title: "模板积分", Description: strings.Repeat("范围", 1000), RequestID: "y"})
+	other, _ := s.CreateTask(c, a, p.ID, app.TaskInput{Title: "无关需求", RequestID: "other"})
+	v := domain.RequirementReview{TaskID: x.Task.ID, ProjectID: p.ID, Evidence: &domain.RequirementReviewEvidence{References: []domain.RequirementReviewReference{{TaskID: y.Task.ID, Revision: y.Task.Revision}}}}
+	fixed := func(after string) {
+		t.Helper()
+		if r, e := s.ReviewRecheckReason(c, v); e != nil || r != "" {
+			t.Fatal("locked after "+after+":", r, e)
+		}
+	}
+	_, _ = s.CreateTask(c, a, p.ID, app.TaskInput{Title: "新增范围", RequestID: "z"})
+	fixed("a new requirement")
+	if _, e := s.EditTask(c, a, other.Task.ID, app.TaskInput{Title: "无关需求", Description: "改了范围", Version: other.Task.Version, RequestID: "edit-other"}); e != nil {
+		t.Fatal(e)
+	}
+	fixed("an unread edit")
 	changed := y.Task
 	changed.Status = "doing"
 	changed.Submission = &domain.Submission{Summary: "不进入评审的开发日志"}
@@ -90,17 +103,52 @@ func TestReviewCatalogIgnoresDevelopmentProgressButDetectsNewScope(t *testing.T)
 	if e := s.Store.CommitTask(c, changed, y.Task.Version, domain.Event{ProjectID: p.ID, TaskID: changed.ID, Kind: "fixture-progress"}, nil); e != nil {
 		t.Fatal(e)
 	}
-	after, _ := s.ReviewCatalogFingerprint(c, p.ID, x.Task.ID)
-	if before != after {
-		t.Fatal("development progress invalidates product review")
+	fixed("development progress")
+	// Rechecking either side used to bump its review and lock the other again.
+	if _, e := s.SaveRequirementReview(c, a, y.Task.ID, app.RequirementReviewInput{Action: "start", RequestID: "start-y"}); e != nil {
+		t.Fatal(e)
 	}
+	fixed("the read requirement's review moved on")
 	pool, e := s.RequirementPool(c, a, p.ID, app.RequirementPoolQuery{Limit: 1})
 	if e != nil || !pool.HasMore || len([]rune(pool.Items[0].ScopeSummary)) > 330 {
 		t.Fatal(pool, e)
 	}
-	_, _ = s.CreateTask(c, a, p.ID, app.TaskInput{Title: "新增范围", RequestID: "z"})
-	after, _ = s.ReviewCatalogFingerprint(c, p.ID, x.Task.ID)
-	if before == after {
-		t.Fatal("new scope was ignored")
+}
+
+func TestReviewRecheckNamesChangedReferences(t *testing.T) {
+	s, p := setup(t)
+	c := context.Background()
+	a := app.Human()
+	x, _ := s.CreateTask(c, a, p.ID, app.TaskInput{Title: "本需求", RequestID: "x"})
+	y, _ := s.CreateTask(c, a, p.ID, app.TaskInput{Title: "模板积分", Description: "点数", RequestID: "y"})
+	v := domain.RequirementReview{TaskID: x.Task.ID, ProjectID: p.ID, Evidence: &domain.RequirementReviewEvidence{References: []domain.RequirementReviewReference{{TaskID: y.Task.ID, Revision: y.Task.Revision}}}}
+	reason := func() string {
+		t.Helper()
+		r, e := s.ReviewRecheckReason(c, v)
+		if e != nil {
+			t.Fatal(e)
+		}
+		return r
+	}
+	edited, e := s.EditTask(c, a, y.Task.ID, app.TaskInput{Title: "模板积分", Description: "点数支持两位小数", Version: y.Task.Version, RequestID: "edit-y"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if r := reason(); r != "评审参考的需求「模板积分」有修改，确认前需要重新核对。" {
+		t.Fatal(r)
+	}
+	v.Evidence.References[0].Revision = edited.Task.Revision
+	if r := reason(); r != "" {
+		t.Fatal("rechecked reference still locked:", r)
+	}
+	if _, e = s.Act(c, a, y.Task.ID, app.Action{Action: "close", Body: "并入其他需求", RequestID: "close-y"}); e != nil {
+		t.Fatal(e)
+	}
+	if r := reason(); r != "评审参考的需求「模板积分」已结束，确认前需要重新核对。" {
+		t.Fatal(r)
+	}
+	v.Evidence.References[0].Ended = true // read again after it ended
+	if r := reason(); r != "" {
+		t.Fatal("ended reference read after closing still locked:", r)
 	}
 }

@@ -113,7 +113,7 @@ func recordReviewReference(r *domain.Run, detail app.RequirementDetailResult) {
 	if r.ReviewEvidence == nil || detail.Task.ID == r.TaskID {
 		return
 	}
-	ref := domain.RequirementReviewReference{TaskID: detail.Task.ID, Title: detail.Task.Title, Revision: detail.Task.Revision, ReviewVersion: detail.Review.Version}
+	ref := domain.RequirementReviewReference{TaskID: detail.Task.ID, Title: detail.Task.Title, Revision: detail.Task.Revision, Ended: domain.TaskTerminated(detail.Task.Status)}
 	for i, v := range r.ReviewEvidence.References {
 		if v.TaskID == ref.TaskID {
 			r.ReviewEvidence.References[i] = ref
