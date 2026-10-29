@@ -109,7 +109,12 @@ try {
     repository_auth: { mode: "server" },
     branch: "main",
   });
-  await api(`/projects/${project.id}/sync`, {});
+  for (let n = 0; n < 100; n++) {
+    const status = await api(`/projects/${project.id}/repository-status`);
+    if (!status.syncing) { assert.equal(status.sha, sha); break; }
+    assert(n < 99, 'initial automatic sync did not finish');
+    await new Promise(done => setTimeout(done, 50));
+  }
   await page.goto(base);
   await nav("项目版本");
   await page

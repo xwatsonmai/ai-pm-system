@@ -85,6 +85,7 @@ func TestProjectMembershipAndCredentialBoundaries(t *testing.T) {
 		call(member, method, "/api/projects/"+p.ID+"/tokens", `{"name":"steal"}`, 403)
 	}
 	call(outsider, "GET", "/api/projects/"+p.ID+"/repository-auth", "", 403)
+	call(outsider, "GET", "/api/projects/"+p.ID+"/repository-status", "", 403)
 	call(outsider, "PUT", "/api/projects/"+p.ID, `{"name":"takeover"}`, 403)
 	call(outsider, "POST", "/api/repository/test", `{"project_id":"`+p.ID+`","repository":"https://git.example.test/team/private.git","repository_auth":{"mode":"token"}}`, 403)
 	meta := call(owner, "GET", "/api/projects/"+p.ID+"/repository-auth", "", 200)

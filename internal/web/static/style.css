@@ -844,6 +844,8 @@ label {
   line-height: 1.7;
   margin-bottom: 18px;
 }
+#repository-status:not(:empty) { margin: 16px 32px 0; }
+#repository-status .notice { margin-bottom: 0; }
 .notice.info {
   background: #f5f3fa;
   border-color: #b6a8cf;

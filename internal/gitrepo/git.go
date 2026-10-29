@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -64,13 +65,56 @@ func command(ctx context.Context, dir string, args ...string) (string, error) {
 	return out.String(), nil
 }
 func (r *Repositories) path(p string) string { return filepath.Join(r.Root, p) }
+
+type repositorySync struct {
+	sync.Mutex
+	running atomic.Bool
+}
+
+func (m *repositorySync) finish() {
+	m.running.Store(false)
+	m.Unlock()
+}
+
+func (r *Repositories) syncLock(id string) *repositorySync {
+	lock, _ := r.locks.LoadOrStore(id, &repositorySync{})
+	return lock.(*repositorySync)
+}
+
+// Syncing reports work actually holding the per-project sync lock, including
+// background work accepted before the creation response is sent.
+func (r *Repositories) Syncing(id string) bool {
+	if state, ok := r.locks.Load(id); ok {
+		return state.(*repositorySync).running.Load()
+	}
+	return false
+}
+
+// SyncAsync survives the originating HTTP request, with the same timeout and
+// lock as manual and scheduled syncs. Failures are saved on the project.
+func (r *Repositories) SyncAsync(ctx context.Context, id string) {
+	m := r.syncLock(id)
+	if !m.TryLock() {
+		return
+	}
+	m.running.Store(true)
+	go func() {
+		defer m.finish()
+		_ = r.syncProject(context.WithoutCancel(ctx), id)
+	}()
+}
+
 func (r *Repositories) Sync(ctx context.Context, id string) error {
-	lock, _ := r.locks.LoadOrStore(id, &sync.Mutex{})
-	m := lock.(*sync.Mutex)
+	m := r.syncLock(id)
 	if !m.TryLock() {
 		return errors.New("仓库正在同步")
 	}
-	defer m.Unlock()
+	m.running.Store(true)
+	defer m.finish()
+	return r.syncProject(ctx, id)
+}
+
+func (r *Repositories) syncProject(ctx context.Context, id string) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	p, err := r.App.Store.GetProject(ctx, id)
@@ -177,6 +221,15 @@ func (r *Repositories) sync(c context.Context, p domain.Project) error {
 var shaPattern = regexp.MustCompile(`^[a-fA-F0-9]{40,64}$`)
 
 func (r *Repositories) resolve(c context.Context, p, ref string) (string, error) {
+	if _, e := os.Stat(filepath.Join(r.path(p), "HEAD")); e != nil {
+		if os.IsNotExist(e) {
+			if r.Syncing(p) {
+				return "", errors.New("仓库正在同步，请稍后再读取代码")
+			}
+			return "", errors.New("仓库尚未同步，请先同步仓库后再读取代码")
+		}
+		return "", errors.New("无法读取本地仓库，请检查服务端目录权限")
+	}
 	if shaPattern.MatchString(ref) {
 		s, e := command(c, r.path(p), "rev-parse", "--verify", ref+"^{commit}")
 		return strings.TrimSpace(s), e
@@ -188,7 +241,7 @@ func (r *Repositories) resolve(c context.Context, p, ref string) (string, error)
 		}
 		ref = project.Branch
 	}
-	if _, e := command(c, r.path(p), "check-ref-format", "refs/heads/"+ref); e != nil {
+	if _, e := command(c, "", "check-ref-format", "refs/heads/"+ref); e != nil {
 		return "", errors.New("分支名称不合法")
 	}
 	s, e := command(c, r.path(p), "rev-parse", "--verify", "refs/heads/"+ref+"^{commit}")

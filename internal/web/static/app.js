@@ -426,13 +426,42 @@ function render() {
       )
       .join(
         "",
-      )}</nav><div class="side-caption">个人与平台</div><nav class="nav">${action("navigate", icon("code") + " 我的 MCP", state.page === "mcp" ? "active" : "", 'data-page="mcp"')}${isPlatformAdmin() ? action("navigate", icon("settings") + " 平台设置", state.page === "platform" ? "active" : "", 'data-page="platform"') : ""}</nav><div class="sidebar-bottom"><div class="agent-indicator"><span class="dot ${state.platform.configured ? "live" : ""}"></span>${state.platform.configured ? "平台 Agent 已配置" : "平台 Agent 待配置"}</div><div class="local-label"><span>项目工作台</span><span>v0.1</span></div></div></aside><main class="main"><header class="topbar"><div class="breadcrumbs">${action("menu", icon("menu"), "ghost icon-only mobile-menu", 'aria-label="打开导航"')}<span>${escape(project?.name || "工作空间")}</span><span>/</span><strong>${paths[state.page]}</strong></div><div class="row">${project && !["mcp", "platform"].includes(state.page) ? action("new-task", icon("plus") + " 创建需求", "header-new") : action("new-project", icon("plus") + " 创建项目", "header-new")}${accountHTML()}</div></header><div id="page"></div></main></div>`;
+      )}</nav><div class="side-caption">个人与平台</div><nav class="nav">${action("navigate", icon("code") + " 我的 MCP", state.page === "mcp" ? "active" : "", 'data-page="mcp"')}${isPlatformAdmin() ? action("navigate", icon("settings") + " 平台设置", state.page === "platform" ? "active" : "", 'data-page="platform"') : ""}</nav><div class="sidebar-bottom"><div class="agent-indicator"><span class="dot ${state.platform.configured ? "live" : ""}"></span>${state.platform.configured ? "平台 Agent 已配置" : "平台 Agent 待配置"}</div><div class="local-label"><span>项目工作台</span><span>v0.1</span></div></div></aside><main class="main"><header class="topbar"><div class="breadcrumbs">${action("menu", icon("menu"), "ghost icon-only mobile-menu", 'aria-label="打开导航"')}<span>${escape(project?.name || "工作空间")}</span><span>/</span><strong>${paths[state.page]}</strong></div><div class="row">${project && !["mcp", "platform"].includes(state.page) ? action("new-task", icon("plus") + " 创建需求", "header-new") : action("new-project", icon("plus") + " 创建项目", "header-new")}${accountHTML()}</div></header><div id="repository-status" aria-live="polite"></div><div id="page"></div></main></div>`;
   renderPage();
 }
+function updateRepositoryStatus() {
+  const target = $("#repository-status"), p = state.project;
+  if (!target) return;
+  const visible = p?.repository && !["mcp", "platform"].includes(state.page);
+  const message = !visible ? "" : p.syncing
+    ? '<div class="notice info">正在同步代码仓库，完成后即可读取和分析代码。</div>'
+    : p.sync_error ? `<div class="notice">仓库同步失败：${escape(p.sync_error)} ${action("sync", "重试同步", "ghost")}</div>` : "";
+  patchHTML(target, message);
+  $$("button[data-action=sync]", $("#page")).forEach((button) => { button.disabled = !!p?.syncing; });
+}
+
+let repositoryRefreshing = false;
+setInterval(async () => {
+  if (repositoryRefreshing || document.hidden || state.switchingProject || !state.project?.syncing) return;
+  repositoryRefreshing = true;
+  const projectID = state.project.id;
+  try {
+    const p = await api(`/projects/${projectID}/repository-status`);
+    if (state.project?.id !== projectID || state.switchingProject) return;
+    const receipt = {sha: p.sha, synced_at: p.synced_at, sync_error: p.sync_error, syncing: p.syncing};
+    Object.assign(state.project, receipt);
+    if (state.context?.project?.id === projectID) Object.assign(state.context.project, receipt);
+    updateRepositoryStatus();
+    if (!p.syncing && !$("dialog") && ["overview", "code"].includes(state.page)) renderPage();
+  } catch { /* Keep the last known state until the next successful status read. */ }
+  finally { repositoryRefreshing = false; }
+}, 2500);
+
 function heading(title, description = "", buttons = "") {
   return `<div class="page-heading"><div><div class="eyebrow">${escape(state.project?.name || "WORKSPACE")}</div><h1>${title}</h1><p>${description}</p></div><div class="row">${buttons}</div></div>`;
 }
 function renderPage() {
+  updateRepositoryStatus();
   if (signInPending()) {
     renderLogin();
     return;
@@ -472,6 +501,7 @@ function renderPage() {
   }
   if (state.page === "settings") { loadProjectMembers(state.project.id); loadRepositoryAuth(); }
   if (state.page === "code" && state.project.sha) loadFiles();
+  updateRepositoryStatus();
 }
 function taskRow(t) {
   return `<div class="list-row" role="button" tabindex="0" data-action="open-task" data-id="${t.id}"><i class="status-icon ${t.status}"></i><div class="grow"><div class="title">${escape(t.title)}</div><div class="subtitle">${t.kind === "bug" ? (t.parent_requirement_id ? "需求测试 Bug" : "平台 Bug") : "迭代需求"} · ${short(t.id)}${t.owner ? " · " + escape(t.owner) : ""}</div></div><div class="right">${t.blocker ? '<span class="badge blocked">阻塞</span>' : status(t)}</div></div>`;
@@ -507,7 +537,7 @@ function overview() {
     )
     .join(
       "",
-    )}</div>${state.project.sync_error ? `<div class="notice">仓库同步未完成：${escape(state.project.sync_error)}</div>` : ""}<div class="overview-grid"><div><h2 class="section-label">当前工作 ${action("navigate", "查看全部 " + icon("arrow"), "ghost", 'data-page="tasks"')}</h2>${now.length ? now.map(taskRow).join("") : empty("当前没有推进中的需求", "提出一个需求，或记录一个需要处理的问题。", action("new-task", icon("plus") + " 创建需求"))}<div class="divider"></div><h2 class="section-label">项目进度解读 ${action("analyze", "更新分析", "ghost", 'data-kind="progress"')}</h2>${evidence ? `<div class="prewrap">${escape(evidence.body)}</div><p class="hint">平台 Agent · ${date(evidence.at)} · 结论依据可在记录中查看</p>` : `<div class="context-note">${state.platform.configured ? "点击更新分析，让平台 Agent 对照需求和 Git 变化解释进度。" : "由平台管理员配置 Agent 模型后，平台 Agent 将结合需求、Git 与开发汇报分析进度。"}</div>`}</div><aside class="context-column"><section><h2 class="section-label">仓库观察</h2><p class="context-note"><strong>${escape(state.project.branch)}</strong><br>${state.project.sha ? `<span class="mono">${state.project.sha.slice(0, 12)}</span>` : "尚未读取代码"}<br>最近同步 ${date(state.project.synced_at)}</p>${action("navigate", "查看代码与变更 " + icon("arrow"), "inline-link", 'data-page="code"')}<p class="page-note">代码状态与上线记录分别记录。<br>按需求确认上线版本和环境。</p></section><section><h2 class="section-label">最近动态</h2>${events.length ? events.map((e) => `<div class="event"><p>${escape(e.body || e.kind)}</p><time>${escape(e.actor)} · ${date(e.at)}</time></div>`).join("") : '<p class="context-note">项目活动会记录在这里。</p>'}</section></aside></div></div>`;
+    )}</div><div class="overview-grid"><div><h2 class="section-label">当前工作 ${action("navigate", "查看全部 " + icon("arrow"), "ghost", 'data-page="tasks"')}</h2>${now.length ? now.map(taskRow).join("") : empty("当前没有推进中的需求", "提出一个需求，或记录一个需要处理的问题。", action("new-task", icon("plus") + " 创建需求"))}<div class="divider"></div><h2 class="section-label">项目进度解读 ${action("analyze", "更新分析", "ghost", 'data-kind="progress"')}</h2>${evidence ? `<div class="prewrap">${escape(evidence.body)}</div><p class="hint">平台 Agent · ${date(evidence.at)} · 结论依据可在记录中查看</p>` : `<div class="context-note">${state.platform.configured ? "点击更新分析，让平台 Agent 对照需求和 Git 变化解释进度。" : "由平台管理员配置 Agent 模型后，平台 Agent 将结合需求、Git 与开发汇报分析进度。"}</div>`}</div><aside class="context-column"><section><h2 class="section-label">仓库观察</h2><p class="context-note"><strong>${escape(state.project.branch)}</strong><br>${state.project.sha ? `<span class="mono">${state.project.sha.slice(0, 12)}</span>` : "尚未读取代码"}<br>最近同步 ${date(state.project.synced_at)}</p>${action("navigate", "查看代码与变更 " + icon("arrow"), "inline-link", 'data-page="code"')}<p class="page-note">代码状态与上线记录分别记录。<br>按需求确认上线版本和环境。</p></section><section><h2 class="section-label">最近动态</h2>${events.length ? events.map((e) => `<div class="event"><p>${escape(e.body || e.kind)}</p><time>${escape(e.actor)} · ${date(e.at)}</time></div>`).join("") : '<p class="context-note">项目活动会记录在这里。</p>'}</section></aside></div></div>`;
 }
 function filteredTasks() {
   return state.context.tasks.filter(
@@ -925,7 +955,7 @@ function repositoryFields(p) {
     )
     .join(
       "",
-    )}</fieldset><div data-auth-fields="none" ${mode !== "none" ? "hidden" : ""}><p class="hint">使用无需认证的公开仓库，不读取服务器上的账号凭据。</p></div><div data-auth-fields="server" ${mode !== "server" ? "hidden" : ""}><p class="hint">沿用运行服务那台机器的 Git / SSH 配置。统一登录模式仅兼容原有仓库，新项目请使用专用凭据。</p></div><div data-auth-fields="token" ${mode !== "token" ? "hidden" : ""}>${field("Git 用户名", `<input name="git_username" autocomplete="off" placeholder="仓库平台要求的用户名">`)}${field("访问令牌", `<input type="password" name="git_token" autocomplete="new-password" placeholder="${p.credential_id ? "已配置，留空保留" : "填写具有仓库读取权限的 Token"}">`, "建议使用仅当前仓库可用的只读令牌，通过 HTTPS 连接。")}</div><div data-auth-fields="ssh" ${mode !== "ssh" ? "hidden" : ""}><div class="row between"><span class="hint">使用仓库专用密钥</span>${action("generate-ssh-key", icon("plus") + " 生成密钥", "ghost")}</div>${field("SSH 私钥", `<textarea name="git_private_key" class="secret-input" autocomplete="off" spellcheck="false" placeholder="${p.credential_id ? "已配置，留空保留；也可粘贴新私钥替换" : "粘贴无口令的专用私钥，或点击生成密钥"}"></textarea>`)}<div class="ssh-public-key" hidden>${field("SSH 公钥", '<textarea name="git_public_key" class="mono" readonly></textarea>', "把这段公钥添加为仓库的只读 Deploy Key，再测试连接。")}${action("copy-ssh-key", icon("copy") + " 复制公钥", "ghost")}</div>${field("SSH 主机公钥（known_hosts）", '<textarea name="git_known_hosts" class="mono" spellcheck="false" placeholder="git.example.com ssh-ed25519 AAAA…"></textarea>', "由仓库管理员提供并确认，用于验证服务器身份；不会跳过主机校验。")}</div><div class="repository-test-row">${action("test-repository", icon("refresh") + " 测试连接")}<span class="repository-result" role="status" aria-live="polite"></span></div>${field("默认分支", `<input name="branch" value="${escape(p.branch || "main")}" required placeholder="测试成功后可选择分支">`, "测试连接后获取真实分支；空仓库可先填写预期分支。")}</section>`;
+    )}</fieldset><div data-auth-fields="none" ${mode !== "none" ? "hidden" : ""}><p class="hint">使用无需认证的公开仓库，不读取服务器上的账号凭据。</p></div><div data-auth-fields="server" ${mode !== "server" ? "hidden" : ""}><p class="hint">沿用运行服务那台机器的 Git / SSH 配置。统一登录模式仅兼容原有仓库，新项目请使用专用凭据。</p></div><div data-auth-fields="token" ${mode !== "token" ? "hidden" : ""}>${field("Git 用户名", `<input name="git_username" autocomplete="off" placeholder="仓库平台要求的用户名">`)}${field("访问令牌", `<input type="password" name="git_token" autocomplete="new-password" placeholder="${p.credential_id ? "已配置，留空保留" : "填写具有仓库读取权限的 Token"}">`, "建议使用仅当前仓库可用的只读令牌，通过 HTTPS 连接。")}</div><div data-auth-fields="ssh" ${mode !== "ssh" ? "hidden" : ""}><div class="row between"><span class="hint">使用仓库专用密钥</span>${action("generate-ssh-key", icon("plus") + " 生成密钥", "ghost")}</div>${field("SSH 私钥", `<textarea name="git_private_key" class="secret-input" autocomplete="off" spellcheck="false" placeholder="${p.credential_id ? "已配置，留空保留；也可粘贴新私钥替换" : "粘贴无口令的专用私钥，或点击生成密钥"}"></textarea>`)}<div class="ssh-public-key" hidden>${field("SSH 公钥", '<textarea name="git_public_key" class="mono" readonly></textarea>', "把这段公钥添加为仓库的只读 Deploy Key，再测试连接。")}${action("copy-ssh-key", icon("copy") + " 复制公钥", "ghost")}</div>${field("SSH 主机公钥（known_hosts）", '<textarea name="git_known_hosts" class="mono" spellcheck="false" placeholder="git.example.com ssh-ed25519 AAAA…"></textarea>', "由仓库管理员提供并确认，用于验证服务器身份；不会跳过主机校验。")}</div><div class="repository-test-row">${action("test-repository", icon("refresh") + " 测试连接")}<span class="repository-result" role="status" aria-live="polite"></span></div>${field("默认分支", `<input name="branch" value="${escape(p.branch || "main")}" required placeholder="测试成功后可选择分支">`, "首次配置保存后自动同步仓库。测试连接后获取真实分支；空仓库可先填写预期分支。")}</section>`;
 }
 function projectFields(p = {}) {
   return `${field("项目名称", `<input name="name" value="${escape(p.name)}" placeholder="例如：客户服务中台" required>`)}${field("项目说明", `<textarea name="description" placeholder="项目服务谁，解决什么问题…">${escape(p.description)}</textarea>`)}${repositoryFields(p)}${field("代码阅读方式", `<select name="agent_read_mode"><option value="legacy" ${p.agent_read_mode !== "sandbox" ? "selected" : ""}>原有 Git 查询</option><option value="sandbox" ${p.agent_read_mode === "sandbox" ? "selected" : ""}>隔离源码阅读</option></select>`, "隔离阅读为每次分析提供独立的只读源码，需要管理员先配置运行环境。")}${field("分析代码版本", `<input name="agent_ref" value="${escape(p.agent_ref || "")}" placeholder="留空跟随默认分支，也可填写分支或完整提交 SHA">`, "隔离阅读在每轮开始时固定版本，分析期间不会随仓库同步变化。")}`;
@@ -1097,7 +1127,7 @@ async function searchEmployees(page = 1) {
   } catch (e) { if (revision === directoryRevision && $("#employee-search") === form) {$("#directory-status").textContent = e.message;$("#employee-results").innerHTML = action("retry-directory", "重新读取", "ghost");} }
 }
 function codePage() {
-  return `<div class="page">${heading("代码与变更", `默认分支 ${escape(state.project.branch)} · ${date(state.project.synced_at)}`, action("sync", icon("refresh") + " 同步仓库", "primary"))}${state.project.sync_error ? `<div class="notice">${escape(state.project.sync_error)}</div>` : ""}${!state.project.sha ? empty("尚未读取代码", "在项目设置中填写仓库地址，然后同步。", action("navigate", "项目设置", "", 'data-page="settings"')) : `<div class="toolbar"><input id="code-search" placeholder="搜索代码内容…" aria-label="代码搜索">${action("search-code", "搜索")}${action("git-log", "最近提交", "ghost")}<span class="mono muted">${state.project.sha.slice(0, 12)}</span></div><div class="file-browser"><div class="file-list" id="file-list"><p class="hint">正在读取目录…</p></div><div class="file-content" id="file-content"><p class="context-note">选择文件查看当前版本内容。</p></div></div>`}</div>`;
+  return `<div class="page">${heading("代码与变更", `默认分支 ${escape(state.project.branch)} · ${date(state.project.synced_at)}`, action("sync", icon("refresh") + " 同步仓库", "primary"))}${!state.project.sha ? empty(state.project.syncing ? "正在同步代码仓库" : "尚未读取代码", state.project.syncing ? "首次同步完成后会自动显示文件列表。" : "在项目设置中填写仓库地址，然后同步。", action("navigate", "项目设置", "", 'data-page="settings"')) : `<div class="toolbar"><input id="code-search" placeholder="搜索代码内容…" aria-label="代码搜索">${action("search-code", "搜索")}${action("git-log", "最近提交", "ghost")}<span class="mono muted">${state.project.sha.slice(0, 12)}</span></div><div class="file-browser"><div class="file-list" id="file-list"><p class="hint">正在读取目录…</p></div><div class="file-content" id="file-content"><p class="context-note">选择文件查看当前版本内容。</p></div></div>`}</div>`;
 }
 async function loadFiles() {
   try {
@@ -2069,7 +2099,7 @@ document.addEventListener("submit", async (event) => {
         form.dataset.id ? "PUT" : "POST",
       );
       state.project = p;
-      toast("项目已保存");
+      toast(p.syncing ? "项目已保存，正在同步代码仓库" : p.sync_error ? "项目已保存，仓库同步失败，可重试" : "项目已保存");
     } else if (form.id === "task-form") {
       const payload = requirementEditor.payload(id);
       if (form.dataset.bugParent) payload.kind="bug";

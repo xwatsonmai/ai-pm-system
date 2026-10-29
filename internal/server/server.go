@@ -97,7 +97,11 @@ func (s *Server) Handler() http.Handler {
 			fail(w, e)
 			return
 		}
-		respond(w, v)
+		projects := make([]repositoryProject, 0, len(v))
+		for _, p := range v {
+			projects = append(projects, s.repositoryProject(r.Context(), p))
+		}
+		respond(w, projects)
 	})
 	handle("POST /api/projects", s.saveProject)
 	handle("PUT /api/projects/{id}", s.saveProject)
@@ -107,6 +111,7 @@ func (s *Server) Handler() http.Handler {
 			fail(w, e)
 			return
 		}
+		v["project"] = s.repositoryProject(r.Context(), v["project"].(domain.Project))
 		respond(w, v)
 	})
 	handle("POST /api/projects/{id}/sync", func(w http.ResponseWriter, r *http.Request) {
@@ -119,7 +124,7 @@ func (s *Server) Handler() http.Handler {
 			fail(w, e)
 			return
 		}
-		respond(w, p)
+		respond(w, s.repositoryProject(r.Context(), p))
 	})
 	handle("GET /api/projects/{id}/code", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()

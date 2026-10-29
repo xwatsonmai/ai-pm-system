@@ -4,13 +4,16 @@ import (
 	"ai-pm-system/internal/app"
 	"ai-pm-system/internal/domain"
 	"ai-pm-system/internal/gitrepo"
+	"ai-pm-system/internal/storage"
 	"ai-pm-system/internal/storage/sqlite"
 	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func git(t *testing.T, dir string, args ...string) string {
@@ -46,6 +49,9 @@ func TestRealRepositorySyncAndVersionReads(t *testing.T) {
 		t.Fatal(e)
 	}
 	r := &gitrepo.Repositories{Root: filepath.Join(dir, "repos"), App: s}
+	if _, e = r.Read(context.Background(), p.ID, gitrepo.Query{Action: "tree"}); e == nil || !strings.Contains(e.Error(), "仓库尚未同步") {
+		t.Fatal("missing repository reported as an invalid branch", e)
+	}
 	if e = r.Sync(context.Background(), p.ID); e != nil {
 		t.Fatal(e)
 	}
@@ -101,5 +107,82 @@ func TestRealRepositorySyncAndVersionReads(t *testing.T) {
 	}
 	if changes != 1 {
 		t.Fatal("unchanged repository triggered another analysis")
+	}
+}
+
+type gatedProjectStore struct {
+	storage.Store
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *gatedProjectStore) GetProject(c context.Context, id string) (domain.Project, error) {
+	s.once.Do(func() { close(s.started) })
+	select {
+	case <-s.release:
+	case <-c.Done():
+		return domain.Project{}, c.Err()
+	}
+	return s.Store.GetProject(c, id)
+}
+
+func TestBackgroundSyncSurvivesRequestAndExcludesDuplicateSync(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source")
+	if e := os.Mkdir(source, 0700); e != nil {
+		t.Fatal(e)
+	}
+	git(t, source, "init", "-b", "main")
+	git(t, source, "commit", "--allow-empty", "-m", "initial")
+	sha := git(t, source, "rev-parse", "HEAD")
+	db, e := sqlite.Open(filepath.Join(dir, "db"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer db.Close()
+	svc := &app.Service{Store: db}
+	p, e := svc.SaveProject(context.Background(), domain.Project{Name: "background", Repository: source, Branch: "main"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	gate := &gatedProjectStore{Store: db, started: make(chan struct{}), release: make(chan struct{})}
+	svc.Store = gate
+	repos := &gitrepo.Repositories{Root: filepath.Join(dir, "repos"), App: svc}
+	c, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	repos.SyncAsync(c, p.ID)
+	defer func() {
+		select {
+		case <-gate.release:
+		default:
+			close(gate.release)
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for repos.Syncing(p.ID) && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+	}()
+	select {
+	case <-gate.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("background work did not start")
+	}
+	cancel() // An HTTP response or disconnected client must not stop the clone.
+	if !repos.Syncing(p.ID) {
+		t.Fatal("accepted background work is not visible")
+	}
+	if e := repos.Sync(context.Background(), p.ID); e == nil || !strings.Contains(e.Error(), "正在同步") {
+		t.Fatal("manual sync overlapped background sync", e)
+	}
+	repos.SyncAsync(context.Background(), p.ID) // Duplicate triggers are coalesced.
+	close(gate.release)
+	deadline := time.Now().Add(5 * time.Second)
+	for repos.Syncing(p.ID) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	p, e = db.GetProject(context.Background(), p.ID)
+	if e != nil || repos.Syncing(p.ID) || p.SHA != sha || p.SyncedAt == 0 || p.SyncError != "" {
+		t.Fatal("request cancellation prevented background sync", p, e)
 	}
 }

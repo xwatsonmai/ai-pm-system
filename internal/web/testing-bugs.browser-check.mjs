@@ -59,7 +59,7 @@ const report={};
 try{
  for(let n=0;n<100;n++){try{if((await fetch(base+'/api/health')).ok)break}catch{}await new Promise(r=>setTimeout(r,50))}
  const project=await api('/projects',{name:'需求测试 Bug 验证',repository:repo,branch:'main',agent_read_mode:'legacy'});
- await api(`/projects/${project.id}/sync`,{});
+ for(let n=0;n<100;n++){const status=await api(`/projects/${project.id}/repository-status`);if(!status.syncing){assert.equal(status.sha,git('rev-parse','main'));break;}assert(n<99,'initial automatic sync did not finish');await new Promise(done=>setTimeout(done,50));}
  let {task:parent}=await api(`/projects/${project.id}/tasks`,{title:'订单退款需求',kind:'requirement',description:'订单退款测试',acceptance:['重复点击不得重复退款'],request_id:'parent'});
  await api(`/tasks/${parent.id}/actions`,{action:'ready',request_id:'ready'});
  const developer=(await api(`/projects/${project.id}/tokens`,{name:'开发客户端'})).secret;

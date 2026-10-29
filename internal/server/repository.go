@@ -5,10 +5,26 @@ import (
 	"ai-pm-system/internal/credential"
 	"ai-pm-system/internal/domain"
 	"ai-pm-system/internal/gitrepo"
+	"context"
 	"errors"
 	"net/http"
 	"reflect"
 )
+
+type repositoryProject struct {
+	domain.Project
+	Syncing bool `json:"syncing"`
+}
+
+func (s *Server) repositoryProject(ctx context.Context, p domain.Project) repositoryProject {
+	syncing := s.Git != nil && s.Git.Syncing(p.ID)
+	// Read the receipt after checking the lock so completion cannot leave the
+	// response with both an old empty SHA and syncing=false.
+	if latest, e := s.App.Store.GetProject(ctx, p.ID); e == nil {
+		p.SHA, p.SyncedAt, p.SyncError = latest.SHA, latest.SyncedAt, latest.SyncError
+	}
+	return repositoryProject{Project: p, Syncing: syncing}
+}
 
 type repositoryInput struct {
 	Repository  string            `json:"repository"`
@@ -131,9 +147,20 @@ func (s *Server) saveProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, e)
 		return
 	}
-	respond(w, p)
+	if p.Repository != "" && p.SyncedAt == 0 && s.Git != nil {
+		s.Git.SyncAsync(r.Context(), p.ID)
+	}
+	respond(w, s.repositoryProject(r.Context(), p))
 }
 func (s *Server) repositoryRoutes(mux *http.ServeMux) {
+	mux.Handle("GET /api/projects/{id}/repository-status", s.projectAccess(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, e := s.App.Store.GetProject(r.Context(), r.PathValue("id"))
+		if e != nil {
+			fail(w, e)
+			return
+		}
+		respond(w, s.repositoryProject(r.Context(), p))
+	})))
 	mux.HandleFunc("GET /api/users", s.onlyAdmin(func(w http.ResponseWriter, r *http.Request) {
 		users, e := s.App.Store.ListUsers(r.Context())
 		if e != nil {
