@@ -4,6 +4,17 @@
 
 围绕「人提出和确认需求 → 开发 Agent 认领并实现 → 平台 Agent 理解项目、跟进变化 → 人验收」协作。开发 Agent 在原有 IDE 或终端里工作，通过 MCP 接入本平台。
 
+## 项目组成
+
+智驱由平台和桌面客户端组成，分别在两个仓库中维护和发布：
+
+| 仓库 | 职责 |
+| --- | --- |
+| [ai-pm-system](https://github.com/xwatsonmai/ai-pm-system)（本仓库） | 平台服务、Web 工作台、需求与项目数据、平台 Agent、产品与开发 MCP |
+| [ai-pm-desktop](https://github.com/xwatsonmai/ai-pm-desktop) | Mac / Windows 桌面客户端，从平台认领需求并在本机调度 Codex、Claude Code、ZCode 等开发执行器 |
+
+先启动或部署本平台，再按[桌面客户端说明](https://github.com/xwatsonmai/ai-pm-desktop#readme)连接平台地址，通过浏览器完成 OAuth 登录并选择授权项目。客户端负责访问平台及管理本地任务，执行器读取客户端准备的任务上下文。平台也支持浏览器和其他 MCP 客户端接入。
+
 ## 启动
 
 需要 Go 1.26.2+、Node.js 22.19+、npm 和 Git。在仓库根目录执行：
