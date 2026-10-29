@@ -4,5 +4,6 @@
   "type": "module",
   "engines": { "node": ">=22.19.0" },
   "scripts": { "check": "node --check worker.mjs && node --check model-activity.mjs && node --check review-context.mjs", "test": "node --test *.test.mjs" },
-  "dependencies": { "@earendil-works/pi-coding-agent": "1.1.0" }
+  "dependencies": { "@earendil-works/pi-coding-agent": "1.1.0" },
+  "overrides": { "undici": "8.12.2" }
 }
