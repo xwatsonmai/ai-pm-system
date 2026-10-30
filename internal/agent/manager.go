@@ -438,7 +438,7 @@ func toolsFor(r domain.Run) []tool {
 			tools = append(tools, requirementIntakeTools()...)
 		}
 		tools = append(tools,
-			tool{"create_collaboration", "缺少环境证据时创建异步只读排查；只分享必要的脱敏问题摘要，不复制私人对话或凭据。立即返回任务，不等待结果。仅复用尚未结束的同类任务；旧任务 completed 后用户要求续查时创建新任务，保留旧结果。", schema(map[string]string{"title": "排查标题", "brief": "现象、时间范围、业务标识、已知判断和需要确认的问题", "environment": "需要调查的环境名称，不含凭据"}, "title", "brief", "environment")},
+			tool{"create_collaboration", "缺少环境证据时创建异步只读排查；只分享必要的脱敏问题摘要，不复制私人对话或凭据。创建前先调用 get_collaborations，已有协查且本轮未成功查询时工具会拒绝。立即返回任务，不等待结果。仅复用尚未结束的同类任务；旧任务 completed 后用户要求续查时创建新任务，保留旧结果。", schema(map[string]string{"title": "排查标题", "brief": "现象、时间范围、业务标识、已知判断和需要确认的问题", "environment": "需要调查的环境名称，不含凭据"}, "title", "brief", "environment")},
 			tool{"get_collaborations", "实时查询当前用户、当前会话的协同任务；可查指定任务，否则列出全部。返回认领租约、进展、结果及续答状态。用户催问、继续或重试时先查询，不凭旧快照猜测。", schema(map[string]string{"collaboration_id": "可选协同 ID；省略则列出当前会话的协同"})},
 			tool{"cancel_collaboration", "用户明确要求停止排查时，取消当前会话的指定协同并停止后续续答；保留已有调查结果。必须明确任务 ID，多任务指代不清时先澄清。重复取消安全。本地执行方需收到通知或再次查询后协作停止，不能声称已终止本地进程。", schema(map[string]string{"collaboration_id": "要取消的协同 ID"}, "collaboration_id")},
 		)
@@ -939,7 +939,7 @@ func (m *Manager) callTool(c context.Context, a domain.Actor, r domain.Run, call
 		if r.Kind != "question" || r.TriggerType == "collaboration_result" {
 			return nil, domain.ErrForbidden
 		}
-		return m.App.CreateCollaboration(c, a, app.CollaborationInput{RequestID: r.ID + ":" + app.Hash(args["title"]+"\n"+args["environment"]), OriginRunID: r.ID, Title: args["title"], Brief: args["brief"], Environment: args["environment"]})
+		return m.createConversationCollaboration(c, r, args["title"], args["brief"], args["environment"])
 	case "project_context":
 		var data map[string]any
 		var err error

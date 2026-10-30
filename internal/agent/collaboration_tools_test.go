@@ -298,3 +298,59 @@ func TestPersonalMCPCollaborationOwnerAndRevocation(t *testing.T) {
 		})
 	}
 }
+
+func TestContinuationCreationRequiresSuccessfulQueryInPersistedTurn(t *testing.T) {
+	for _, queryStatus := range []string{"", "running", "failed", "done"} {
+		t.Run("query_"+queryStatus, func(t *testing.T) {
+			m, db, r, old := collaborationToolsFixture(t)
+			ctx := context.Background()
+			dev := domain.Actor{ID: "dev", Kind: "developer", ProjectID: r.ProjectID}
+			claim, err := m.App.ActCollaboration(ctx, dev, old.ID, app.CollaborationAction{Action: "claim", RequestID: "claim"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = m.App.ActCollaboration(ctx, dev, old.ID, app.CollaborationAction{Action: "submit", RequestID: "submit", ClaimID: claim.ClaimID, Version: claim.Collaboration.Version, Result: &domain.InvestigationResult{Outcome: "cannot_access", Summary: "当时缺少 SSH 配置", Environment: "prod", ObservedAt: "2026-10-30T09:52:15+08:00", DeploymentVersion: "unknown", Limitations: "尚未统计"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.ID, r.Prompt = "followup", "再继续刚才的问题"
+			if queryStatus != "" {
+				r.Steps = []domain.Step{{Name: "get_collaborations", Status: queryStatus}}
+			}
+			if err = db.PutRun(ctx, r); err != nil {
+				t.Fatal(err)
+			}
+			// Only the stored turn counts, never steps supplied by a caller.
+			forged := r
+			forged.Steps = []domain.Step{{Name: "get_collaborations", Status: "done"}}
+			args, _ := json.Marshal(map[string]string{"title": old.Title, "brief": old.Brief, "environment": old.Environment})
+			out, err := m.callTool(ctx, domain.Actor{Kind: "platform", ID: "platform", ProjectID: r.ProjectID}, forged, "create", "create_collaboration", args)
+			if queryStatus != "done" {
+				if err == nil {
+					t.Fatal("created without successful current-turn query", out)
+				}
+				items, e := db.ListCollaborations(ctx, r.ProjectID)
+				if e != nil || len(items) != 1 {
+					t.Fatal("rejected call changed inbox", items, e)
+				}
+				r.Steps = []domain.Step{{Name: "get_collaborations", Status: "done"}}
+				if err = db.PutRun(ctx, r); err != nil {
+					t.Fatal(err)
+				}
+				out, err = m.callTool(ctx, domain.Actor{Kind: "platform", ID: "platform", ProjectID: r.ProjectID}, r, "create", "create_collaboration", args)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			fresh := out.(domain.CollaborationMutation).Collaboration
+			if fresh.ID == old.ID || fresh.Status != "pending" || fresh.OriginRunID != r.ID {
+				t.Fatal(fresh)
+			}
+			// Same-turn retry is idempotent and does not create another task.
+			again, err := m.callTool(ctx, domain.Actor{Kind: "platform", ID: "platform", ProjectID: r.ProjectID}, r, "retry", "create_collaboration", args)
+			if err != nil || again.(domain.CollaborationMutation).Collaboration.ID != fresh.ID {
+				t.Fatal(again, err)
+			}
+		})
+	}
+}

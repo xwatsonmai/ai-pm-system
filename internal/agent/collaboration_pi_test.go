@@ -73,15 +73,24 @@ func TestPiCreatesCollaborationAndResumesLatestConversation(t *testing.T) {
 				if !strings.Contains(string(current), "再继续刚才的问题") || !strings.Contains(string(current), "历史 cannot_access/inconclusive") || !strings.Contains(string(current), "先调用 get_collaborations") {
 					t.Error("current user turn missing continuation policy", string(current))
 				}
-				call("get_collaborations", `{}`)
+				// Simulate a model skipping the mandatory fresh query. The server
+				// must reject without creating work, and Pi must recover in-turn.
+				call("create_collaboration", `{"title":"生产回调调查","brief":"trace-42 续查","environment":"production"}`)
 			case 6:
+				messages := body["messages"].([]any)
+				last, _ := json.Marshal(messages[len(messages)-1])
+				if !strings.Contains(string(last), "本轮必须先成功调用 get_collaborations") {
+					t.Error("missing query-before-create rejection", string(last))
+				}
+				call("get_collaborations", `{}`)
+			case 7:
 				messages := body["messages"].([]any)
 				last, _ := json.Marshal(messages[len(messages)-1])
 				if !strings.Contains(string(last), "cannot_access") || !strings.Contains(string(last), "as_of") {
 					t.Error("retry did not get historical result", string(last))
 				}
 				call("create_collaboration", `{"title":"生产回调调查","brief":"继续原目标 trace-42；旧调查取证时间 2026-10-14T10:00:00+08:00，曾因连接配置缺失无法访问；本轮用户要求继续，使用执行端最新配置重新核验，不将旧结果视为现状。","environment":"production"}`)
-			case 7:
+			case 8:
 				send(map[string]string{"content": "已重新发起只读调查，等待认领；原访问失败是历史结果，当前尚未重新核验。"}, nil)
 				send(map[string]any{}, "stop")
 			default:
@@ -211,10 +220,10 @@ func TestPiCreatesCollaborationAndResumesLatestConversation(t *testing.T) {
 		t.Fatal(err)
 	}
 	retried := waitRun(retry.ID)
-	if retried.Status != "succeeded" || len(retried.Steps) != 2 || retried.Steps[0].Name != "get_collaborations" || retried.Steps[1].Name != "create_collaboration" {
+	if retried.Status != "succeeded" || len(retried.Steps) != 3 || retried.Steps[0].Name != "create_collaboration" || retried.Steps[0].Status != "failed" || retried.Steps[1].Name != "get_collaborations" || retried.Steps[2].Name != "create_collaboration" {
 		t.Fatal("continuation did not query and re-dispatch", retried)
 	}
-	for _, step := range retried.Steps {
+	for _, step := range retried.Steps[1:] {
 		if step.Status != "done" {
 			t.Fatal("continuation tool failed", step)
 		}
@@ -257,7 +266,7 @@ func TestPiCreatesCollaborationAndResumesLatestConversation(t *testing.T) {
 	time.Sleep(1100 * time.Millisecond)
 	jobs, _ := db.ListReplyJobs(ctx)
 	runs, _ := db.ListRuns(ctx, p.ID)
-	if len(jobs) != 1 || jobs[0].Status != "delivered" || len(runs) != 4 || requests.Load() != 7 {
+	if len(jobs) != 1 || jobs[0].Status != "delivered" || len(runs) != 4 || requests.Load() != 8 {
 		t.Fatal("duplicate continuation after restart", jobs, len(runs), requests.Load())
 	}
 }

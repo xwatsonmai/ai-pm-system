@@ -113,3 +113,37 @@ func (m *Manager) cancelConversationCollaboration(ctx context.Context, r domain.
 	}
 	return m.cancelCollaboration(ctx, a, id, "cancel_collaboration:"+r.ID+":"+id)
 }
+
+// The model may skip a query even when prompted. Existing investigations require
+// a successful read in this persisted user turn before another task is created.
+func (m *Manager) createConversationCollaboration(ctx context.Context, r domain.Run, title, brief, environment string) (domain.CollaborationMutation, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, conversation, err := m.collaborationScope(ctx, r)
+	if err != nil {
+		return domain.CollaborationMutation{}, err
+	}
+	current, err := m.App.Store.GetRun(ctx, r.ID)
+	if err != nil {
+		return domain.CollaborationMutation{}, err
+	}
+	queried := false
+	for _, step := range current.Steps {
+		if step.Name == "get_collaborations" && step.Status == "done" {
+			queried = true
+			break
+		}
+	}
+	if !queried {
+		items, err := m.App.Store.ListCollaborations(ctx, r.ProjectID)
+		if err != nil {
+			return domain.CollaborationMutation{}, err
+		}
+		for _, item := range items {
+			if inCollaborationScope(item, a, conversation) {
+				return domain.CollaborationMutation{}, errors.New("当前会话已有协查。本轮必须先成功调用 get_collaborations 查询最新状态：未结束的同类任务复用；已完成且用户要求续查则创建新调查，不能用历史 cannot_access 拒绝续查。")
+			}
+		}
+	}
+	return m.App.CreateCollaboration(ctx, a, app.CollaborationInput{RequestID: r.ID + ":" + app.Hash(title+"\n"+environment), OriginRunID: r.ID, Title: title, Brief: brief, Environment: environment})
+}
