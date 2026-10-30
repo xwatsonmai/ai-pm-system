@@ -54,6 +54,43 @@ func TestPiCreatesCollaborationAndResumesLatestConversation(t *testing.T) {
 			return
 		}
 		n := requests.Add(1)
+		if n >= 5 {
+			available := map[string]bool{}
+			for _, raw := range body["tools"].([]any) {
+				available[raw.(map[string]any)["function"].(map[string]any)["name"].(string)] = true
+			}
+			if !available["get_collaborations"] || !available["create_collaboration"] {
+				t.Error("user continuation after automatic result lost collaboration tools", available)
+			}
+			call := func(name, args string) {
+				send(map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": fmt.Sprintf("retry-%d", n), "type": "function", "function": map[string]string{"name": name, "arguments": args}}}}, nil)
+				send(map[string]any{}, "tool_calls")
+			}
+			switch n {
+			case 5:
+				messages := body["messages"].([]any)
+				current, _ := json.Marshal(messages[len(messages)-1])
+				if !strings.Contains(string(current), "再继续刚才的问题") || !strings.Contains(string(current), "历史 cannot_access/inconclusive") || !strings.Contains(string(current), "先调用 get_collaborations") {
+					t.Error("current user turn missing continuation policy", string(current))
+				}
+				call("get_collaborations", `{}`)
+			case 6:
+				messages := body["messages"].([]any)
+				last, _ := json.Marshal(messages[len(messages)-1])
+				if !strings.Contains(string(last), "cannot_access") || !strings.Contains(string(last), "as_of") {
+					t.Error("retry did not get historical result", string(last))
+				}
+				call("create_collaboration", `{"title":"生产回调调查","brief":"继续原目标 trace-42；旧调查取证时间 2026-10-14T10:00:00+08:00，曾因连接配置缺失无法访问；本轮用户要求继续，使用执行端最新配置重新核验，不将旧结果视为现状。","environment":"production"}`)
+			case 7:
+				send(map[string]string{"content": "已重新发起只读调查，等待认领；原访问失败是历史结果，当前尚未重新核验。"}, nil)
+				send(map[string]any{}, "stop")
+			default:
+				t.Error("unexpected continuation request", n)
+				send(map[string]any{}, "stop")
+			}
+			fmt.Fprint(w, "data: [DONE]\n\n")
+			return
+		}
 		if n == 1 {
 			send(map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "investigate", "type": "function", "function": map[string]string{"name": "create_collaboration", "arguments": `{"title":"生产回调调查","brief":"trace-42 回调失败，请核查生产日志与部署配置","environment":"production"}`}}}}, nil)
 			send(map[string]any{}, "tool_calls")
@@ -68,7 +105,7 @@ func TestPiCreatesCollaborationAndResumesLatestConversation(t *testing.T) {
 				}
 				answer = "已记录新的部署线索。"
 			}
-			if n >= 4 {
+			if n == 4 {
 				continued.Store(strings.Contains(string(encoded), "new-deployment-clue") && strings.Contains(string(encoded), "evidence-trace-42") && strings.Contains(string(encoded), "协同任务结果已返回"))
 				for _, raw := range body["tools"].([]any) {
 					tool := raw.(map[string]any)["function"].(map[string]any)
@@ -76,7 +113,7 @@ func TestPiCreatesCollaborationAndResumesLatestConversation(t *testing.T) {
 						t.Error("automatic answer can recursively delegate")
 					}
 				}
-				answer = "环境核查已返回：配置不一致。证据 evidence-trace-42；尚未修复。"
+				answer = "环境核查已返回：当时连接配置缺失，无法访问。证据 evidence-trace-42；目标未完成。"
 			}
 			send(map[string]string{"content": answer}, nil)
 			send(map[string]any{}, "stop")
@@ -147,7 +184,7 @@ func TestPiCreatesCollaborationAndResumesLatestConversation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	completed, err := s.ActCollaboration(ctx, dev, v.ID, app.CollaborationAction{Action: "submit", RequestID: "submit", ClaimID: claimed.ClaimID, Version: claimed.Collaboration.Version, Result: &domain.InvestigationResult{Outcome: "confirmed", Summary: "配置不一致", Evidence: "evidence-trace-42", Environment: "production", ObservedAt: "2026-10-14T10:00:00+08:00", DeploymentVersion: "deployed-sha", Limitations: "尚未修复"}})
+	completed, err := s.ActCollaboration(ctx, dev, v.ID, app.CollaborationAction{Action: "submit", RequestID: "submit", ClaimID: claimed.ClaimID, Version: claimed.Collaboration.Version, Result: &domain.InvestigationResult{Outcome: "cannot_access", Summary: "连接配置缺失，无法访问", Evidence: "evidence-trace-42", Environment: "production", ObservedAt: "2026-10-14T10:00:00+08:00", DeploymentVersion: "deployed-sha", Limitations: "尚未修复"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,6 +202,48 @@ func TestPiCreatesCollaborationAndResumesLatestConversation(t *testing.T) {
 	if result.Status != "succeeded" || result.OwnerID != origin.OwnerID || result.ConversationID != origin.ConversationID || result.Prompt != "" || !continued.Load() {
 		t.Fatal("bad continuation", result, continued.Load())
 	}
+	// Resume the same Pi session after its automatic result turn. The old
+	// no-recursion instruction must not hide tools or govern the new user turn.
+	changes, unsubscribe := s.SubscribeWork(p.ID)
+	defer unsubscribe()
+	retry, err := m.Start(ctx, p.ID, "", "question", "再继续刚才的问题", result.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retried := waitRun(retry.ID)
+	if retried.Status != "succeeded" || len(retried.Steps) != 2 || retried.Steps[0].Name != "get_collaborations" || retried.Steps[1].Name != "create_collaboration" {
+		t.Fatal("continuation did not query and re-dispatch", retried)
+	}
+	for _, step := range retried.Steps {
+		if step.Status != "done" {
+			t.Fatal("continuation tool failed", step)
+		}
+	}
+	all, err = db.ListCollaborations(ctx, p.ID)
+	if err != nil || len(all) != 2 {
+		t.Fatal("new investigation not persisted", all, err)
+	}
+	work, err := s.WorkList(ctx, dev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := work["collaborations"].([]domain.Collaboration)
+	if len(pending) != 1 || pending[0].ID == v.ID || pending[0].Status != "pending" {
+		t.Fatal("developer inbox did not receive new investigation", pending)
+	}
+	fresh, _ := db.GetCollaboration(ctx, pending[0].ID)
+	if fresh.OriginRunID != retry.ID || fresh.ConversationID != origin.ConversationID || fresh.Title != v.Title || fresh.Environment != v.Environment {
+		t.Fatal("continuation lost origin or scope", fresh)
+	}
+	old, err := db.GetCollaboration(ctx, v.ID)
+	if err != nil || old.Status != "completed" || old.Result.Outcome != "cannot_access" || old.Result.Evidence != "evidence-trace-42" || old.Version != completed.Collaboration.Version {
+		t.Fatal("continuation rewrote historical investigation", old, err)
+	}
+	select {
+	case <-changes:
+	default:
+		t.Fatal("new investigation did not notify developer subscribers")
+	}
 	if titles.Load() != 1 {
 		t.Fatal("automatic reply renamed conversation", titles.Load())
 	}
@@ -178,7 +257,7 @@ func TestPiCreatesCollaborationAndResumesLatestConversation(t *testing.T) {
 	time.Sleep(1100 * time.Millisecond)
 	jobs, _ := db.ListReplyJobs(ctx)
 	runs, _ := db.ListRuns(ctx, p.ID)
-	if len(jobs) != 1 || jobs[0].Status != "delivered" || len(runs) != 3 || requests.Load() != 4 {
+	if len(jobs) != 1 || jobs[0].Status != "delivered" || len(runs) != 4 || requests.Load() != 7 {
 		t.Fatal("duplicate continuation after restart", jobs, len(runs), requests.Load())
 	}
 }

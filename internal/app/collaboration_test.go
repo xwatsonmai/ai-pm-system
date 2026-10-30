@@ -171,3 +171,82 @@ func TestDeletedConversationStopsCollaborationAndAutomaticRecursion(t *testing.T
 		t.Fatal("claimed deleted conversation")
 	}
 }
+
+// A new user turn may repeat a finished investigation without mutating its
+// evidence/outbox. Pending work is still deduplicated for repeated requests.
+func TestCollaborationContinuationPreservesHistoryAndReusesActiveWork(t *testing.T) {
+	for _, outcome := range []string{"cannot_access", "inconclusive", "confirmed"} {
+		t.Run(outcome, func(t *testing.T) {
+			s, p, old, dev := collaborationFixture(t)
+			ctx := context.Background()
+			claimed, err := s.ActCollaboration(ctx, dev, old.ID, app.CollaborationAction{Action: "claim", RequestID: "claim"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			done, err := s.ActCollaboration(ctx, dev, old.ID, app.CollaborationAction{Action: "submit", RequestID: "result", ClaimID: claimed.ClaimID, Version: claimed.Collaboration.Version, Result: &domain.InvestigationResult{Outcome: outcome, Summary: "原调查结论", Evidence: "原取证记录", Environment: old.Environment, ObservedAt: "2026-10-30T09:52:15+08:00", DeploymentVersion: "unknown", Limitations: "仅代表原取证时刻"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := s.Store.GetCollaboration(ctx, old.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeJSON, _ := json.Marshal(before)
+			jobBefore, err := s.Store.GetReplyJob(ctx, done.Collaboration.Result.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			origin, err := s.Store.GetRun(ctx, "origin")
+			if err != nil {
+				t.Fatal(err)
+			}
+			origin.ID, origin.Prompt = "continuation", "环境配置已恢复，再继续刚才的问题"
+			if err = s.Store.PutRun(ctx, origin); err != nil {
+				t.Fatal(err)
+			}
+			in := app.CollaborationInput{OriginRunID: origin.ID, RequestID: "continue", Title: old.Title, Brief: old.Brief, Environment: old.Environment}
+			fresh, err := s.CreateCollaboration(ctx, app.Human(), in)
+			if err != nil || fresh.Collaboration.ID == old.ID || fresh.Collaboration.Status != "pending" {
+				t.Fatal(fresh, err)
+			}
+			var newClaim app.CollaborationAction
+			for _, status := range []string{"pending", "investigating", "blocked"} {
+				if status == "investigating" {
+					claim, e := s.ActCollaboration(ctx, dev, fresh.Collaboration.ID, app.CollaborationAction{Action: "claim", RequestID: "new-claim"})
+					if e != nil {
+						t.Fatal(e)
+					}
+					newClaim = app.CollaborationAction{Action: "report", RequestID: "new-blocked", ClaimID: claim.ClaimID, ReportKind: "blocked", Body: "等待本轮环境核验"}
+				}
+				if status == "blocked" {
+					if _, err = s.ActCollaboration(ctx, dev, fresh.Collaboration.ID, newClaim); err != nil {
+						t.Fatal(err)
+					}
+				}
+				in.RequestID = "repeat-" + status
+				reused, e := s.CreateCollaboration(ctx, app.Human(), in)
+				if e != nil || reused.Collaboration.ID != fresh.Collaboration.ID || reused.Collaboration.Status != status {
+					t.Fatal("active investigation duplicated", reused, e)
+				}
+			}
+			after, err := s.Store.GetCollaboration(ctx, old.ID)
+			afterJSON, _ := json.Marshal(after)
+			jobAfter, jobErr := s.Store.GetReplyJob(ctx, done.Collaboration.Result.ID)
+			if err != nil || jobErr != nil || string(afterJSON) != string(beforeJSON) || jobAfter != jobBefore {
+				t.Fatal("history/outbox changed", after, err, jobErr)
+			}
+			work, err := s.WorkList(ctx, dev)
+			if err != nil {
+				t.Fatal(err)
+			}
+			items := work["collaborations"].([]domain.Collaboration)
+			if len(items) != 1 || items[0].ID != fresh.Collaboration.ID {
+				t.Fatal("new task missing from inbox", work, err)
+			}
+			all, err := s.Store.ListCollaborations(ctx, p.ID)
+			if err != nil || len(all) != 2 {
+				t.Fatal(all, err)
+			}
+		})
+	}
+}
