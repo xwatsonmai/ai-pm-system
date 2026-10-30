@@ -2,9 +2,20 @@
 
 **把产品想法聊清楚，让 Agent 接得住，让交付有据可验。**
 
+**配套桌面客户端：[AI PM Desktop · ai-pm-desktop](https://github.com/xwatsonmai/ai-pm-desktop)**
+
 智驱把需求讨论、Agent 评审、本地开发、问题排查和人工验收连在一起。产品可以从一句话、一张截图或一次问答开始，和 Agent 逐步明确目标、范围与验收条件；确认后的工作交给桌面客户端认领，在本机调用开发 Agent 推进。
 
 你负责业务判断和最终确认，Agent 负责整理、追问、调查和执行。需求原文、讨论记录、开发结果与验收结论留在同一条工作流里。
+
+## 项目组成
+
+本仓库是智驱的平台主仓，配套的桌面客户端维护在独立仓库中。两者属于同一产品，独立开发和发版。
+
+| 仓库 | 用来做什么 |
+| --- | --- |
+| [ai-pm-system](https://github.com/xwatsonmai/ai-pm-system)（平台主仓，本仓库） | 运行平台，供产品讨论需求、查看进度、测试和验收 |
+| [ai-pm-desktop](https://github.com/xwatsonmai/ai-pm-desktop)（配套桌面客户端） | 在开发机器上接单，管理工作区并调度开发 Agent |
 
 [多轮需求评审](#review) · [客户端接单](#desktop) · [问答协查](#investigation) · [Bug 建单](#bugs) · [对话转需求](#ideas) · [开始使用](#getting-started) · [路线图](#roadmap)
 
@@ -118,13 +129,6 @@ Agent 先问会影响整个需求的关键选择。例如：“退款原路退�
 <a id="getting-started"></a>
 
 ## 开始使用
-
-智驱由两个独立维护和发版的仓库组成：
-
-| 仓库 | 用来做什么 |
-| --- | --- |
-| [ai-pm-system](https://github.com/xwatsonmai/ai-pm-system)（本仓库） | 运行平台，供产品讨论需求、查看进度、测试和验收 |
-| [ai-pm-desktop](https://github.com/xwatsonmai/ai-pm-desktop) | 在开发机器上接单，管理工作区并调度开发 Agent |
 
 本机体验平台需要 Go 1.26.2+、Node.js 22.19+、npm 和 Git：
 
