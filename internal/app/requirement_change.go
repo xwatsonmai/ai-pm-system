@@ -37,6 +37,7 @@ func (s *Service) prepareRequirementChange(c context.Context, a domain.Actor, t 
 		}
 		v.Messages = append(v.Messages, domain.RequirementReviewMessage{ID: domain.ID("rm_"), Role: "system", Action: "change_feedback", Body: "本次变更来源反馈；原报告、讨论与附件保留，确认变更前不关闭。", Source: &bug, Attachments: bug.Attachments, At: change.At, Generation: v.Generation + 1})
 		if prior, err := s.Store.GetRequirementReview(c, bug.ID); err == nil {
+			change.SourceReviewVersion = prior.Version
 			// Preserve the product's corrections, rather than treating the prior
 			// Bug Agent's classification as a final product decision.
 			start := max(0, len(prior.Messages)-10)

@@ -179,7 +179,11 @@ func (s *Service) saveRequirementReview(c context.Context, a domain.Actor, id st
 	if t.Status == "clarify" && !t.ReviewingChange() {
 		v.Mode = ""
 	}
-	if t.ChangeRequestID != "" && in.Action != "start" {
+	if t.ChangeRequestID != "" {
+		if in.Action == "start" {
+			v.Source, v.TaskRevision, v.Status = t, t.Revision, "change_pending"
+			return v, nil
+		}
 		return v, errors.New("此反馈已转入原需求变更，请打开原需求继续处理")
 	}
 	if v.Mode == "testing_change" && !t.ReviewingChange() && in.Action != "start" && in.Action != "request_change" {
