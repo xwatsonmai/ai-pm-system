@@ -70,6 +70,9 @@ func syncChangeFeedback(c context.Context, tx *sql.Tx, before, after domain.Task
 		if e != nil {
 			return e
 		}
+		if starting && v.Version != change.SourceReviewVersion {
+			return domain.ErrConflict
+		}
 		v.Version++
 		v.Generation++
 		v.Status, v.Source, v.TaskRevision, v.UpdatedAt, v.RunID = status, bug, bug.Revision, bug.UpdatedAt, ""
@@ -83,6 +86,8 @@ func syncChangeFeedback(c context.Context, tx *sql.Tx, before, after domain.Task
 		if _, err = tx.ExecContext(c, "UPDATE requirement_reviews SET version=?,payload=? WHERE task_id=?", v.Version, string(b), bug.ID); err != nil {
 			return err
 		}
+	} else if errors.Is(err, sql.ErrNoRows) && starting && change.SourceReviewVersion != 0 {
+		return domain.ErrConflict
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}

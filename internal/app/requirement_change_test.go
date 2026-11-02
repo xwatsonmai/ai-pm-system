@@ -255,6 +255,10 @@ func TestTestingChangeOtherBugResolvedDuringReviewAndReadyFeedbackIsNotClaimable
 	if !seenParent {
 		t.Fatal("original developer lost pending requirement")
 	}
+	frozenReview, err := s.SaveRequirementReview(c, app.Human(), bug.ID, app.RequirementReviewInput{Action: "start", RequestID: "open-frozen-feedback"})
+	if err != nil || frozenReview.Status != "change_pending" {
+		t.Fatal("frozen feedback restarted old review", frozenReview, err)
+	}
 	current, _ := s.Store.GetTask(c, parent.ID)
 	if _, err = s.SaveRequirementReview(c, app.Human(), parent.ID, app.RequirementReviewInput{Action: "cancel_change", ExpectedTaskVersion: current.Version, Generation: v.Generation, RequestID: "cancel-ready-source"}); err != nil {
 		t.Fatal(err)
