@@ -74,17 +74,40 @@ try{
  await page.locator('#testing-form [name=note]').fill('原操作仍会触发异常');await page.locator('#testing-form button[type=submit]').click();await waitTask(platformBug.id,'doing');
  assert.equal((await task(parent.id)).status,'testing');
  report.platformBug='独立平台 Bug 验证失败可退回原 Bug 修复，不影响需求状态';
+ // Exercise post-release acceptance, including the to-do entry and review dialog.
+ parent=await task(parent.id);
+ await api(`/tasks/${parent.id}/actions`,{action:'test_pass',version:parent.version,request_id:'initial-test-pass',test_verification:{revision:parent.revision,sha:baseline,environment:'测试环境',note:'产品测试通过'}});
+ parent=await task(parent.id);
+ await api(`/tasks/${parent.id}/actions`,{action:'mark_deployed',version:parent.version,request_id:'initial-deploy',deployment:{revision:parent.revision,sha:baseline,environment:'生产环境',body:'已实际部署初始版本'}});
+ parent=await task(parent.id);
+ const todoID='td_abcdef987654';
+ await page.route(base+'/api/todos/'+todoID,route=>route.fulfill({json:{todo:{id:todoID,project:project.name,title:'已上线，待验收',kind:'acceptance',subject:parent.title,created_at:Date.now(),fields:[],open:true},task:parent,recipient:true}}));
+ await page.goto(base+'/todo/'+todoID);
+ await page.getByRole('link',{name:'提起 Bug',exact:true}).click();
+ await page.locator('.detail-title').waitFor();
+ assert(await page.getByRole('button',{name:'提起 Bug',exact:true}).isVisible());
+ report.acceptanceTodo='验收待办可进入原需求提起 Bug';
  const profile=await api('/profiles',{name:'本地测试模型',provider:'fixture',model:'fixture',base_url:'http://127.0.0.1:1',api:'openai-completions',supports_images:true});
  await api('/platform/settings',{profile_id:profile.id},'PUT');
- async function createBug(title,paste=false){
-  await open(parent.id);await page.getByRole('button',{name:'提起 Bug',exact:true}).click();
+ async function createBug(title,paste=false,acceptance=false){
+  await open(parent.id);
+  if(acceptance){
+   await page.getByRole('button',{name:'开始验收',exact:true}).click();
+   await page.setViewportSize({width:390,height:844});
+   await page.screenshot({path:join(output,'acceptance-mobile.png')});
+   assert(await page.locator('#review-form .modal-actions').evaluate(el=>el.scrollWidth<=el.clientWidth+1),'acceptance actions overflow on mobile');
+   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+  }
+  await page.getByRole('button',{name:'提起 Bug',exact:true}).click();
+  if(acceptance){await page.getByRole('heading',{name:'提起验收 Bug',exact:true}).waitFor();await page.setViewportSize({width:1440,height:1050});}
   await page.locator('#task-form [name=title]').fill(title);
   await page.locator('#requirement-editor [contenteditable]').fill('连续点击退款出现两条记录，期望只生成一条。');
   if(paste){const prose=page.locator('#requirement-editor [contenteditable]');const png=await prose.screenshot();await prose.click();await prose.evaluate((el,bytes)=>{const dt=new DataTransfer();dt.items.add(new File([new Uint8Array(bytes)],'bug.png',{type:'image/png'}));el.dispatchEvent(new ClipboardEvent('paste',{clipboardData:dt,bubbles:true,cancelable:true}));},[...png]);await page.locator('.requirement-file').waitFor();}
   await page.locator('#task-form button[type=submit]').click();await page.locator('#task-form').waitFor({state:'detached'});
   const ctx=await api(`/projects/${project.id}/context`);return ctx.tasks.find(t=>t.title===title);
  }
- let bug=await createBug('重复退款 Bug',true);assert(bug);bug=await waitTask(bug.id,'ready');assert.equal(bug.parent_requirement_id,parent.id);assert.equal(bug.attachments.length,1);assert.equal(bug.bug_context.sha,baseline);assert.equal((await task(parent.id)).status,'fixing');
+ let bug=await createBug('重复退款 Bug',true,true);assert(bug);bug=await waitTask(bug.id,'ready');assert.equal(bug.parent_requirement_id,parent.id);assert.equal(bug.attachments.length,1);assert.equal(bug.bug_context.sha,baseline);assert.equal((await task(parent.id)).status,'fixing');
+ report.acceptance='待验收可从详情及验收弹窗提 Bug；保存后阻塞验收并进入待修复';
  report.baseline='Agent 请求 main 时服务端仍读取提测分支固定 SHA；图文及粘贴图片保存、自动待领取通过';
  const rejected=await createBug('驳回反馈');
  await open(rejected.id);await page.getByRole('button',{name:'继续需求评审',exact:true}).click();

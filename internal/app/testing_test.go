@@ -328,3 +328,112 @@ func TestPlatformBugTestingCanReturnWithoutReturningRequirement(t *testing.T) {
 	}
 	passTesting(t, s, m.Task)
 }
+
+func acceptanceRequirement(t *testing.T, s *app.Service, p string) domain.Task {
+	t.Helper()
+	parent := passTesting(t, s, testingRequirement(t, s, p))
+	m, err := s.Act(context.Background(), app.Human(), parent.ID, app.Action{Action: "mark_deployed", RequestID: domain.ID("deploy_"), Version: parent.Version, Deployment: &domain.Deployment{Revision: parent.Revision, SHA: parent.Submission.SHA, Environment: "生产环境", Body: "实际部署已完成"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m.Task
+}
+
+func TestAcceptanceBugBlocksUntilRepairRetestAndRelease(t *testing.T) {
+	s, p := setup(t)
+	c := context.Background()
+	parent := acceptanceRequirement(t, s, p.ID)
+	original := parent
+	bug := fileTestBug(t, s, parent)
+	if bug.BugContext.SHA != original.Deployment.SHA || bug.BugContext.Branch != original.Branch || bug.BugContext.Version != original.Version {
+		t.Fatal("acceptance Bug lost deployed baseline", bug.BugContext)
+	}
+	parent, _ = s.Store.GetTask(c, parent.ID)
+	if parent.Status != "fixing" || parent.Version <= original.Version || parent.TestVerification != nil || parent.Deployment == nil || *parent.Deployment != *original.Deployment {
+		t.Fatal("filing did not block acceptance and preserve deployment", parent)
+	}
+	accept := app.Action{Action: "accept", RequestID: "stale-accept", Version: original.Version, Review: &domain.Review{Revision: original.Revision, SHA: original.Submission.SHA, Environment: original.Deployment.Environment, Checks: []string{"passed"}}}
+	if _, err := s.Act(c, app.Human(), parent.ID, accept); err == nil {
+		t.Fatal("stale acceptance ignored open Bug")
+	}
+	accept.Version, accept.RequestID = parent.Version, "blocked-accept"
+	if _, err := s.Act(c, app.Human(), parent.ID, accept); err == nil {
+		t.Fatal("accepted requirement with open Bug")
+	}
+	reviewBug(t, s, bug, "ready")
+	m, err := s.Act(c, developer(p.ID, "dev"), bug.ID, app.Action{Action: "claim", RequestID: "acceptance-bug-claim", Branch: "fix/acceptance"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixed := strings.Repeat("b", 40)
+	m, err = s.Act(c, app.Human(), bug.ID, app.Action{Action: "submit", Revision: m.Task.Revision, RequestID: "acceptance-bug-submit", Submission: &domain.Submission{SHA: fixed, Summary: "修复验收问题", Tests: "回归通过"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Act(c, app.Human(), bug.ID, app.Action{Action: "verify_bug", Version: m.Task.Version, RequestID: "acceptance-bug-verify", TestVerification: &domain.TestVerification{Revision: m.Task.Revision, SHA: fixed, Environment: "测试环境", Note: "产品确认有效"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, _ = s.Store.GetTask(c, parent.ID)
+	if parent.Status != "retest" {
+		t.Fatal("repair skipped retest", parent.Status)
+	}
+	s.ValidateTestingCode = func(_ context.Context, project, branch, sha string, fixes []string) error {
+		if project != p.ID || branch != original.Branch || sha != fixed || len(fixes) != 1 || fixes[0] != fixed {
+			t.Fatal("retest did not validate repair", project, branch, sha, fixes)
+		}
+		return nil
+	}
+	m, err = s.Act(c, app.Human(), parent.ID, app.Action{Action: "start_retest", Version: parent.Version, RequestID: "acceptance-retest", TestVerification: &domain.TestVerification{Revision: parent.Revision, SHA: fixed, Environment: "测试环境", Note: "修复已合入"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent = passTesting(t, s, m.Task)
+	accept.Version, accept.RequestID = parent.Version, "not-released-accept"
+	accept.Review.SHA = fixed
+	if _, err = s.Act(c, app.Human(), parent.ID, accept); err == nil {
+		t.Fatal("old deployment bypassed new release")
+	}
+	m, err = s.Act(c, app.Human(), parent.ID, app.Action{Action: "mark_deployed", Version: parent.Version, RequestID: "acceptance-redeploy", Deployment: &domain.Deployment{Revision: parent.Revision, SHA: fixed, Environment: "生产环境", Body: "修复实际部署完成"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accept.Version, accept.RequestID = m.Task.Version, "fixed-accept"
+	m, err = s.Act(c, app.Human(), parent.ID, accept)
+	if err != nil || m.Task.Status != "done" {
+		t.Fatal(m.Task.Status, err)
+	}
+	if _, err = s.CreateTask(c, app.Human(), p.ID, app.TaskInput{Title: "过期验收 Bug", Kind: "bug", ParentRequirementID: parent.ID, ParentVersion: m.Task.Version, RequestID: "after-acceptance"}); err == nil {
+		t.Fatal("filed linked Bug after acceptance finished")
+	}
+}
+
+func TestAcceptanceBugCreationRacesAcceptance(t *testing.T) {
+	s, p := setup(t)
+	parent := acceptanceRequirement(t, s, p.ID)
+	c := context.Background()
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, err := s.CreateTask(c, app.Human(), p.ID, app.TaskInput{Title: "并发验收 Bug", Kind: "bug", ParentRequirementID: parent.ID, ParentVersion: parent.Version, RequestID: "race-acceptance-bug"})
+		errs <- err
+	}()
+	go func() {
+		defer wg.Done()
+		_, err := s.Act(c, app.Human(), parent.ID, app.Action{Action: "accept", RequestID: "race-acceptance", Version: parent.Version, Review: &domain.Review{Revision: parent.Revision, SHA: parent.Submission.SHA, Environment: parent.Deployment.Environment, Checks: []string{"passed"}}})
+		errs <- err
+	}()
+	wg.Wait()
+	close(errs)
+	success := 0
+	for err := range errs {
+		if err == nil {
+			success++
+		}
+	}
+	if success != 1 {
+		t.Fatal("conflicting acceptance and Bug creation committed", success)
+	}
+}

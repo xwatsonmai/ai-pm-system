@@ -6,12 +6,12 @@
 
 需求的测试流程：`doing → testing → fixing → retest → testing → pending_release → review → done`。
 
-- `testing` 为测试中；需求详情提供「提起 Bug」和「确认测试通过」。测试缺陷不能通过 `rework` 直接退回原需求。
+- `testing` 为测试中；需求详情提供「提起 Bug」和「确认测试通过」。`review`（上线后待验收）的需求详情、验收弹窗和验收待办也提供「提起 Bug」入口。测试缺陷不能通过 `rework` 直接退回原需求。
 - 从需求提起的 Bug 保存 `parent_requirement_id` 和 `bug_context`。一个 Bug 只归属同项目的一条需求，创建后不能换绑或改成需求；独立平台 Bug 不填写归属，沿用原创建方式。
-- 提 Bug 时原子保存关联并使需求进入 `fixing`（待修复）。待修复和待复测仍可提起其他 Bug，以便继续登记问题。
+- 提 Bug 时原子保存关联并使需求进入 `fixing`（待修复）。待修复和待复测仍可提起其他 Bug，以便继续登记问题。验收期间提 Bug 同样进入 `fixing`，保留已有上线记录，阻塞验收；修复后必须经过复测、测试通过、重新上线，再进行业务验收。
 - 关联 Bug 的待评审、评审失败、待补充、驳回待确认、待认领、处理中和待验证均阻塞需求；只有 `resolved`（产品验证已解决）或产品明确结束的 Bug 才解除阻塞。
 - 全部关联 Bug 解决或关闭后，需求进入 `retest`（待复测），不会自动开始测试或自动通过。产品明确选择包含全部修复的实际代码版本与环境，再点击「开始复测」。
-- Bug 的创建、重开、解决与需求状态同步在同一 SQLite 事务提交；测试放行与新建 Bug 互斥，过期表单不能覆盖新状态。有关联未结 Bug 时不能直接结束需求，需先处理各 Bug。
+- Bug 的创建、重开、解决与需求状态同步在同一 SQLite 事务提交；测试放行、验收通过与新建 Bug 互斥，过期表单不能覆盖新状态。有关联未结 Bug 时不能直接结束需求，需先处理各 Bug。
 
 ## 图文录入和评审
 
@@ -37,7 +37,7 @@ Agent 的结论有三条路径：
 
 ## 接口与客户端
 
-- `POST /api/projects/{id}/tasks` 新增 `parent_requirement_id / parent_version`，仅工作台人类用户可创建关联测试 Bug；关联信息由服务端从需求读取。
+- `POST /api/projects/{id}/tasks` 新增 `parent_requirement_id / parent_version`，仅工作台人类用户可在测试、修复或待验收期间创建关联 Bug；关联信息由服务端从需求读取。
 - `POST /api/tasks/{id}/actions` 新增 `test_pass / verify_bug / return_bug / start_retest`。必须携带最新 `version` 和唯一 `request_id`；除退回 Bug 外还需 `test_verification` 的 `revision / sha / environment / note`。
 - `POST /api/tasks/{id}/requirement-review` 增加 `confirm_rejection`，需当前 `generation`，与普通评审一样支持幂等重试。
 - MCP `task_submit_result` 保持原参数，返回状态变化为 `testing` 或关联 Bug 的 `verifying`。产品测试确认仍通过工作台执行，MCP 工具不会自动授予部署或产品确认权限。
