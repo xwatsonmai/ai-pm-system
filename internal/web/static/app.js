@@ -1170,7 +1170,7 @@ async function openTask(taskID) {
     buttons +=
       action("submit-result", "提交开发结果", "primary", `data-id="${t.id}"`) +
       action("release", "交接任务", "", `data-id="${t.id}"`);
-  if (t.kind === "requirement" && ["testing","fixing","retest"].includes(t.status)) buttons += action("file-testing-bug","提起 Bug","",`data-id="${t.id}"`);
+  if (t.kind === "requirement" && ["testing","fixing","retest","review"].includes(t.status)) buttons += action("file-testing-bug","提起 Bug","",`data-id="${t.id}"`);
   if (t.status === "testing") buttons += action("test-pass","确认测试通过","primary",`data-id="${t.id}"`);
   if (t.status === "retest") buttons += action("start-retest","开始复测","primary",`data-id="${t.id}"`);
   if (t.status === "verifying") buttons += action("verify-bug","确认修复有效","primary",`data-id="${t.id}"`);
@@ -1249,7 +1249,7 @@ async function taskForm(taskID, iterationSourceID, bugParentID) {
   const parent = bugParentID ? (await api(`/tasks/${bugParentID}`)).task : null;
   const t = taskID ? (await api(`/tasks/${taskID}`)).task : parent ? {kind:"bug"} : {};
   if (state.project.id !== projectID) return;
-  modal(parent ? "提起测试 Bug" : source ? "追加迭代" : taskID ? "编辑需求" : "创建需求", requirementFormHTML(t), {document: true});
+  modal(parent ? (parent.status === "review" ? "提起验收 Bug" : "提起测试 Bug") : source ? "追加迭代" : taskID ? "编辑需求" : "创建需求", requirementFormHTML(t), {document: true});
   requirementEditor = mountRequirementEditor($("#task-form"), {
     task: t, projectID, userID: state.auth?.user?.id || "local-owner",
     draftScope: parent ? 'testing-bug:' + parent.id : source ? 'iteration:' + source.id : undefined,
@@ -1262,9 +1262,9 @@ async function taskForm(taskID, iterationSourceID, bugParentID) {
     form.dataset.bugParent = parent.id; form.dataset.parentVersion = parent.version;
     form.elements.kind.value = 'bug';
     $('.requirement-kind',form).hidden = true;
-    $('.requirement-state-note',form).textContent = '先保存报告和图片，Agent 将按此需求的提测代码评审。问题成立后进入待认领，驳回须由你确认。';
+    $('.requirement-state-note',form).textContent = '先保存报告和图片，Agent 将按此需求的代码版本评审。需求进入待修复；修复后需复测、上线并重新验收，驳回须由你确认。';
     $('button[type=submit]',form).textContent = '保存 Bug 并评审';
-    $('.requirement-document',form).insertAdjacentHTML('afterbegin',`<div class="notice info">所属需求：${escape(parent.title)} · R${parent.revision}<br>开发分支：${escape(parent.branch || '未登记')}<br>提测版本：${escape(parent.submission?.sha || '未登记')}</div>`);
+    $('.requirement-document',form).insertAdjacentHTML('afterbegin',`<div class="notice info">所属需求：${escape(parent.title)} · R${parent.revision}<br>开发分支：${escape(parent.branch || '未登记')}<br>${parent.status === "review" ? "验收版本" : "提测版本"}：${escape(parent.submission?.sha || '未登记')}</div>`);
   }
   if (t.parent_requirement_id) $('.requirement-kind',form).hidden = true;
   if (source) {
@@ -1298,7 +1298,7 @@ async function reviewForm(taskID) {
   if (t.status !== "review") throw new Error("需求尚未进入待验收");
   modal(
     "业务验收",
-    `<form id="review-form" data-id="${t.id}" data-revision="${t.revision}" data-sha="${escape(t.submission.sha)}" data-count="${t.acceptance.length}"><p class="context-note">${escape(t.title)} · R${t.revision}<br><span class="mono">${escape(t.submission.sha)}</span></p>${field("验收环境", `<input name="environment" value="${escape(t.deployment?.environment || "")}" readonly required>`)}<label>逐项确认</label>${t.acceptance.map((v, i) => `<label class="check-row"><input type="checkbox" name="check_${i}"><span>${escape(v)}</span></label>`).join("")}${field("验收说明", `<textarea name="note" placeholder="通过说明，或退回的具体原因"></textarea>`)}<div class="form-error"></div><div class="modal-actions"><button name="verdict" value="reject" type="submit">退回修改</button><button name="verdict" value="accept" type="submit" class="primary">确认验收通过</button></div></form>`,
+    `<form id="review-form" data-id="${t.id}" data-revision="${t.revision}" data-sha="${escape(t.submission.sha)}" data-count="${t.acceptance.length}"><p class="context-note">${escape(t.title)} · R${t.revision}<br><span class="mono">${escape(t.submission.sha)}</span></p>${field("验收环境", `<input name="environment" value="${escape(t.deployment?.environment || "")}" readonly required>`)}<label>逐项确认</label>${t.acceptance.map((v, i) => `<label class="check-row"><input type="checkbox" name="check_${i}"><span>${escape(v)}</span></label>`).join("")}${field("验收说明", `<textarea name="note" placeholder="通过说明，或退回的具体原因"></textarea>`)}<div class="form-error"></div><div class="modal-actions">${t.kind === "requirement" ? action("file-testing-bug", "提起 Bug", "", `data-id="${t.id}"`) : ""}<button name="verdict" value="reject" type="submit">退回修改</button><button name="verdict" value="accept" type="submit" class="primary">确认验收通过</button></div></form>`,
   );
 }
 function profileForm(profileID) {

@@ -74,8 +74,8 @@ func validateTestingWrite(c context.Context, tx *sql.Tx, t domain.Task, expected
 			}
 		}
 		if !domain.TaskFinished(t.Status) && (expected == 0 || domain.TaskFinished(old.Status)) {
-			if parent.Status != "testing" && parent.Status != "fixing" && parent.Status != "retest" {
-				return fmt.Errorf("%w: 所属需求已离开测试流程，不能新建或重新打开关联 Bug", domain.ErrConflict)
+			if !domain.RequirementBugReporting(parent.Status) {
+				return fmt.Errorf("%w: 所属需求已离开测试、修复或待验收流程，不能新建或重新打开关联 Bug", domain.ErrConflict)
 			}
 		}
 	}
@@ -101,7 +101,7 @@ func syncBugParent(c context.Context, tx *sql.Tx, bug domain.Task) error {
 	if err != nil {
 		return err
 	}
-	if parent.Status != "testing" && parent.Status != "fixing" && parent.Status != "retest" {
+	if !domain.RequirementBugReporting(parent.Status) {
 		return nil
 	}
 	n, err := openRequirementBugs(c, tx, parent.ID)

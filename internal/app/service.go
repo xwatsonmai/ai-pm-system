@@ -299,8 +299,8 @@ func (s *Service) createTask(c context.Context, a domain.Actor, p string, v Task
 		if parent.Version != v.ParentVersion {
 			return domain.Mutation{}, domain.ErrConflict
 		}
-		if parent.Status != "testing" && parent.Status != "fixing" && parent.Status != "retest" {
-			return domain.Mutation{}, errors.New("只能在需求测试或修复期间提起关联 Bug")
+		if !domain.RequirementBugReporting(parent.Status) {
+			return domain.Mutation{}, errors.New("只能在需求测试、修复或待验收期间提起关联 Bug")
 		}
 		if parent.Submission == nil || parent.Submission.Revision != parent.Revision || !nonempty(parent.Branch) {
 			return domain.Mutation{}, errors.New("需求缺少当前提测版本或开发分支，请由开发方补全后提起 Bug")

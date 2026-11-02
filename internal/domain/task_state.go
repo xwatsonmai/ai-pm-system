@@ -1,5 +1,11 @@
 package domain
 
+// RequirementBugReporting includes post-release acceptance. Filing a Bug returns
+// the requirement to fixing; repairs still require retesting and a new release.
+func RequirementBugReporting(status string) bool {
+	return status == "testing" || status == "fixing" || status == "retest" || status == "review"
+}
+
 func TaskActive(status string) bool {
 	switch status {
 	case "clarify", "ready", "doing", "aligning", "testing", "fixing", "retest", "verifying", "pending_release", "review":

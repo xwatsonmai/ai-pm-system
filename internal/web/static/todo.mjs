@@ -108,7 +108,7 @@ function releaseForms(task) {
 
 function acceptanceForm(task) {
   const checks = (task.acceptance || []).map((a, i) => `<label class="todo-check"><input type="checkbox" name="check_${i}"><span>${escape(a)}</span></label>`).join("");
-  return actionForm("acceptance", "业务验收", `<fieldset class="todo-checks"><legend>逐项确认验收条件</legend>${checks || '<p class="hint">这条需求没有验收条件。</p>'}</fieldset>` + field("验收环境", `<input value="${escape(task.deployment?.environment)}" readonly>`) + field("验收说明", '<textarea name="note" rows="3" placeholder="不通过时必须填写原因"></textarea>'), '<button class="primary" type="submit" name="decision" value="accept">验收通过</button><button class="danger" type="submit" name="decision" value="reject">验收不通过</button>');
+  return actionForm("acceptance", "业务验收", `<fieldset class="todo-checks"><legend>逐项确认验收条件</legend>${checks || '<p class="hint">这条需求没有验收条件。</p>'}</fieldset>` + field("验收环境", `<input value="${escape(task.deployment?.environment)}" readonly>`) + field("验收说明", '<textarea name="note" rows="3" placeholder="不通过时必须填写原因"></textarea>'), '<button class="primary" type="submit" name="decision" value="accept">验收通过</button><button class="danger" type="submit" name="decision" value="reject">验收不通过</button>' + (task.kind === "requirement" ? `<a class="todo-button" href="${workbench(task)}">提起 Bug</a>` : ""));
 }
 
 async function detail(todoID) {
