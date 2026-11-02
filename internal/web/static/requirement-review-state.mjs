@@ -1,5 +1,6 @@
 // Only the current revision in the review stage can require product attention.
 export function reviewAttention(task, summary) {
+  if (task?.change_request_id) return {label:'已转入变更',detail:'在原需求继续处理',attention:false};
   if (task?.status === 'aligning') return {label:'待对齐',detail:'回复开发问题',attention:true};
   if (task?.status !== 'clarify') return null;
   if (!summary || summary.task_revision !== task.revision) return {label:'后台评审中', attention:false};
@@ -136,7 +137,7 @@ export function chatTimeline(review, {viewerID = ''} = {}) {
     }
     if (m.role === 'user' && (m.action === 'confirm' || m.action === 'confirm_rejection')) {
       items.push({key: m.id, type: 'event', action: m.action, message: m, at: m.at,
-        text: m.action === 'confirm' ? `${m.actor || '产品'} 确认了需求稿与验收条件，需求进入待认领` : `${m.actor || '产品'} 同意驳回，Bug 已关闭`});
+        text: m.action === 'confirm' ? (m.body?.includes('本轮变更')?`${m.actor || '产品'} ${m.body}`:`${m.actor || '产品'} 确认了需求稿与验收条件，需求进入待认领`) : `${m.actor || '产品'} 同意驳回，Bug 已关闭`});
       return;
     }
     const agent = m.role === 'assistant';

@@ -11,6 +11,8 @@ import (
 )
 
 type RequirementReviewInput struct {
+	SourceBugID         string                                  `json:"source_bug_id,omitempty"`
+	SourceBugVersion    int                                     `json:"source_bug_version,omitempty"`
 	ExpectedTaskVersion int                                     `json:"expected_task_version,omitempty"`
 	Action              string                                  `json:"action"`
 	RequestID           string                                  `json:"request_id"`
@@ -47,6 +49,9 @@ func (s *Service) RequirementReview(c context.Context, a domain.Actor, id string
 	if err == nil && domain.TaskTerminated(t.Status) {
 		v.Source = t
 		v.Status = "closed"
+	}
+	if err == nil && (t.ReviewingChange() || t.ChangeRequestID != "") {
+		v.Source = t
 	}
 	if err == nil && t.Status == "clarify" && (v.Status == "needs_input" || v.Status == "ready_to_confirm") {
 		v.RecheckReason, err = s.ReviewRecheckReason(c, v)
@@ -168,11 +173,17 @@ func (s *Service) saveRequirementReview(c context.Context, a domain.Actor, id st
 		}
 		return v, fmt.Errorf("%w: 需求已结束，评审记录只读；输入仍保留在草稿中，请先重新打开需求", domain.ErrConflict)
 	}
-	if v.Mode == "development_alignment" && t.Status != "clarify" {
+	if v.Mode == "development_alignment" && t.Status != "clarify" && in.Action != "request_change" {
 		return s.replyDevelopmentAlignment(c, a, t, v, in, key, fp, authorization)
 	}
-	if t.Status == "clarify" {
+	if t.Status == "clarify" && !t.ReviewingChange() {
 		v.Mode = ""
+	}
+	if t.ChangeRequestID != "" && in.Action != "start" {
+		return v, errors.New("此反馈已转入原需求变更，请打开原需求继续处理")
+	}
+	if v.Mode == "testing_change" && !t.ReviewingChange() && in.Action != "start" && in.Action != "request_change" {
+		return v, errors.New("本次变更评审已结束；历史保留，后续请在原需求处理")
 	}
 	if t.ParentRequirementID != "" && t.Status != "clarify" && t.Status != "ready" && in.Action != "start" {
 		return v, errors.New("Bug 已进入修复流程，请在工作记录补充；评审历史只读")
@@ -185,6 +196,14 @@ func (s *Service) saveRequirementReview(c context.Context, a domain.Actor, id st
 	var task *domain.Task
 	var ev *domain.Event
 	switch in.Action {
+	case "request_change":
+		if err = s.prepareRequirementChange(c, a, &t, &v, in); err != nil {
+			return v, err
+		}
+		task = &t
+		ev = &domain.Event{ProjectID: t.ProjectID, TaskID: t.ID, Kind: "requirement_change_requested", Actor: a.Name, Body: in.Body, At: t.UpdatedAt}
+		in.Action, in.ReplyTo, in.Answers, in.QuestionNotes = "message", "", nil, nil
+		fallthrough
 	case "start", "message", "retry":
 		if in.Action == "message" {
 			hasNote := false
@@ -289,6 +308,12 @@ func (s *Service) saveRequirementReview(c context.Context, a domain.Actor, id st
 			}
 			v.Messages = append(v.Messages, attributed(domain.RequirementReviewMessage{ID: domain.ID("rm_"), Role: "system", Authorization: authorization, Action: retry, Body: body, At: domain.Now(), Generation: v.Generation}, actor))
 		}
+	case "cancel_change":
+		if err = s.cancelRequirementChange(c, a, &t, &v, in); err != nil {
+			return v, err
+		}
+		task = &t
+		ev = &domain.Event{ProjectID: t.ProjectID, TaskID: t.ID, Kind: "requirement_change_canceled", Actor: a.Name, Body: "取消本轮变更，恢复原测试流程", At: t.UpdatedAt}
 	case "confirm_rejection":
 		if t.ParentRequirementID == "" || t.Status != "clarify" || v.Status != "rejection_pending" || in.Generation != v.Generation || v.TaskRevision != t.Revision {
 			return v, domain.ErrConflict
@@ -329,10 +354,19 @@ func (s *Service) saveRequirementReview(c context.Context, a domain.Actor, id st
 		if proposal == nil {
 			return v, errors.New("尚无可确认的需求稿")
 		}
+		changing := t.ReviewingChange()
+		if changing {
+			if err = confirmRequirementChange(&t, v, a, in); err != nil {
+				return v, err
+			}
+		}
 		t.Description, t.Acceptance = proposal.Description, proposal.Acceptance
 		t.Revision++
 		t.Version++
 		t.Status = "ready"
+		if changing && t.Claimant != "" && t.ClaimHash != "" {
+			t.Status = "doing"
+		}
 		t.UpdatedAt = domain.Now()
 		task = &t
 		v.TaskRevision = t.Revision
@@ -340,6 +374,11 @@ func (s *Service) saveRequirementReview(c context.Context, a domain.Actor, id st
 		v.ExpireForms(nil, "需求稿已确认，此表单已结束。", domain.Now())
 		v.Messages = append(v.Messages, attributed(domain.RequirementReviewMessage{ID: domain.ID("rm_"), Role: "user", Authorization: authorization, Action: "confirm", Body: "已确认需求稿与验收条件，需求进入待认领。", At: domain.Now(), Generation: v.Generation}, reviewActor(a, authorization)))
 		ev = &domain.Event{ProjectID: t.ProjectID, TaskID: t.ID, Kind: "requirements_confirmed", Actor: a.Name, Body: "产品确认评审需求稿与验收条件，进入待认领", At: domain.Now()}
+		if changing {
+			v.Messages[len(v.Messages)-1].Body = "已确认本轮变更与验收条件，交回开发继续修改；原提测结果失效，须重新提测。"
+			v.Source = t
+			ev.Kind, ev.Body = "requirement_change_confirmed", v.Messages[len(v.Messages)-1].Body
+		}
 	default:
 		return v, errors.New("不支持的评审操作")
 	}
@@ -484,6 +523,9 @@ func (s *Service) finishRequirementReview(c context.Context, id string, generati
 	}
 	if t.ParentRequirementID != "" && t.Status != "clarify" {
 		problem = "Bug 已进入后续处理，旧评审不能改变其状态"
+	}
+	if t.ChangeRequestID != "" {
+		return nil // The parent change owns this feedback; late Bug output is obsolete.
 	}
 	if t.Revision != v.TaskRevision {
 		// The next start/message rebases on the new source; preserve this attempt as failed.

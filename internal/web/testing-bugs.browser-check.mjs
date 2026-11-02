@@ -25,13 +25,14 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
  if(m.type==='stop'){finish();return}
  if(m.type==='start'){
   source=m.review_context;
-  if(!source?.requirement.parent_requirement_id){emit({type:'tool_call',id:'review',name:'submit_requirement_review',args:{reply:'保存原始需求',decision:'clarify',agenda:[{id:'scope',title:'需求范围',kind:'direction',status:'open'}],ask:{topic_id:'scope',kind:'direction',question:'这次要覆盖哪些场景？'}}});return}
+  if(!source?.requirement.parent_requirement_id && source?.requirement.requirement_change?.status!=='reviewing'){emit({type:'tool_call',id:'review',name:'submit_requirement_review',args:{reply:'保存原始需求',decision:'clarify',agenda:[{id:'scope',title:'需求范围',kind:'direction',status:'open'}],ask:{topic_id:'scope',kind:'direction',question:'这次要覆盖哪些场景？'}}});return}
   emit({type:'tool_call',id:'code',name:'repository_read',args:{action:'file',path:'behavior.txt',ref:'main'}});return;
  }
  if(m.type!=='tool_result')return;
  if(m.error){emit({type:'error',error:m.error});finish();return}
  if(m.id!=='code'){finish();return}
- if(m.data.text.trim()!=='FEATURE BUG BASELINE'||m.data.sha!==source.requirement.bug_context.sha){emit({type:'error',error:'review used wrong baseline'});finish();return}
+ if(!['FEATURE BUG BASELINE','FIXED FEATURE'].includes(m.data.text.trim())||m.data.sha!==(source.requirement.bug_context?.sha||source.requirement.requirement_change?.sha)){emit({type:'error',error:'review used wrong baseline'});finish();return}
+ if(source.requirement.requirement_change?.status==='reviewing'){emit({type:'tool_call',id:'review',name:'submit_requirement_review',args:{reply:'本轮变更采用浏览器定位，保留原功能；无需先发布原实现，等待产品确认。',decision:'ready',agenda:[],proposal:{description:source.requirement.description+'\\n\\n本轮变更：使用浏览器定位，拒绝授权时明确提示。',acceptance:['浏览器授权后记录位置，拒绝或失败显示提示']}}});return;}
  const title=source.requirement.title,last=source.conversation.filter(v=>v.role==='user').at(-1)?.body||'';
  // Earlier topics stay on the agenda; a settled round closes them instead of dropping them silently.
  const closed=(source.agenda||[]).map(t=>({...t,status:'resolved',conclusion:t.conclusion||'产品已补充'}));
@@ -127,6 +128,40 @@ try{
  report.lifecycle='待修复 → 产品验证 Bug → 待复测 → 开始复测 → 测试通过 → 待上线通过';
  await page.getByRole('button',{name:'确认已上线',exact:true}).waitFor();
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:join(output,'parent-mobile.png')});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+ // Re-review the same unreleased requirement: direct entry can be canceled.
+ await page.setViewportSize({width:1440,height:1050});await open(parent.id);
+ await page.getByRole('button',{name:'变更当前需求',exact:true}).click();
+ await page.locator('#requirement-change-form [name=body]').fill('本轮改用浏览器定位；先检查取消后原流程保留');
+ await page.locator('#requirement-change-form button[type=submit]').click();
+ await page.getByRole('button',{name:'取消本次变更',exact:true}).click();
+ await waitTask(parent.id,'pending_release');
+ assert.equal((await task(parent.id)).submission.sha,fixed);
+ // A rejected Bug can become a product-confirmed change, without passing or publishing the old implementation.
+ parent=await task(parent.id);
+ await api(`/tasks/${parent.id}/actions`,{action:'rework',request_id:'change-before-release',body:'本轮尚未发布，继续测试当前实现'});
+ await api(`/tasks/${parent.id}/actions`,{action:'submit',revision:parent.revision,request_id:'change-retest-fixture',submission:{summary:'原实现进入测试，尚未发布',sha:fixed,branch:'feature/testing',environment:'测试环境',tests:'自测完成'}});
+ const changeBug=await createBug('驳回变更反馈',true);
+ await open(changeBug.id);await page.getByRole('button',{name:'继续需求评审',exact:true}).click();
+ await page.getByRole('button',{name:'同意驳回，关闭 Bug',exact:true}).waitFor();
+ await page.locator('#review-input').fill('本轮改用浏览器定位，当前实现不放行，不先合入主线发布');await page.locator('.review-send').click();
+ await page.getByRole('button',{name:'同意驳回，关闭 Bug',exact:true}).waitFor();
+ await page.getByRole('button',{name:'转为当前需求变更',exact:true}).click();
+ assert.match(await page.locator('#requirement-change-form [name=body]').inputValue(),/浏览器定位/);
+ await page.setViewportSize({width:390,height:844});await page.screenshot({path:join(output,'change-form-mobile.png')});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+ await page.locator('#requirement-change-form button[type=submit]').click();
+ await page.getByRole('button',{name:'确认变更，交回开发',exact:true}).waitFor();
+ assert.equal((await task(parent.id)).status,'clarify');assert.equal((await task(changeBug.id)).status,'clarify');
+ const changeReview=await api(`/tasks/${parent.id}/requirement-review`);
+ assert.equal(changeReview.source.requirement_change.sha,fixed);assert.equal(changeReview.source.requirement_change.branch,'feature/testing');
+ await page.screenshot({path:join(output,'change-review-mobile.png')});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+ await page.setViewportSize({width:1440,height:1050});await page.screenshot({path:join(output,'change-review-desktop.png')});
+ const revision=(await task(parent.id)).revision;
+ await page.getByRole('button',{name:'确认变更，交回开发',exact:true}).click();
+ parent=await waitTask(parent.id,'doing');assert.equal(parent.revision,revision+1);assert.equal(parent.branch,'feature/testing');assert.equal(parent.submission,undefined);assert.equal(parent.deployment,undefined);assert.equal((await task(changeBug.id)).status,'closed');assert(parent.attachments.some(file=>changeBug.attachments.some(x=>x.id===file.id)));
+ await writeFile(join(repo,'behavior.txt'),'BROWSER LOCATION');git('commit','-am','apply current requirement change');const changed=git('rev-parse','HEAD');await api(`/projects/${project.id}/sync`,{});
+ await api(`/tasks/${parent.id}/actions`,{action:'submit',revision:parent.revision,request_id:'change-submit',submission:{summary:'本轮改用浏览器定位',sha:changed,branch:'feature/testing',environment:'测试环境',tests:'授权和拒绝场景通过'}});
+ parent=await waitTask(parent.id,'testing');assert.equal(parent.submission.sha,changed);assert.equal(parent.deployment,undefined);
+ report.requirementChange='详情发起可取消；驳回反馈转原需求变更、图片与纠正保留、产品显式确认、原分支原开发继续、新修订重新提测通过，未放行或发布旧实现';
  assert.deepEqual(errors,[]);await writeFile(join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));
 }catch(e){await page.screenshot({path:join(output,'failure.png')});throw e}
 finally{await browser.close();server.kill('SIGTERM');await serverExit;await rm(data,{recursive:true,force:true})}

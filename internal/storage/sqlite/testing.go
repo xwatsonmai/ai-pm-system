@@ -47,6 +47,9 @@ func validateTestingWrite(c context.Context, tx *sql.Tx, t domain.Task, expected
 		if old.ParentRequirementID != t.ParentRequirementID {
 			return errors.New("不能更改 Bug 归属")
 		}
+		if old.ChangeRequestID != "" {
+			return fmt.Errorf("%w: 此反馈已转入原需求变更，请在原需求继续处理", domain.ErrConflict)
+		}
 		if old.Status == "testing" && t.Status == "doing" {
 			var n int
 			if err := tx.QueryRowContext(c, "SELECT count(*) FROM tasks WHERE json_extract(payload,'$.parent_requirement_id')=?", t.ID).Scan(&n); err != nil {
@@ -79,7 +82,7 @@ func validateTestingWrite(c context.Context, tx *sql.Tx, t domain.Task, expected
 			}
 		}
 	}
-	if t.Kind == "requirement" && (t.Status == "testing" || t.Status == "retest" || t.Status == "pending_release" || t.Status == "review" || domain.TaskFinished(t.Status) || t.Status == "doing") {
+	if t.Kind == "requirement" && (t.Status == "testing" || t.Status == "retest" || t.Status == "pending_release" || t.Status == "review" || domain.TaskFinished(t.Status) || (t.Status == "doing" && !t.DevelopingChange())) {
 		n, err := openRequirementBugs(c, tx, t.ID)
 		if err != nil {
 			return err
@@ -101,7 +104,7 @@ func syncBugParent(c context.Context, tx *sql.Tx, bug domain.Task) error {
 	if err != nil {
 		return err
 	}
-	if !domain.RequirementBugReporting(parent.Status) {
+	if !domain.RequirementBugReporting(parent.Status) && !parent.ReviewingChange() {
 		return nil
 	}
 	n, err := openRequirementBugs(c, tx, parent.ID)
@@ -109,7 +112,10 @@ func syncBugParent(c context.Context, tx *sql.Tx, bug domain.Task) error {
 		return err
 	}
 	next := parent.Status
-	if n > 0 {
+	if parent.ReviewingChange() {
+		// Keep the parent in product review; invalidate stale confirmation forms
+		// when another linked Bug changes while that review is open.
+	} else if n > 0 {
 		next = "fixing"
 	} else if parent.Status == "fixing" {
 		next = "retest"

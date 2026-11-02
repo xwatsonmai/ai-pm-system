@@ -366,6 +366,12 @@ func requirementReviewContext(t domain.Task, v domain.RequirementReview, q Requi
 }
 
 func requirementNextAction(t domain.Task, v RequirementReviewContext) (string, string) {
+	if t.ChangeRequestID != "" {
+		return "user", "本反馈已转入原需求变更，请打开所属需求查看本轮变更与后续开发"
+	}
+	if t.ReviewingChange() {
+		return "user", "在本轮变更评审中明确新需求稿与验收条件，确认后交回原开发重新实现和提测；无需先发布旧实现"
+	}
 	if t.Status == "clarify" {
 		switch v.State {
 		case "awaiting_rejection_confirmation":

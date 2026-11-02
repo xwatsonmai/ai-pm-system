@@ -354,7 +354,10 @@ func (s *Service) WorkList(ctx context.Context, a domain.Actor) (map[string]any,
 	}
 	ready := []domain.Task{}
 	for _, t := range tasks {
-		if (t.Status == "ready" && (!alignmentReserved(t) || ownsTaskClient(t, a))) || ((t.Status == "doing" || t.Status == "aligning" || t.Status == "testing" || t.Status == "fixing" || t.Status == "retest" || t.Status == "verifying" || t.Status == "pending_release" || t.Status == "review") && ownsTaskClient(t, a)) {
+		if t.ChangeRequestID != "" {
+			continue
+		}
+		if (t.Status == "ready" && (!alignmentReserved(t) || ownsTaskClient(t, a))) || ((t.ReviewingChange() || t.Status == "doing" || t.Status == "aligning" || t.Status == "testing" || t.Status == "fixing" || t.Status == "retest" || t.Status == "verifying" || t.Status == "pending_release" || t.Status == "review") && ownsTaskClient(t, a)) {
 			ready = append(ready, t)
 		}
 	}

@@ -69,9 +69,11 @@ type TestVerification struct {
 }
 
 type Task struct {
-	ParentRequirementID string            `json:"parent_requirement_id,omitempty"`
-	BugContext          *BugContext       `json:"bug_context,omitempty"`
-	TestVerification    *TestVerification `json:"test_verification,omitempty"`
+	RequirementChange   *RequirementChange `json:"requirement_change,omitempty"`
+	ChangeRequestID     string             `json:"change_request_id,omitempty"`
+	ParentRequirementID string             `json:"parent_requirement_id,omitempty"`
+	BugContext          *BugContext        `json:"bug_context,omitempty"`
+	TestVerification    *TestVerification  `json:"test_verification,omitempty"`
 
 	Alignment        *DevelopmentAlignment `json:"alignment,omitempty"`
 	ClaimClientID    string                `json:"claim_client_id,omitempty"`
