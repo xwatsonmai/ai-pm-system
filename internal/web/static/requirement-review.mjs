@@ -5,7 +5,7 @@ import { BASE } from './base.mjs';
 import { answerRows, askIsOpen, chatTimeline, currentTopic, hasAnswerDraft, hasReviewDraft, hasQuestionNotes, lineDiff, proposalStates, questionCardStatus, questionIsActive, questionReplies, sameAnswerSheet, sameQuestionNotes, taskActive, taskTerminated } from './requirement-review-state.mjs';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const STATUS = {not_started:'等待开始',queued:'排队中',running:'Agent 评审中',needs_input:'等待补充',rejection_pending:'驳回待确认',ready_to_confirm:'待确认需求稿',confirmed:'已确认',failed:'评审未完成',closed:'已结束',alignment_replied:'等待开发确认',alignment_completed:'对齐完成'};
+const STATUS = {not_started:'等待开始',queued:'排队中',running:'Agent 评审中',needs_input:'等待补充',rejection_pending:'驳回待确认',ready_to_confirm:'待确认需求稿',confirmed:'已确认',failed:'评审未完成',closed:'已结束',alignment_replied:'等待开发确认',alignment_completed:'对齐完成',change_pending:'已转入需求变更',change_canceled:'变更已取消'};
 const KINDS = {overlap:'范围重叠',dependency:'存在依赖',conflict:'业务规则冲突'};
 const time = value => {
   const at = new Date(value), today = new Date().toDateString() === at.toDateString();
@@ -25,7 +25,7 @@ export function requirementReviewHTML(task) {
         <div class="rc-members" aria-label="参与成员"></div>
         <button type="button" class="rc-source-toggle" data-review-action="source" aria-expanded="false">需求原文</button>
         <button type="button" data-review-action="relations" class="rc-relations-toggle" aria-expanded="false" hidden></button>
-        <button type="button" data-review-action="details">查看需求</button>
+        ${task.parent_requirement_id && !task.change_request_id && ['clarify','ready'].includes(task.status)?'<button type="button" data-review-action="request_change">转为当前需求变更</button>':''}${task.requirement_change?.status==='reviewing'?'<button type="button" data-review-action="cancel_change">取消本次变更</button>':''}<button type="button" data-review-action="details">查看需求</button>
         <div class="rc-menu-wrap"><button type="button" data-review-action="menu" aria-label="更多操作" aria-haspopup="menu" aria-expanded="false">···</button>
           <div class="rc-menu" role="menu" hidden><button type="button" role="menuitem" class="danger-outline" data-review-action="decline">拒绝需求</button><button type="button" role="menuitem" data-review-action="close-task">关闭需求</button></div></div>
       </div>
@@ -73,7 +73,7 @@ function answerHTML(questions, values, notes = {}, project) {
   return `<dl class="review-saved-answers">${answerRows(questions,values,notes).map(row=>`<div class="review-answer-row"><dt>${esc(row.label)}</dt><dd class="${row.values.length?'':'review-answer-empty'}">${row.values.length?row.values.map(esc).join('、'):'未填写'}</dd>${row.note?`<dd class="review-answer-question-note">${row.note.body?`<p class="prewrap">补充：${esc(row.note.body)}</p>`:''}${attachments(row.note.attachments || row.note.files,project)}</dd>`:''}</div>`).join('')}</dl>`;
 }
 
-export function mountRequirementReview(root, {task,api,userID,onDetails,onConfirmed,onResolve}) {
+export function mountRequirementReview(root, {task,api,userID,onDetails,onConfirmed,onResolve,onChange}) {
   const $ = selector => root.querySelector(selector), feed = $('.review-feed'), input = $('#review-input');
   const key = `ai-pm:review-draft:${userID}:${task.project_id}:${task.id}`;
   let draft; try { draft = JSON.parse(localStorage.getItem(key)||'null'); } catch {}
@@ -91,10 +91,11 @@ export function mountRequirementReview(root, {task,api,userID,onDetails,onConfir
     const id = activeForm()?.id;
     return hasReviewDraft({body:input.value,files,answers:id?{[id]:answers[id]}:{},questionNotes:id?{[id]:notes[id]}:{},pending});
   };
-  const bugReadOnly = () => source().parent_requirement_id && !['clarify','ready'].includes(source().status) && v?.mode !== 'development_alignment';
+  const bugReadOnly = () => source().parent_requirement_id && (source().change_request_id || !['clarify','ready'].includes(source().status)) && v?.mode !== 'development_alignment';
   const alignmentDone = () => v?.mode === 'development_alignment' && v.status === 'alignment_completed';
   const closed = () => v?.status==='closed' || taskTerminated(source());
-  const readOnly = () => closed() || bugReadOnly() || alignmentDone();
+  const changeDone = () => v?.status==='change_canceled' || (v?.mode === 'testing_change' && source().requirement_change?.status !== 'reviewing');
+  const readOnly = () => closed() || bugReadOnly() || alignmentDone() || changeDone();
   const topicOf = id => (v?.agenda || []).find(t => t.id === id);
   const node = id => [...feed.children].find(child => child.dataset.key === id);
 
@@ -187,7 +188,8 @@ export function mountRequirementReview(root, {task,api,userID,onDetails,onConfir
     const head = `<strong>需求稿 v${number}</strong><span class="rc-muted">${proposal.acceptance.length} 条验收条件</span>${tag}`;
     const full = `<div class="markdown-content">${renderDocumentMarkdown(proposal.description)}</div>`;
     if (state === 'superseded' || state === 'draft') return `<details class="rc-card rc-proposal rc-card-muted" data-state="${state}" data-key="${esc(message.id)}:proposal"><summary class="rc-card-head">${head}</summary><div class="rc-proposal-body">${full}<h4>验收条件</h4><ol>${proposal.acceptance.map(value=>`<li>${esc(value)}</li>`).join('')}</ol></div></details>`;
-    const foot = state === 'current' ? `<div class="rc-card-foot"><span class="rc-card-tip rc-confirm-tip">确认后需求进入待认领，等待开发领取</span><button type="button" class="primary review-confirm" data-review-action="confirm">确认需求，进入待认领</button></div>` : '';
+    const changing=source().requirement_change?.status==='reviewing';
+    const foot = state === 'current' ? `<div class="rc-card-foot"><span class="rc-card-tip rc-confirm-tip">${changing?"确认后交回开发重新实现与提测；来源反馈转入变更并关闭，其他 Bug 保留":"确认后需求进入待认领，等待开发领取"}</span><button type="button" class="primary review-confirm" data-review-action="confirm">${changing?"确认变更，交回开发":"确认需求，进入待认领"}</button></div>` : '';
     return `<div class="rc-card rc-proposal" data-state="${state}"><div class="rc-card-head">${head}</div><div class="rc-proposal-body"><h4>验收条件</h4><ol>${proposal.acceptance.map(value=>`<li>${esc(value)}</li>`).join('')}</ol><details class="rc-proposal-full" data-key="${esc(message.id)}:full"><summary>查看完整需求稿</summary>${full}</details></div>${foot}</div>`;
   }
   function rejectionHTML(message) {
@@ -347,8 +349,10 @@ export function mountRequirementReview(root, {task,api,userID,onDetails,onConfir
   /* ---------- state ---------- */
   function updateActions() {
     if (disposed) return;
+    for(const button of root.querySelectorAll('[data-review-action=cancel_change]')){button.hidden=source().requirement_change?.status!=='reviewing'||closed();button.disabled=saving||uploading;}
+    for(const button of root.querySelectorAll('[data-review-action=request_change]')){button.hidden=Boolean(source().change_request_id)||!['clarify','ready'].includes(source().status);button.disabled=saving||uploading;}
     const note = $('.review-composer-note'), hint = $('.rc-composer-hint');
-    note.textContent = closed() ? '需求已结束，评审记录只读' : bugReadOnly() ? 'Bug 已进入修复或验证流程，评审历史保留；后续补充请使用工作记录。' : alignmentDone() ? '开发已确认对齐完成，新的问题会开启新一轮对齐。' : '';
+    note.textContent = source().change_request_id ? '此反馈已转入原需求变更，原报告与讨论保留；请在原需求继续处理。' : changeDone() ? '本次变更评审已结束，记录保留；请在原需求查看后续开发与测试。' : closed() ? '需求已结束，评审记录只读' : bugReadOnly() ? 'Bug 已进入修复或验证流程，评审历史保留；后续补充请使用工作记录。' : alignmentDone() ? '开发已确认对齐完成，新的问题会开启新一轮对齐。' : '';
     note.hidden = !note.textContent;
     const form = activeForm(), count = form ? filledCount(form) : 0;
     hint.textContent = pending ? '上次发送的结果还不确定，内容已保留；重试会核对保存结果，不会重复发送。' : count && !readOnly() ? `发送时会一并提交「${topicOf(form.result.ask?.topic_id)?.title || '当前问题'}」里已填的 ${count} 项` : '';
@@ -365,7 +369,7 @@ export function mountRequirementReview(root, {task,api,userID,onDetails,onConfir
     for (const button of root.querySelectorAll('[data-review-action=confirm], [data-review-action=confirm_rejection]')) {
       button.disabled = saving || uploading || Boolean(blocked);
       const tip = button.parentElement.querySelector('.rc-confirm-tip');
-      if (tip) tip.textContent = blocked || (button.dataset.reviewAction === 'confirm' ? '确认后需求进入待认领，等待开发领取' : '同意后关闭 Bug；不同意可以在下方说明原因或补充截图。');
+      if (tip) tip.textContent = blocked || (button.dataset.reviewAction === 'confirm' ? (source().requirement_change?.status==='reviewing'?'确认后交回开发重新提测；来源反馈转入变更并关闭，其他 Bug 保留':'确认后需求进入待认领，等待开发领取') : '同意后关闭 Bug；不同意可以在下方说明原因或补充截图。');
     }
     for (const button of root.querySelectorAll('[data-review-action=retry]')) button.disabled = saving || uploading;
     for (const button of root.querySelectorAll('[data-review-action=decline], [data-review-action=close-task]')) button.disabled = saving || uploading;
@@ -374,7 +378,7 @@ export function mountRequirementReview(root, {task,api,userID,onDetails,onConfir
   function render(next) {
     if (disposed || next.version < lastVersion) return;
     // Progress changes while the review version stays the same during a round.
-    const extra = JSON.stringify([next.needs_recheck,next.recheck_reason,next.compaction,next.incoming_relations,next.creator,next.progress]);
+    const extra = JSON.stringify([next.needs_recheck,next.recheck_reason,next.compaction,next.incoming_relations,next.creator,next.progress,next.source?.version]);
     if (next.version === lastVersion && extra === lastExtra) return;
     v = next; lastVersion = next.version; lastExtra = extra;
     const nearEnd = feed.scrollHeight-feed.scrollTop-feed.clientHeight < 120;
@@ -435,15 +439,15 @@ export function mountRequirementReview(root, {task,api,userID,onDetails,onConfir
   async function operate(action) {
     if (saving || uploading) return;
     if (['confirm','confirm_rejection'].includes(action) && hasDraft()) { $('.review-send-error').textContent = '请先发送当前补充，让 Agent 根据最新说明评审后再确认。'; saveDraft(); input.focus(); return; }
-    const operationKey = `${action}:${v?.generation || 0}`;
-    const payload = {action,request_id:operations[operationKey] ||= createID(),generation:v?.generation || 0};
+    const operationKey = source().requirement_change?.status==='reviewing'?`${action}:${v?.generation || 0}:${source().version}`:`${action}:${v?.generation || 0}`;
+    const payload = {action,request_id:operations[operationKey] ||= createID(),generation:v?.generation || 0,...(source().requirement_change?.status==='reviewing'?{expected_task_version:source().version}:{})};
     saveDraft(); setSaving(true);
     try {
       const next = await command(payload);
       if (disposed) return;
       saveDraft();
-      $('.review-send-error').textContent = next.status === 'closed'?'已确认驳回并关闭 Bug':next.status === 'confirmed'?'评审已确认，进入待认领':'评审已重新开始，内容已保存';
-      if (['confirmed','closed'].includes(next.status)) onConfirmed?.();
+      $('.review-send-error').textContent = next.status === 'change_canceled'?'本次变更已取消，原流程恢复':next.status === 'closed'?'已确认驳回并关闭 Bug':next.status === 'confirmed'?(next.mode==='testing_change'?'变更已确认，交回开发重新提测':'评审已确认，进入待认领'):'评审已重新开始，内容已保存';
+      if (['confirmed','closed','change_canceled'].includes(next.status)) onConfirmed?.();
     } catch (error) {
       if (!disposed) {
         if (error.status >= 400 && error.status < 500) { delete operations[operationKey]; saveDraft(); void poll(); }
@@ -533,6 +537,7 @@ export function mountRequirementReview(root, {task,api,userID,onDetails,onConfir
     const button = event.target.closest('[data-review-action]'); if (!button || button.matches(':disabled')) return;
     event.preventDefault(); event.stopPropagation();
     const action = button.dataset.reviewAction;
+    if(action === 'request_change'){if(saving||uploading)return;if(hasDraft()){$('.review-send-error').textContent='请先发送当前补充，再转为本轮变更；草稿已保留。';saveDraft();input.focus();return;}saveDraft();onChange?.();return;}
     if (action === 'details' || action === 'related') { if (uploading || saving) return; saveDraft(); onDetails(action==='related'?button.dataset.task:undefined); return; }
     if (action === 'decline' || action === 'close-task' || action === 'reopen') { closeMenu(); if (uploading || saving) return; saveDraft(); onResolve?.(action==='decline'?'decline':action==='reopen'?'reopen':'close'); return; }
     if (action === 'menu') { const menu = $('.rc-menu'); menu.hidden = !menu.hidden; button.setAttribute('aria-expanded',String(!menu.hidden)); if (!menu.hidden) menu.querySelector('button')?.focus(); return; }
@@ -566,7 +571,7 @@ export function mountRequirementReview(root, {task,api,userID,onDetails,onConfir
       }
       answers[message.id] = readAnswers(form); progress(form,message); saveDraft(); updateActions(); return;
     }
-    if (['confirm','confirm_rejection','retry'].includes(action)) void operate(action);
+    if (['confirm','confirm_rejection','retry','cancel_change'].includes(action)) void operate(action);
   });
   fileList(); updateActions();
   void command({action:'start',request_id:createID()}).catch(error=>{

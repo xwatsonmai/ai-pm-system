@@ -158,7 +158,7 @@ func (m *Manager) startAtRef(c context.Context, a domain.Actor, p, t, kind, prom
 	if project.AgentReadMode == "sandbox" && m.SandboxSocket == "" {
 		return domain.Run{}, errors.New("该项目已启用隔离阅读，但沙盒 runner 尚未配置；不会回退到非隔离执行")
 	}
-	if codeRef != "" && project.AgentReadMode != "sandbox" && !(review != nil && review.Source.BugContext != nil && review.Source.BugContext.SHA == codeRef) {
+	if codeRef != "" && project.AgentReadMode != "sandbox" && !(review != nil && ((review.Source.BugContext != nil && review.Source.BugContext.SHA == codeRef) || (review.Source.ReviewingChange() && review.Source.RequirementChange.SHA == codeRef))) {
 		return domain.Run{}, errors.New("指定分析版本需要启用隔离阅读")
 	}
 	settings, e := m.App.Store.GetPlatformSettings(c)
@@ -516,8 +516,13 @@ func (m *Manager) execute(ctx context.Context, r domain.Run, profile domain.Prof
 	instruction := map[string]string{"requirements": "整理此事项的需求，提出验收建议和待澄清问题，并保存分析。", "progress": "根据最新事实分析项目或事项进度，按需检查代码，保存一份简洁进度分析。", "triage": "调查此 Bug 反馈，检查重复反馈及相关代码，保存初诊、证据、未知项和开发下一步。", "knowledge": "建立或更新项目概况和模块目录，保存为 knowledge。"}[r.Kind]
 	if r.Kind == "requirement_review" {
 		instruction = requirementReviewInstruction
-		if review, err := m.App.Store.GetRequirementReview(ctx, r.TaskID); err == nil && review.Source.ParentRequirementID != "" {
-			instruction = requirementBugReviewInstruction
+		if review, err := m.App.Store.GetRequirementReview(ctx, r.TaskID); err == nil {
+			if review.Source.ParentRequirementID != "" {
+				instruction = requirementBugReviewInstruction
+			}
+			if review.Source.ReviewingChange() {
+				instruction += "\n" + requirementChangeReviewInstruction
+			}
 		}
 	}
 	if r.Kind == "question" && r.TriggerType == "" && r.OwnerKind == "human" {

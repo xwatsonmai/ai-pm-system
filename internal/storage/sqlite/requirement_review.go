@@ -104,6 +104,9 @@ func (d *DB) CommitRequirementReview(c context.Context, v domain.RequirementRevi
 		}
 	}
 	if task != nil {
+		if err = syncChangeFeedback(c, tx, current, *task); err != nil {
+			return err
+		}
 		if err = validateTestingWrite(c, tx, *task, current.Version); err != nil {
 			return err
 		}

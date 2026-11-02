@@ -1171,6 +1171,9 @@ async function openTask(taskID) {
       action("submit-result", "提交开发结果", "primary", `data-id="${t.id}"`) +
       action("release", "交接任务", "", `data-id="${t.id}"`);
   if (t.kind === "requirement" && ["testing","fixing","retest","review"].includes(t.status)) buttons += action("file-testing-bug","提起 Bug","",`data-id="${t.id}"`);
+  if (t.kind === "requirement" && ["testing","fixing","retest","pending_release","review"].includes(t.status)) buttons += action("request-change","变更当前需求","",`data-id="${t.id}"`);
+  if (t.parent_requirement_id && !t.change_request_id && ["clarify","ready"].includes(t.status)) buttons += action("request-change","转为当前需求变更","",`data-id="${t.id}"`);
+  if (t.change_request_id) buttons += action("requirement-review","查看当前需求变更","primary",`data-id="${t.parent_requirement_id}"`);
   if (t.status === "testing") buttons += action("test-pass","确认测试通过","primary",`data-id="${t.id}"`);
   if (t.status === "retest") buttons += action("start-retest","开始复测","primary",`data-id="${t.id}"`);
   if (t.status === "verifying") buttons += action("verify-bug","确认修复有效","primary",`data-id="${t.id}"`);
@@ -1224,8 +1227,23 @@ async function openLinkedTask(taskID) {
 async function openRequirementReview(taskID, savedTask, stillCurrent = () => true) {
  const task = savedTask || (await api(`/tasks/${taskID}`)).task;
  if (!stillCurrent()) return;
- modal(task.parent_requirement_id ? "测试 Bug 评审" : task.alignment ? "开发对齐" : "需求评审",requirementReviewHTML(task),{review:true});
- requirementReview = mountRequirementReview($(".requirement-review"),{task,api,userID:state.auth?.user?.id || "local-owner",onDetails:id=>openTask(id || taskID).catch(e=>toast(e.message)),onResolve:action=>taskResolutionForm(taskID,action).catch(e=>toast(e.message)),onConfirmed:()=>{toast("评审状态已更新");void refresh().then(render).catch(e=>toast(e.message));}});
+ modal(task.requirement_change?.status === "reviewing" ? "本轮需求变更" : task.parent_requirement_id ? "测试 Bug 评审" : task.alignment ? "开发对齐" : "需求评审",requirementReviewHTML(task),{review:true});
+ requirementReview = mountRequirementReview($(".requirement-review"),{task,api,userID:state.auth?.user?.id || "local-owner",onDetails:id=>openTask(id || taskID).catch(e=>toast(e.message)),onResolve:action=>taskResolutionForm(taskID,action).catch(e=>toast(e.message)),onChange:()=>requirementChangeForm(taskID).catch(e=>toast(e.message)),onConfirmed:()=>{toast("评审状态已更新");void refresh().then(render).catch(e=>toast(e.message));}});
+}
+async function requirementChangeForm(taskID) {
+ const {task}=await api(`/tasks/${taskID}`);
+ const bug=task.parent_requirement_id ? task : null;
+ const parent=bug ? (await api(`/tasks/${bug.parent_requirement_id}`)).task : task;
+ if(parent.kind!=="requirement" || !["testing","fixing","retest","pending_release","review"].includes(parent.status)) throw Error("原需求当前不能发起变更，请查看最新状态");
+ if(bug && (bug.change_request_id || !["clarify","ready"].includes(bug.status))) throw Error("仅尚未开始修复的反馈可转为变更");
+ const key=`ai-pm:change-draft:${state.auth?.user?.id||'local-owner'}:${parent.project_id}:${parent.id}:${bug?.id||'direct'}`;
+ let draft;try{draft=JSON.parse(localStorage.getItem(key)||'null')}catch{}
+ let body=draft?.body||'';
+ if(!body && bug){const review=await api(`/tasks/${bug.id}/requirement-review`);body=review.messages.findLast(m=>m.role==='user' && m.action==='message' && m.body)?.body || '';}
+ modal("变更当前需求",`<form id="requirement-change-form" data-id="${escape(parent.id)}" data-version="${parent.version}" data-source="${escape(bug?.id||'')}" data-source-version="${bug?.version||0}"><p class="context-note"><strong>${escape(parent.title)}</strong> · R${parent.revision}<br>在当前需求继续调整，无需先合入主线或发布。</p><p class="hint">发起后暂停测试和发布，先评审新的需求稿与验收条件，再由你确认交回开发。原需求、反馈、截图和交付历史均保留。${bug?'此反馈确认前保留；确认变更时才记为已转入本轮变更并关闭，其他 Bug 不受此操作影响。':''}</p>${field('变更原因与期望', '<textarea name="body" required rows="5" placeholder="当前实现哪里不满足目标？这轮希望如何调整？"></textarea>', '发起后可在变更评审中继续补充截图、文档和细节。')}<div class="form-error" role="alert"></div><div class="modal-actions">${action('close','返回')}<button type="submit" class="primary">发起本轮变更评审</button></div></form>`);
+ const form=$('#requirement-change-form');form.dataset.draftKey=key;form.elements.body.value=body;
+ if(draft?.payload?.expected_task_version===parent.version && (draft.payload.source_bug_version||0)===(bug?.version||0))form.dataset.payload=JSON.stringify(draft.payload);
+ form.elements.body.addEventListener('input',()=>{try{localStorage.setItem(key,JSON.stringify({body:form.elements.body.value}))}catch{}});
 }
 async function taskResolutionForm(taskID, operation) {
   const task=(await api(`/tasks/${taskID}`)).task;
@@ -1741,6 +1759,7 @@ document.addEventListener("click", async (event) => {
       modal("退回开发", `<form id="rework-form" data-id="${button.dataset.id}">${field("退回原因", `<textarea name="body" required placeholder="需要继续修改或验证的内容"></textarea>`)}<div class="form-error"></div><div class="modal-actions">${action("close", "取消")}<button type="submit" class="primary">退回处理中</button></div></form>`);
       return;
     }
+    if (a === "request-change") { await requirementChangeForm(button.dataset.id); return; }
     if (a === "file-testing-bug") { await taskForm(null,null,button.dataset.id); return; }
     if (["test-pass","start-retest","verify-bug","return-bug"].includes(a)) { await testingForm(button.dataset.id,a.replaceAll("-","_")); return; }
     if (a === "review") {
@@ -2114,6 +2133,12 @@ document.addEventListener("submit", async (event) => {
       requirementEditor.complete();
       afterTask = form.dataset.id ? result.task.id : "";
       toast(form.dataset.iterationSource ? "迭代需求已保存到当前里程碑，Agent 将在后台评审" : form.dataset.id ? "需求已保存，历史交付记录保留" : "需求已保存到当前里程碑，Agent 将在后台评审，有结论后会标记待确认");
+    } else if (form.id === "requirement-change-form") {
+      const payload=JSON.parse(form.dataset.payload ||= JSON.stringify({action:'request_change',request_id:id(),expected_task_version:Number(form.dataset.version),body:data.body,source_bug_id:form.dataset.source,source_bug_version:Number(form.dataset.sourceVersion)}));
+      try{localStorage.setItem(form.dataset.draftKey,JSON.stringify({body:data.body,payload}))}catch{}
+      await api(`/tasks/${form.dataset.id}/requirement-review`,payload);
+      try{localStorage.removeItem(form.dataset.draftKey)}catch{}
+      const taskID=form.dataset.id;closeModal();await refresh();render();await openRequirementReview(taskID);toast("本轮变更已保存，原需求暂停放行");return;
     } else if (form.id === "task-resolution-form") {
       const payload=JSON.parse(form.dataset.payload ||= JSON.stringify({action:form.dataset.operation,request_id:id(),version:Number(form.dataset.version),body:data.body}));
       $("textarea",form).readOnly=true;

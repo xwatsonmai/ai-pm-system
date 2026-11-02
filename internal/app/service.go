@@ -387,9 +387,12 @@ func (s *Service) editTask(c context.Context, a domain.Actor, id string, v TaskI
 		return domain.Mutation{}, errors.New("不能更换 Bug 所属需求")
 	}
 	if changed {
+		if t.ReviewingChange() {
+			return domain.Mutation{}, errors.New("请在本轮变更评审中补充并确认新需求稿，不要直接编辑")
+		}
 		t.TestVerification = nil
 		if t.Status == "testing" || t.Status == "retest" || t.Status == "fixing" {
-			return domain.Mutation{}, errors.New("测试期间请通过关联 Bug 跟进问题，正式范围变化需另提需求")
+			return domain.Mutation{}, errors.New("测试期间请通过关联 Bug 跟进缺陷；调整本轮范围或方案请使用「变更当前需求」")
 		}
 		if t.Status == "verifying" || t.Status == "resolved" {
 			t.Status = "doing"
@@ -494,6 +497,9 @@ func (s *Service) actTask(c context.Context, a domain.Actor, id string, in Actio
 	reason := body
 	switch in.Action {
 	case "ready":
+		if t.ReviewingChange() {
+			return domain.Mutation{}, errors.New("本轮变更必须完成评审并由产品确认后才能交回开发")
+		}
 		if t.ParentRequirementID != "" {
 			return domain.Mutation{}, errors.New("关联 Bug 必须经 Agent 评审确认存在后进入待认领")
 		}
@@ -528,7 +534,14 @@ func (s *Service) actTask(c context.Context, a domain.Actor, id string, in Actio
 		t.Claimant = a.ID
 		t.ClaimClientID = taskClientID(a)
 		t.Owner = a.Name
-		t.Branch = in.Branch
+		if t.DevelopingChange() {
+			if nonempty(in.Branch) && in.Branch != t.RequirementChange.Branch {
+				return domain.Mutation{}, errors.New("本轮变更须继续使用原需求开发分支")
+			}
+			t.Branch = t.RequirementChange.Branch
+		} else {
+			t.Branch = in.Branch
+		}
 		t.Status = "doing"
 		body = "领取任务"
 	case "report":
@@ -588,6 +601,14 @@ func (s *Service) actTask(c context.Context, a domain.Actor, id string, in Actio
 			return domain.Mutation{}, errors.New("请填写实现说明、代码版本和验证情况")
 		}
 		v := *in.Submission
+		if t.DevelopingChange() {
+			if nonempty(v.Branch) && v.Branch != t.RequirementChange.Branch {
+				return domain.Mutation{}, errors.New("本轮变更须提交原需求开发分支的代码")
+			}
+			if err := s.validateTestingVersion(c, t, v.SHA, []string{t.RequirementChange.SHA}); err != nil {
+				return domain.Mutation{}, err
+			}
+		}
 		if nonempty(v.Branch) {
 			t.Branch = strings.TrimSpace(v.Branch)
 		}

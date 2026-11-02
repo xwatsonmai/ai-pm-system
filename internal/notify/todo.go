@@ -60,6 +60,9 @@ func short(sha string) string { return sha[:min(len(sha), 8)] }
 
 // Derive lists the to-dos a task has right now. review may be nil.
 func Derive(t domain.Task, review *domain.RequirementReview, p domain.Project) []Todo {
+	if t.ChangeRequestID != "" {
+		return nil
+	}
 	if !domain.TaskActive(t.Status) {
 		return nil
 	}
@@ -88,7 +91,7 @@ func Derive(t domain.Task, review *domain.RequirementReview, p domain.Project) [
 			add("review_reply", key, r.owner("product"), "", kind)
 		case "ready_to_confirm":
 			action := "confirm"
-			if review.NeedsRecheck {
+			if review.NeedsRecheck || t.ReviewingChange() {
 				action = ""
 			}
 			add("review_confirm", key, r.owner("product"), action, kind)
