@@ -41,6 +41,9 @@ type RequirementReview struct {
 }
 
 type RequirementReviewMessage struct {
+	Mentions []ReviewMention `json:"mentions,omitempty"`
+	// MentionWarnings is derived by HTTP for the sender, never persisted.
+	MentionWarnings   []string                           `json:"mention_warnings,omitempty"`
 	Authorization     *TaskActionAuthorization           `json:"authorization,omitempty"`
 	ID                string                             `json:"id"`
 	Role              string                             `json:"role"`
@@ -61,6 +64,15 @@ type RequirementReviewMessage struct {
 	FormExpiredAt     int64                              `json:"form_expired_at,omitempty"`
 	// Preserve original documents and later revisions independently of AI proposals.
 	Source *Task `json:"source,omitempty"`
+}
+
+// ReviewMention records an explicitly selected person, never inferred from @text.
+// Offsets use UTF-16 code units, matching browser text selection offsets.
+type ReviewMention struct {
+	UserID string `json:"user_id"`
+	Name   string `json:"name"`
+	Start  int    `json:"start"`
+	End    int    `json:"end"`
 }
 
 type RequirementReviewProgress struct {

@@ -11,6 +11,7 @@ import (
 )
 
 type RequirementReviewInput struct {
+	Mentions            []domain.ReviewMention                  `json:"mentions,omitempty"`
 	SourceBugID         string                                  `json:"source_bug_id,omitempty"`
 	SourceBugVersion    int                                     `json:"source_bug_version,omitempty"`
 	ExpectedTaskVersion int                                     `json:"expected_task_version,omitempty"`
@@ -158,6 +159,9 @@ func (s *Service) saveRequirementReview(c context.Context, a domain.Actor, id st
 	if in.ExpectedTaskVersion > 0 && in.ExpectedTaskVersion != t.Version {
 		return domain.RequirementReview{}, domain.ErrConflict
 	}
+	if err = s.validateReviewMentions(c, t.ProjectID, in); err != nil {
+		return domain.RequirementReview{}, err
+	}
 	v, err := s.Store.GetRequirementReview(c, id)
 	if err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return v, err
@@ -303,7 +307,7 @@ func (s *Service) saveRequirementReview(c context.Context, a domain.Actor, id st
 		v.Status, v.Error, v.RunID = "queued", "", ""
 		actor := reviewActor(a, authorization)
 		if in.Action == "message" {
-			v.Messages = append(v.Messages, attributed(domain.RequirementReviewMessage{ID: domain.ID("rm_"), Role: "user", Authorization: authorization, Action: "message", Body: in.Body, At: domain.Now(), Generation: v.Generation, ReplyTo: in.ReplyTo, Answers: in.Answers, QuestionNotes: notes, Attachments: files}, actor))
+			v.Messages = append(v.Messages, attributed(domain.RequirementReviewMessage{ID: domain.ID("rm_"), Role: "user", Authorization: authorization, Action: "message", Body: in.Body, Mentions: in.Mentions, At: domain.Now(), Generation: v.Generation, ReplyTo: in.ReplyTo, Answers: in.Answers, QuestionNotes: notes, Attachments: files}, actor))
 		}
 		if retry != "" {
 			body := actor.Name + " 重新发起了评审"

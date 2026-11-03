@@ -21,11 +21,13 @@ type Settings struct {
 
 // Delivery is one card for one person on one channel.
 type Delivery struct {
-	ID         string `json:"id"`
-	TodoID     string `json:"todo_id"`
-	UserID     string `json:"user_id"`
-	Channel    string `json:"channel"`
-	ExternalID string `json:"external_id"`
+	// Mention is an informational review notification, independent of to-dos.
+	Mention    *ReviewMentionNotice `json:"mention,omitempty"`
+	ID         string               `json:"id"`
+	TodoID     string               `json:"todo_id"`
+	UserID     string               `json:"user_id"`
+	Channel    string               `json:"channel"`
+	ExternalID string               `json:"external_id"`
 	// State is pending (to send), sent, closing (sent, then the to-do closed
 	// and the card awaits its final text), closed, dropped (closed before it
 	// was sent) or failed.
@@ -65,6 +67,8 @@ type Store interface {
 	DueDeliveries(ctx context.Context, now int64, limit int) ([]Delivery, error)
 	GetDelivery(ctx context.Context, id string) (Delivery, error)
 	PutDelivery(ctx context.Context, d Delivery) error
+	// QueueDelivery inserts once; retries/reconciliation never reset delivery state.
+	QueueDelivery(ctx context.Context, d Delivery) error
 	GetBinding(ctx context.Context, channel, userID string) (Binding, error)
 	FindBinding(ctx context.Context, channel, externalID string) (Binding, error)
 	// PutBinding replaces the user's binding; an external ID bound to someone

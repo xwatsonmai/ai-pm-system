@@ -173,7 +173,7 @@ func (h *Hub) ReconcileAll(ctx context.Context) {
 			continue
 		}
 		for _, t := range tasks {
-			if domain.TaskActive(t.Status) {
+			if domain.TaskActive(t.Status) || h.now().Sub(time.UnixMilli(t.UpdatedAt)) < backfill {
 				ids = append(ids, t.ID)
 			}
 		}
@@ -241,6 +241,11 @@ func (h *Hub) Reconcile(ctx context.Context, taskID string) error {
 			deliveries = h.deliveries(ctx, d, d.Recipients)
 		}
 		if err = h.Store.SaveTodo(ctx, d, deliveries); err != nil {
+			return err
+		}
+	}
+	if t.ID != "" {
+		if err = h.reconcileMentions(ctx, t); err != nil {
 			return err
 		}
 	}
@@ -335,7 +340,24 @@ func (h *Hub) deliver(ctx context.Context, d Delivery) {
 	now := h.now()
 	d.UpdatedAt = now.UnixMilli()
 	a, ok := h.channel(d.Channel)
-	todo, err := h.Store.GetTodo(ctx, d.TodoID)
+	var todo Todo
+	var err error
+	if d.Mention == nil {
+		todo, err = h.Store.GetTodo(ctx, d.TodoID)
+	} else {
+		allowed, e := h.canDeliverMention(ctx, d)
+		if e != nil {
+			// Retry transient storage failures without sending stale or private content.
+			d.NextAt = now.Add(time.Minute).UnixMilli()
+			_ = h.Store.PutDelivery(ctx, d)
+			return
+		}
+		if !allowed {
+			d.State, d.Error = "dropped", "成员已离开项目或提及已失效"
+			_ = h.Store.PutDelivery(ctx, d)
+			return
+		}
+	}
 	if err != nil {
 		d.State, d.Error = "failed", err.Error()
 		_ = h.Store.PutDelivery(ctx, d)
@@ -347,7 +369,12 @@ func (h *Hub) deliver(ctx context.Context, d Delivery) {
 		_ = h.Store.PutDelivery(ctx, d)
 		return
 	}
-	card := h.card(a, todo, d)
+	var card Card
+	if d.Mention != nil {
+		card = h.mentionCard(d)
+	} else {
+		card = h.card(a, todo, d)
+	}
 	send, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	switch d.State {
@@ -483,6 +510,7 @@ func (h *Hub) Bind(ctx context.Context, name, userID, externalID string) error {
 			return err
 		}
 	}
+	h.refreshAll() // also recover recent review mentions for this new binding
 	h.poke()
 	return nil
 }

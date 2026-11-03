@@ -149,7 +149,7 @@ func testIMBindingEntrySignInAndCardActions(t *testing.T, mount string) {
 	if e = db.PutProject(ctx, p); e != nil {
 		t.Fatal(e)
 	}
-	task := domain.Task{ID: "tsk_im", ProjectID: p.ID, Kind: "requirement", Title: "积分兑换", Status: "testing", Version: 1, Revision: 1, Acceptance: []string{"可兑换"}, Submission: &domain.Submission{SHA: "abc1234567", Environment: "staging", Revision: 1}}
+	task := domain.Task{ID: domain.ID("tsk_"), ProjectID: p.ID, Kind: "requirement", Title: "积分兑换", Status: "testing", Version: 1, Revision: 1, Acceptance: []string{"可兑换"}, Submission: &domain.Submission{SHA: "abc1234567", Environment: "staging", Revision: 1}}
 	if e = db.CommitTask(ctx, task, 0, domain.Event{ProjectID: p.ID, TaskID: task.ID, Kind: "created", Actor: "陈晨", At: domain.Now()}, nil); e != nil {
 		t.Fatal(e)
 	}
@@ -193,6 +193,10 @@ func testIMBindingEntrySignInAndCardActions(t *testing.T, mount string) {
 	}
 	if s := desktop.do("GET", "/api/auth/session", nil, 200); s["authenticated"] != true || s["user"].(map[string]any)["id"] != lin {
 		t.Fatal(s)
+	}
+	reviewPage := "/?review_message=rm_" + strings.Repeat("a", 24) + "&task=" + task.ID
+	if code, to := desktop.get("/integrations/fakeim/entry?to=" + url.QueryEscape(reviewPage)); code != 303 || to != mount+reviewPage {
+		t.Fatal("review notification must retain its exact message target under the mount path", code, to)
 	}
 	// Someone else's channel account cannot be bound to an account already bound.
 	other := newBrowser(t, base)

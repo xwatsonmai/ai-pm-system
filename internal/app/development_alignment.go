@@ -212,7 +212,7 @@ func (s *Service) replyDevelopmentAlignment(c context.Context, a domain.Actor, t
 	if !nonempty(in.Body) && !hasAnswer && len(files) == 0 && len(notes) == 0 {
 		return v, errors.New("请填写部分回答或直接输入你的看法")
 	}
-	v.Messages = append(v.Messages, attributed(domain.RequirementReviewMessage{ID: domain.ID("rm_"), Role: "user", Action: "alignment_reply", Authorization: authorization, Body: in.Body, ReplyTo: in.ReplyTo, Answers: in.Answers, QuestionNotes: notes, Attachments: files, Generation: v.Generation, At: domain.Now()}, reviewActor(a, authorization)))
+	v.Messages = append(v.Messages, attributed(domain.RequirementReviewMessage{ID: domain.ID("rm_"), Role: "user", Action: "alignment_reply", Authorization: authorization, Body: in.Body, Mentions: in.Mentions, ReplyTo: in.ReplyTo, Answers: in.Answers, QuestionNotes: notes, Attachments: files, Generation: v.Generation, At: domain.Now()}, reviewActor(a, authorization)))
 	v.ExpireForms(nil, "产品已提交回复，等待原开发客户端判断；仍可继续补充文字。", domain.Now())
 	t.Status, t.Blocker = "ready", ""
 	t.Alignment = &domain.DevelopmentAlignment{Status: "replied"}

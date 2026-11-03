@@ -29,6 +29,12 @@ const (
 
 var todoPath = regexp.MustCompile(`^/todo(/td_[0-9a-f]+(_[0-9]+)?)?$`)
 
+var reviewMessagePath = regexp.MustCompile(`^/\?review_message=rm_[0-9a-f]{24}&task=tsk_[0-9a-f]{24}$`)
+
+func validNotificationPath(to string) bool {
+	return todoPath.MatchString(to) || reviewMessagePath.MatchString(to)
+}
+
 func randomToken() string {
 	b := make([]byte, 32)
 	if _, e := rand.Read(b); e != nil {
@@ -252,7 +258,7 @@ func (s *Server) channelEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	to := r.URL.Query().Get("to")
-	if !todoPath.MatchString(to) {
+	if !validNotificationPath(to) {
 		to = "/todo"
 	}
 	if user, err := s.Auth.User(r); err == nil {
@@ -376,7 +382,7 @@ func (s *Server) channelComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	to := attempt.ReturnTo
-	if !todoPath.MatchString(to) {
+	if !validNotificationPath(to) {
 		to = "/todo"
 	}
 	http.Redirect(w, r, s.appPath(to), http.StatusSeeOther)

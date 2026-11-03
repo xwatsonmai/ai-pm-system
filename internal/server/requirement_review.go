@@ -2,6 +2,7 @@ package server
 
 import (
 	"ai-pm-system/internal/app"
+	"ai-pm-system/internal/domain"
 	"context"
 	"net/http"
 )
@@ -12,6 +13,7 @@ func (s *Server) getRequirementReview(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	s.reviewMentionWarnings(r, &v)
 	respond(w, v)
 }
 func (s *Server) saveRequirementReview(w http.ResponseWriter, r *http.Request) {
@@ -38,5 +40,15 @@ func (s *Server) saveRequirementReview(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		v = latest
 	}
+	s.reviewMentionWarnings(r, &v)
 	respond(w, v)
+}
+
+func (s *Server) reviewMentionWarnings(r *http.Request, v *domain.RequirementReview) {
+	for i := range v.Messages {
+		m := &v.Messages[i]
+		if m.ActorID == s.actor(r).ID {
+			m.MentionWarnings = s.Notify.MentionWarnings(r.Context(), *m)
+		}
+	}
 }
