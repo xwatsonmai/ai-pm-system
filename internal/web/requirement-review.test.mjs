@@ -201,3 +201,12 @@ test('the reviewing bubble shows what the Agent is doing and what it already fin
   assert.equal(running.text,'Agent 正在评审');assert.equal(running.activity,'正在阅读代码（List.vue）');
   assert.equal(chatTimeline({status:'queued',generation:1,source:{status:'clarify'},progress:steps,messages:[]}).at(-1).activity,undefined,'queued rounds show no stale progress');
 });
+
+
+test('the same requirement room stays available after confirmation without treating questions as workflow writes', async()=>{
+  const {discussionAvailable,chatTimeline}=await import('./static/requirement-review-state.mjs');
+  for(const status of ['ready','doing','testing','fixing','retest','pending_release','review','done','closed','rejected','canceled'])assert(discussionAvailable({status}));
+  for(const task of [{status:'clarify'},{status:'aligning'},{status:'ready',alignment:{status:'replied'}},{status:'closed',change_request_id:'change'}])assert(!discussionAvailable(task));
+  const review={mode:'discussion',status:'running',source:{status:'testing'},messages:[]};
+  assert.equal(chatTimeline(review).at(-1).text,'Agent 正在回复');
+});

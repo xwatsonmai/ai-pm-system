@@ -102,12 +102,12 @@ func (s *Service) ReviewIncomingRelations(c context.Context, v domain.Requiremen
 	items := []domain.RequirementRelation{}
 	conflicts := []domain.RequirementRelation{}
 	for _, other := range reviews {
-		if other.TaskID == v.TaskID || other.ProjectID != v.ProjectID || other.Status == "closed" {
+		if other.TaskID == v.TaskID || other.ProjectID != v.ProjectID || other.Status == "closed" || (other.Mode == "discussion" && domain.TaskTerminated(other.Source.Status)) {
 			continue
 		}
 		for i := len(other.Messages) - 1; i >= 0; i-- {
 			m := other.Messages[i]
-			if m.Result == nil || m.Generation != other.Generation {
+			if m.Result == nil || m.Result.Decision == "answer" || (other.Mode != "discussion" && m.Generation != other.Generation) {
 				continue
 			}
 			for _, relation := range m.Result.Relations {

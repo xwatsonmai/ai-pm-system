@@ -45,9 +45,13 @@ func (s *Service) RequirementReview(c context.Context, a domain.Actor, id string
 			status = "closed"
 		}
 		creator, err := s.taskCreator(c, t)
-		return domain.RequirementReview{TaskID: id, ProjectID: t.ProjectID, Source: t, Creator: creator, TaskRevision: t.Revision, Status: status, Messages: []domain.RequirementReviewMessage{}}, err
+		if err != nil {
+			return domain.RequirementReview{}, err
+		}
+		messages, err := s.requirementTimeline(c, t, nil)
+		return domain.RequirementReview{TaskID: id, ProjectID: t.ProjectID, Source: t, Creator: creator, TaskRevision: t.Revision, Status: status, Messages: messages}, err
 	}
-	if err == nil && domain.TaskTerminated(t.Status) {
+	if err == nil && domain.TaskTerminated(t.Status) && v.Mode != "discussion" {
 		v.Source = t
 		v.Status = "closed"
 	}
@@ -70,6 +74,11 @@ func (s *Service) RequirementReview(c context.Context, a domain.Actor, id string
 		v.IncomingRelations, _, err = s.ReviewIncomingRelations(c, v)
 	}
 	if err == nil {
+		v.Source = t
+		v.Messages, err = s.requirementTimeline(c, t, v.Messages)
+		if err != nil {
+			return v, err
+		}
 		v.Creator, err = s.taskCreator(c, t)
 	}
 	return v, err
@@ -168,6 +177,15 @@ func (s *Service) saveRequirementReview(c context.Context, a domain.Actor, id st
 	}
 	if v.TaskID == "" {
 		v = domain.RequirementReview{TaskID: id, ProjectID: t.ProjectID, Messages: []domain.RequirementReviewMessage{}}
+	}
+	if in.Action == "start" && t.Status != "clarify" {
+		return s.RequirementReview(c, a, id)
+	}
+	if in.Action == "discuss" || (in.Action == "retry" && v.Mode == "discussion") {
+		return s.queueRequirementDiscussion(c, a, t, v, in, key, fp, authorization)
+	}
+	if v.Mode == "discussion" && in.Action != "request_change" {
+		v.Mode = ""
 	}
 	if domain.TaskTerminated(t.Status) {
 		if in.Action == "start" {
@@ -519,6 +537,9 @@ func (s *Service) finishRequirementReview(c context.Context, id string, generati
 	if err != nil {
 		return err
 	}
+	if v.Mode == "discussion" {
+		return s.finishRequirementDiscussion(c, t, v, generation, runID, result, problem)
+	}
 	if domain.TaskTerminated(t.Status) {
 		expected := v.Version
 		v.Status = "closed"
@@ -705,9 +726,18 @@ func ReviewPrompt(v domain.RequirementReview) string {
 		agenda = []domain.RequirementTopic{}
 	}
 	b, _ := json.Marshal(struct {
+		Mode     string                            `json:"mode,omitempty"`
 		Source   domain.Task                       `json:"requirement"`
 		Agenda   []domain.RequirementTopic         `json:"agenda"`
 		Messages []domain.RequirementReviewMessage `json:"conversation"`
-	}{ReviewSource(v.Source), agenda, messages})
+	}{v.Mode, reviewPromptSource(v), agenda, messages})
 	return strings.TrimSpace(string(b))
+}
+
+func reviewPromptSource(v domain.RequirementReview) domain.Task {
+	t := ReviewSource(v.Source)
+	if v.Mode == "discussion" {
+		t.Branch, t.Submission, t.Deployment, t.TestVerification = v.Source.Branch, v.Source.Submission, v.Source.Deployment, v.Source.TestVerification
+	}
+	return t
 }

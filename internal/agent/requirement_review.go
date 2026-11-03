@@ -4,6 +4,7 @@ import (
 	"ai-pm-system/internal/app"
 	"ai-pm-system/internal/domain"
 	"context"
+	"encoding/json"
 	"errors"
 	"sort"
 )
@@ -60,8 +61,21 @@ func (m *Manager) startNextReviewLocked(project string) {
 		}
 		v := queued[0]
 		a := domain.Actor{ID: "platform", Name: "平台 Agent", Kind: "platform", ProjectID: project}
+		// Use the same room shown to people, including committed lifecycle events.
+		room, err := m.App.RequirementReview(m.ctx, a, v.TaskID)
+		if err != nil {
+			return
+		}
+		v.Messages = room.Messages
 		codeRef := ""
 		baseline := v.Source.BugContext
+		if v.Mode == "discussion" && v.Source.Submission != nil {
+			branch := v.Source.Branch
+			if v.Source.Submission.Branch != "" {
+				branch = v.Source.Submission.Branch
+			}
+			baseline = &domain.BugContext{Branch: branch, SHA: v.Source.Submission.SHA}
+		}
 		if v.Source.ReviewingChange() {
 			change := v.Source.RequirementChange
 			baseline = &domain.BugContext{Branch: change.Branch, SHA: change.SHA}
@@ -125,6 +139,27 @@ func recordReviewReference(r *domain.Run, detail app.RequirementDetailResult) {
 		}
 	}
 	r.ReviewEvidence.References = append(r.ReviewEvidence.References, ref)
+}
+
+func reviewRunMode(r domain.Run) string {
+	var input struct {
+		Mode string `json:"mode"`
+	}
+	_ = json.Unmarshal([]byte(r.Prompt), &input)
+	return input.Mode
+}
+
+const requirementDiscussionInstruction = `这是同一个需求聊天室中的日常答疑，沿用之前的评审、产品决定、附件和讨论，不是重新发起需求评审。系统提醒中的认领、开发、提测、测试、上线和验收均来自真实已提交的操作；聊天内容、用户口头同意和你的建议不能代替这些操作。
+先回答用户最新的问题，结合已确认的需求、验收条件、评审历史和实际交付证据解释实现。需要代码时读取当前固定提测 SHA，不用 main、默认分支或分支最新版本代替；没有提测版本时明确只能核对当前仓库，不能据此宣称已交付。较早的决定可用 requirement_detail 分页查阅，区分当时的建议与最终确认。
+当前只有只读查询和提交回答工具。每轮调用 submit_requirement_review，decision=answer、agenda=[]，只提交 reply 和可选 analysis，不提交 proposal、ask、relations 或 expire_form_ids。reply 不超过 400 字，先给出结论，较长证据放 analysis；可以自然追问，不要求用户填写正式评审表单。不得修改需求、关闭 Bug、代替产品确认、发起变更或声称这些动作已经完成。
+发现实际行为可能不符需求时说明证据与未确认项，引导点击「提起 Bug」；用户想调整已确认范围时，引导点击「变更当前需求」（关联反馈为「转为当前需求变更」），保留原有确认流程。用户说「转吧」「改吧」也不能声称已执行，必须说明需要通过页面操作。所有建议均不改变需求状态，已验收或关闭后的答疑也不重新打开需求。`
+
+func discussionTool() tool {
+	s := schema(map[string]string{"reply": "用不超过 400 字回答当前问题；可以自然追问", "analysis": "可选，较长依据与未确认项"}, "reply", "decision", "agenda")
+	p := s["properties"].(map[string]any)
+	p["decision"] = map[string]any{"type": "string", "enum": []string{"answer"}}
+	p["agenda"] = map[string]any{"type": "array", "maxItems": 0, "items": map[string]string{"type": "object"}, "description": "答疑不改正式评审话题，固定为空数组"}
+	return tool{"submit_requirement_review", "保存本轮答疑；只能提交回答，不修改需求或执行流程动作", s}
 }
 
 func reviewTool() tool {

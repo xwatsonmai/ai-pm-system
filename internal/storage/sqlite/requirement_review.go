@@ -77,7 +77,7 @@ func (d *DB) CommitRequirementReview(c context.Context, v domain.RequirementRevi
 	if current.Revision != taskRevision {
 		return domain.ErrConflict
 	}
-	if domain.TaskTerminated(current.Status) && v.Status != "closed" {
+	if domain.TaskTerminated(current.Status) && v.Status != "closed" && !(v.Mode == "discussion" && task == nil) {
 		return domain.ErrConflict
 	}
 	body, err := json.Marshal(v)

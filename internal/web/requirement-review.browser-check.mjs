@@ -149,7 +149,7 @@ try{
  await page.route(`**/api${endpoint}`,async route=>{if(route.request().method()==='POST'&&route.request().postDataJSON()?.action==='confirm'&&!lostConfirm){lostConfirm=true;await route.fetch();await route.abort('failed')}else await route.continue()});
  await page.locator('.review-confirm').click();await page.locator('.review-send-error').filter({hasText:'输入已保留'}).waitFor();
  assert.equal((await api(`/tasks/${task.id}`)).task.status,'ready');const confirmedVersion=(await api(`/tasks/${task.id}`)).task.version;
- await closeDialog();await openReview(task.title,'评审记录');
+ await closeDialog();await openReview(task.title,'问 Agent');
  await page.locator('.rc-event').filter({hasText:'确认了需求稿与验收条件'}).waitFor();
  assert.equal(await page.locator('.rc-proposal[data-state=confirmed]').count(),1);
  assert.equal(await page.locator('.requirement-nav-badge .nav-count').count(),0);assert.equal((await api(`/tasks/${task.id}`)).task.version,confirmedVersion);v=await api(endpoint);assert.equal(v.messages.filter(m=>m.action==='confirm').length,1);
@@ -229,13 +229,13 @@ try{
  await noteForm.locator('[data-question-id=scope] textarea').fill('关闭前尚未发送的逐题说明');await pasteNote();await noteForm.locator('[data-question-id=scope] .review-note-image').waitFor();
  await page.getByRole('button',{name:'更多操作'}).click();await page.getByRole('menuitem',{name:'关闭需求'}).click();
  await page.locator('#task-resolution-form [name=body]').fill('阶段性结束，保留所有输入');await page.locator('#task-resolution-form button[type=submit]').click();await page.locator('.detail-meta .badge.closed').waitFor();
- await page.getByRole('button',{name:'评审记录',exact:true}).click();
+ await page.getByRole('button',{name:'问 Agent',exact:true}).click();
  await page.locator('.rc-event').filter({hasText:'项目负责人 关闭了需求：阶段性结束，保留所有输入'}).getByRole('button',{name:'重新打开'}).waitFor();
- await page.getByText('需求已结束，评审记录只读',{exact:true}).waitFor();assert(await page.locator('#review-input').evaluate(el=>el.readOnly));
+ assert(!(await page.locator('#review-input').evaluate(el=>el.readOnly)));assert(!(await page.locator('.review-send').isDisabled()));
  await page.locator('.rc-card-expired').last().locator(':scope > summary').click();
  await page.locator('.review-unsent-sheet').filter({hasText:'关闭前尚未发送的逐题说明'}).waitFor();
  await page.screenshot({path:join(output,'review-closed.png')});
- report.closed='菜单关闭需求、关闭事件带人名与原因和重新打开入口、保留未发送的逐题文字和图片、输入框只读通过';
+ report.closed='菜单关闭需求、关闭事件带人名与原因和重新打开入口、保留未发送的逐题文字和图片、原评审与逐题草稿保留、可继续答疑通过';
  await closeDialog();
 
  // Legacy escaped Markdown reads as a document in the source drawer at several sizes.

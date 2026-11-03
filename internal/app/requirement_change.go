@@ -57,7 +57,7 @@ func (s *Service) prepareRequirementChange(c context.Context, a domain.Actor, t 
 	t.RequirementChange, t.Status = change, "clarify"
 	t.Version++
 	t.UpdatedAt = change.At
-	v.Mode, v.ConversationID, v.Agenda = "testing_change", "", nil
+	v.Mode, v.Agenda = "testing_change", nil
 	return nil
 }
 

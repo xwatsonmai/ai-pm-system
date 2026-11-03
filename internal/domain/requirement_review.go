@@ -9,7 +9,7 @@ type RequirementReviewSummary struct {
 	Status       string `json:"status"`
 }
 
-// RequirementReview is the durable conversation before a requirement is ready.
+// RequirementReview is the requirement's single durable room across its lifecycle.
 // It is separate from Review, which records delivery acceptance.
 type RequirementReview struct {
 	Mode                        string                     `json:"mode,omitempty"`
