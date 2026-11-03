@@ -106,6 +106,11 @@ export function proposalStates(review) {
 
 const endActions = ['task_closed', 'task_declined', 'task_canceled'];
 
+export function discussionAvailable(task) {
+  return Boolean(task && task.status !== 'clarify' && task.status !== 'aligning' && !task.change_request_id &&
+    !(task.status === 'ready' && task.alignment && task.alignment.status !== 'completed'));
+}
+
 // The conversation as a group chat: people and agents speak, everything else
 // (creation, edits, decisions, failures) is a one-line event with its author.
 export function chatTimeline(review, {viewerID = ''} = {}) {
@@ -125,7 +130,7 @@ export function chatTimeline(review, {viewerID = ''} = {}) {
       if (m.action === 'task_edited') item.button = {action: 'diff', label: '查看变更', message: m.id};
       else if (m.action === 'review_failed') {
         Object.assign(item, {tone: 'warn', note: '需求和已发送消息均已保存'});
-        if (index === lastFailure && review.status === 'failed') item.button = {action: 'retry', label: '重试评审'};
+        if (index === lastFailure && review.status === 'failed') item.button = {action: 'retry', label: review.mode === 'discussion' ? '重试回复' : '重试评审'};
       } else if (endActions.includes(m.action)) {
         if (index === lastEnd && taskTerminated(source)) item.button = {action: 'reopen', label: '重新打开'};
       } else if (m.source) {
@@ -156,7 +161,7 @@ export function chatTimeline(review, {viewerID = ''} = {}) {
   if (review?.mode === 'development_alignment' && review.status === 'alignment_replied') items.push({key: 'alignment-replied', type: 'event',
     text: '回复已提交，等待开发确认', note: '原开发客户端确认后继续开发；仍可继续补充文字。'});
   if (['queued', 'running'].includes(review?.status)) items.push({key: 'typing', type: 'typing',
-    text: review.status === 'queued' ? '已保存，正在排队等待评审' : review.compaction?.status === 'running' ? 'Agent 正在整理较早的上下文' : 'Agent 正在评审',
+    text: review.status === 'queued' ? (review.mode === 'discussion' ? '已保存，正在等待 Agent 回复' : '已保存，正在排队等待评审') : review.compaction?.status === 'running' ? 'Agent 正在整理较早的上下文' : review.mode === 'discussion' ? 'Agent 正在回复' : 'Agent 正在评审',
     ...(review.status === 'running' ? reviewActivity(review.progress) : {})});
   let previous = null;
   for (const item of items) {

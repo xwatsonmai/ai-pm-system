@@ -42,7 +42,7 @@ func (h *Hub) reconcileMentions(ctx context.Context, t domain.Task) error {
 		return err
 	}
 	for _, m := range v.Messages {
-		if m.Role != "user" || m.ActorKind != "human" || (m.Action != "message" && m.Action != "alignment_reply") || h.now().Sub(time.UnixMilli(m.At)) >= backfill {
+		if m.Role != "user" || m.ActorKind != "human" || (m.Action != "message" && m.Action != "discuss" && m.Action != "alignment_reply") || h.now().Sub(time.UnixMilli(m.At)) >= backfill {
 			continue
 		}
 		for _, mention := range m.Mentions {

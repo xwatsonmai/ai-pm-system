@@ -1187,7 +1187,7 @@ async function openTask(taskID) {
   if (taskActive(t)) buttons += action("task-decline","拒绝需求","danger-outline",`data-id="${t.id}"`) + action("task-close","关闭需求","ghost",`data-id="${t.id}"`);
   if (taskTerminated(t)) buttons += action("task-reopen","重新打开需求","",`data-id="${t.id}"`);
   buttons +=
-    (t.status !== "clarify" ? action("requirement-review", "评审记录", "", `data-id="${t.id}"`) : "") +
+    (t.status !== "clarify" ? action("requirement-review", "问 Agent", "", `data-id="${t.id}"`) : "") +
     (!taskTerminated(t) ? action("edit-task", "编辑", "", `data-id="${t.id}"`) : "") +
     action(
       "task-analyze",
@@ -1231,8 +1231,8 @@ async function openLinkedTask(taskID) {
 async function openRequirementReview(taskID, savedTask, stillCurrent = () => true, messageID = '') {
  const task = savedTask || (await api(`/tasks/${taskID}`)).task;
  if (!stillCurrent()) return;
- modal(task.requirement_change?.status === "reviewing" ? "本轮需求变更" : task.parent_requirement_id ? "测试 Bug 评审" : task.alignment ? "开发对齐" : "需求评审",requirementReviewHTML(task),{review:true});
- requirementReview = mountRequirementReview($(".requirement-review"),{task,api,messageID,userID:state.auth?.user?.id || "local-owner",onDetails:id=>openTask(id || taskID).catch(e=>toast(e.message)),onResolve:action=>taskResolutionForm(taskID,action).catch(e=>toast(e.message)),onChange:()=>requirementChangeForm(taskID).catch(e=>toast(e.message)),onConfirmed:()=>{toast("评审状态已更新");void refresh().then(render).catch(e=>toast(e.message));}});
+ modal(task.requirement_change?.status === "reviewing" ? "本轮需求变更" : task.parent_requirement_id ? "测试 Bug 评审" : (task.status === "aligning" || (task.status === "ready" && task.alignment?.status === "replied")) ? "开发对齐" : task.status === "clarify" ? "需求评审" : "需求讨论",requirementReviewHTML(task),{review:true});
+ requirementReview = mountRequirementReview($(".requirement-review"),{task,api,messageID,userID:state.auth?.user?.id || "local-owner",onDetails:id=>openTask(id || taskID).catch(e=>toast(e.message)),onResolve:action=>taskResolutionForm(taskID,action).catch(e=>toast(e.message)),onChange:()=>requirementChangeForm(taskID).catch(e=>toast(e.message)),onFileBug:()=>taskForm(null,null,taskID).catch(e=>toast(e.message)),onConfirmed:()=>{toast("评审状态已更新");void refresh().then(render).catch(e=>toast(e.message));}});
 }
 async function requirementChangeForm(taskID) {
  const {task}=await api(`/tasks/${taskID}`);

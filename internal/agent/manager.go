@@ -158,7 +158,7 @@ func (m *Manager) startAtRef(c context.Context, a domain.Actor, p, t, kind, prom
 	if project.AgentReadMode == "sandbox" && m.SandboxSocket == "" {
 		return domain.Run{}, errors.New("该项目已启用隔离阅读，但沙盒 runner 尚未配置；不会回退到非隔离执行")
 	}
-	if codeRef != "" && project.AgentReadMode != "sandbox" && !(review != nil && ((review.Source.BugContext != nil && review.Source.BugContext.SHA == codeRef) || (review.Source.ReviewingChange() && review.Source.RequirementChange.SHA == codeRef))) {
+	if codeRef != "" && project.AgentReadMode != "sandbox" && !(review != nil && ((review.Source.BugContext != nil && review.Source.BugContext.SHA == codeRef) || (review.Source.ReviewingChange() && review.Source.RequirementChange.SHA == codeRef) || (review.Mode == "discussion" && review.Source.Submission != nil && review.Source.Submission.SHA == codeRef))) {
 		return domain.Run{}, errors.New("指定分析版本需要启用隔离阅读")
 	}
 	settings, e := m.App.Store.GetPlatformSettings(c)
@@ -423,6 +423,9 @@ func toolsFor(r domain.Run) []tool {
 		readTools[0].Description = "按需读取当前项目基本信息和已保存的项目级知识/证据；可指定 task_id 读取该事项详情。需求池总数与分页使用 requirement_pool。"
 	}
 	if r.Kind == "requirement_review" {
+		if reviewRunMode(r) == "discussion" {
+			return append(readTools, discussionTool())
+		}
 		return append(readTools, reviewTool())
 	}
 	if r.TriggerType == "collaboration_result" {
@@ -523,6 +526,9 @@ func (m *Manager) execute(ctx context.Context, r domain.Run, profile domain.Prof
 			if review.Source.ReviewingChange() {
 				instruction += "\n" + requirementChangeReviewInstruction
 			}
+		}
+		if reviewRunMode(r) == "discussion" {
+			instruction = requirementDiscussionInstruction
 		}
 	}
 	if r.Kind == "question" && r.TriggerType == "" && r.OwnerKind == "human" {
@@ -719,7 +725,11 @@ func (m *Manager) execute(ctx context.Context, r domain.Run, profile domain.Prof
 					if v, e := m.App.Store.GetRequirementReview(ctx, r.TaskID); e == nil {
 						agenda = v.Agenda
 					}
-					err = app.ValidateRequirementReviewSubmission(submission, agenda)
+					if reviewRunMode(r) == "discussion" {
+						err = app.ValidateRequirementDiscussionSubmission(submission)
+					} else {
+						err = app.ValidateRequirementReviewSubmission(submission, agenda)
+					}
 					result = submission.Result()
 				}
 				if err == nil {

@@ -11,7 +11,7 @@ func (s *Service) validateReviewMentions(c context.Context, project string, in R
 	if len(in.Mentions) == 0 {
 		return nil
 	}
-	if (in.Action != "message" && in.Action != "request_change") || len(in.Mentions) > 100 {
+	if (in.Action != "message" && in.Action != "discuss" && in.Action != "request_change") || len(in.Mentions) > 100 {
 		return errors.New("只能在评审消息中提及成员，单条最多 100 处")
 	}
 	p, err := s.Store.GetProject(c, project)

@@ -3,10 +3,11 @@ import { createID } from './id.mjs';
 import { renderMarkdown, renderDocumentMarkdown } from './markdown.mjs';
 import { BASE } from './base.mjs';
 import { mountReviewMentions } from './review-mentions.mjs';
-import { answerRows, askIsOpen, chatTimeline, currentTopic, hasAnswerDraft, hasReviewDraft, hasQuestionNotes, lineDiff, proposalStates, questionCardStatus, questionIsActive, questionReplies, sameAnswerSheet, sameQuestionNotes, taskActive, taskTerminated } from './requirement-review-state.mjs';
+import { answerRows, askIsOpen, chatTimeline, currentTopic, discussionAvailable, hasAnswerDraft, hasReviewDraft, hasQuestionNotes, lineDiff, proposalStates, questionCardStatus, questionIsActive, questionReplies, sameAnswerSheet, sameQuestionNotes, taskActive, taskTerminated } from './requirement-review-state.mjs';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const STATUS = {not_started:'等待开始',queued:'排队中',running:'Agent 评审中',needs_input:'等待补充',rejection_pending:'驳回待确认',ready_to_confirm:'待确认需求稿',confirmed:'已确认',failed:'评审未完成',closed:'已结束',alignment_replied:'等待开发确认',alignment_completed:'对齐完成',change_pending:'已转入需求变更',change_canceled:'变更已取消'};
+const TASK_STATUS = {clarify:'需求评审',ready:'待认领',doing:'开发中',aligning:'待对齐',testing:'测试中',fixing:'待修复',retest:'待复测',verifying:'待验证',resolved:'已解决',pending_release:'待上线',review:'待验收',done:'已验收',closed:'已关闭',rejected:'已拒绝',canceled:'已取消'};
 const KINDS = {overlap:'范围重叠',dependency:'存在依赖',conflict:'业务规则冲突'};
 const time = value => {
   const at = new Date(value), today = new Date().toDateString() === at.toDateString();
@@ -26,6 +27,7 @@ export function requirementReviewHTML(task) {
         <div class="rc-members" aria-label="参与成员"></div>
         <button type="button" class="rc-source-toggle" data-review-action="source" aria-expanded="false">需求原文</button>
         <button type="button" data-review-action="relations" class="rc-relations-toggle" aria-expanded="false" hidden></button>
+        <button type="button" data-review-action="file_bug" hidden>提起 Bug</button><button type="button" data-review-action="change_requirement" hidden>变更当前需求</button>
         ${task.parent_requirement_id && !task.change_request_id && ['clarify','ready'].includes(task.status)?'<button type="button" data-review-action="request_change">转为当前需求变更</button>':''}${task.requirement_change?.status==='reviewing'?'<button type="button" data-review-action="cancel_change">取消本次变更</button>':''}<button type="button" data-review-action="details">查看需求</button>
         <div class="rc-menu-wrap"><button type="button" data-review-action="menu" aria-label="更多操作" aria-haspopup="menu" aria-expanded="false">···</button>
           <div class="rc-menu" role="menu" hidden><button type="button" role="menuitem" class="danger-outline" data-review-action="decline">拒绝需求</button><button type="button" role="menuitem" data-review-action="close-task">关闭需求</button></div></div>
@@ -86,7 +88,7 @@ export function reviewMessageHTML(message, text = message.body) {
   return html + esc(text.slice(end));
 }
 
-export function mountRequirementReview(root, {task,api,userID,messageID = '',onDetails,onConfirmed,onResolve,onChange}) {
+export function mountRequirementReview(root, {task,api,userID,messageID = '',onDetails,onConfirmed,onResolve,onChange,onFileBug}) {
   const $ = selector => root.querySelector(selector), feed = $('.review-feed'), input = $('#review-input');
   const key = `ai-pm:review-draft:${userID}:${task.project_id}:${task.id}`;
   let draft; try { draft = JSON.parse(localStorage.getItem(key)||'null'); } catch {}
@@ -109,7 +111,8 @@ export function mountRequirementReview(root, {task,api,userID,messageID = '',onD
   const alignmentDone = () => v?.mode === 'development_alignment' && v.status === 'alignment_completed';
   const closed = () => v?.status==='closed' || taskTerminated(source());
   const changeDone = () => v?.status==='change_canceled' || (v?.mode === 'testing_change' && source().requirement_change?.status !== 'reviewing');
-  const readOnly = () => closed() || bugReadOnly() || alignmentDone() || changeDone();
+  const discussing = () => discussionAvailable(source());
+  const readOnly = () => !discussing() && (closed() || bugReadOnly() || alignmentDone() || changeDone());
   const topicOf = id => (v?.agenda || []).find(t => t.id === id);
   const node = id => [...feed.children].find(child => child.dataset.key === id);
 
@@ -288,8 +291,8 @@ export function mountRequirementReview(root, {task,api,userID,messageID = '',onD
   /* ---------- header, topics, source drawer and relations ---------- */
   function renderHeader(items) {
     const status = $('.rc-status');
-    status.textContent = v.needs_recheck ? '需要复核' : v.mode === 'development_alignment' && v.status === 'needs_input' ? '待对齐' : STATUS[v.status] || v.status;
-    status.dataset.status = v.needs_recheck ? 'recheck' : v.status;
+    status.textContent = discussing() ? TASK_STATUS[source().status] || source().status : v.needs_recheck ? '需要复核' : v.mode === 'development_alignment' && v.status === 'needs_input' ? '待对齐' : STATUS[v.status] || v.status;
+    status.dataset.status = discussing() ? source().status : v.needs_recheck ? 'recheck' : v.status;
     $('.rc-rev').textContent = 'R' + source().revision;
     const people = new Map();
     if (v.creator?.name) people.set(v.creator.id || 'name:'+v.creator.name, {kind:'human', id:v.creator.id || 'name:'+v.creator.name, name:v.creator.name});
@@ -309,8 +312,8 @@ export function mountRequirementReview(root, {task,api,userID,messageID = '',onD
   }
   function renderTopics() {
     const nav = $('.rc-topics'), agenda = v.agenda || [];
-    nav.hidden = !agenda.length;
-    if (!agenda.length) { nav.innerHTML = ''; return; }
+    nav.hidden = discussing() || !agenda.length;
+    if (nav.hidden) { nav.innerHTML = ''; return; }
     const current = readOnly() ? '' : currentTopic(v);
     const icon = t => t.status === 'resolved' ? '✓' : t.status === 'dropped' ? '–' : t.id === current ? '●' : '○';
     const done = agenda.every(t => t.status !== 'open');
@@ -367,8 +370,14 @@ export function mountRequirementReview(root, {task,api,userID,messageID = '',onD
     for(const button of root.querySelectorAll('[data-review-action=cancel_change]')){button.hidden=source().requirement_change?.status!=='reviewing'||closed();button.disabled=saving||uploading;}
     for(const button of root.querySelectorAll('[data-review-action=request_change]')){button.hidden=Boolean(source().change_request_id)||!['clarify','ready'].includes(source().status);button.disabled=saving||uploading;}
     const note = $('.review-composer-note'), hint = $('.rc-composer-hint');
-    note.textContent = source().change_request_id ? '此反馈已转入原需求变更，原报告与讨论保留；请在原需求继续处理。' : changeDone() ? '本次变更评审已结束，记录保留；请在原需求查看后续开发与测试。' : closed() ? '需求已结束，评审记录只读' : bugReadOnly() ? 'Bug 已进入修复或验证流程，评审历史保留；后续补充请使用工作记录。' : alignmentDone() ? '开发已确认对齐完成，新的问题会开启新一轮对齐。' : '';
+    note.textContent = discussing() ? '' : source().change_request_id ? '此反馈已转入原需求变更，原报告与讨论保留；请在原需求继续处理。' : changeDone() ? '本次变更评审已结束，记录保留；请在原需求查看后续开发与测试。' : closed() ? '需求已结束，评审记录只读' : bugReadOnly() ? 'Bug 已进入修复或验证流程，评审历史保留；后续补充请使用工作记录。' : alignmentDone() ? '开发已确认对齐完成，新的问题会开启新一轮对齐。' : '';
     note.hidden = !note.textContent;
+    input.placeholder = discussing() ? '对实现有疑问？直接提问，也可以粘贴截图，输入 @ 提及项目成员。' : '直接回答、提问或纠正理解，输入 @ 可提及项目成员。';
+    const current = source();
+    const bugButton = $('[data-review-action=file_bug]'), changeButton = $('[data-review-action=change_requirement]');
+    bugButton.hidden = !onFileBug || current.kind !== 'requirement' || !['testing','fixing','retest','review'].includes(current.status);
+    changeButton.hidden = !onChange || current.kind !== 'requirement' || !['testing','fixing','retest','pending_release','review'].includes(current.status);
+    bugButton.disabled = changeButton.disabled = saving || uploading;
     const form = activeForm(), count = form ? filledCount(form) : 0;
     hint.textContent = pending ? '上次发送的结果还不确定，内容已保留；重试会核对保存结果，不会重复发送。' : count && !readOnly() ? `发送时会一并提交「${topicOf(form.result.ask?.topic_id)?.title || '当前问题'}」里已填的 ${count} 项` : '';
     hint.hidden = !hint.textContent;
@@ -431,11 +440,11 @@ export function mountRequirementReview(root, {task,api,userID,messageID = '',onD
   }
   async function submit() {
     if (saving || uploading || disposed || (readOnly() && !pending)) return;
-    const {reply,values,questionNotes} = submissionTarget();
+    const {reply,values,questionNotes} = discussing() ? {reply:'',values:{},questionNotes:{}} : submissionTarget();
     if (!pending && !input.value.trim() && !files.length && !Object.keys(values).length && !hasQuestionNotes(questionNotes)) {
       $('.review-send-error').textContent = '请输入说明，或回答至少一个问题。'; input.focus(); return;
     }
-    pending ||= {action:'message',generation:v?.generation,request_id:createID(),body:input.value,mentions:mentionEditor.mentions,reply_to:reply,answers:values,question_notes:questionNotes,attachment_ids:files.map(file=>file.id)};
+    pending ||= {action:discussing()?'discuss':'message',generation:v?.generation,request_id:createID(),body:input.value,mentions:mentionEditor.mentions,reply_to:reply,answers:values,question_notes:questionNotes,attachment_ids:files.map(file=>file.id)};
     saveDraft(); setSaving(true); $('.review-send-error').textContent = '正在保存消息…';
     const submitted = pending;
     try {
@@ -557,6 +566,8 @@ export function mountRequirementReview(root, {task,api,userID,messageID = '',onD
     const button = event.target.closest('[data-review-action]'); if (!button || button.matches(':disabled')) return;
     event.preventDefault(); event.stopPropagation();
     const action = button.dataset.reviewAction;
+    if(action === 'file_bug'){if(saving||uploading)return;saveDraft();onFileBug?.();return;}
+    if(action === 'change_requirement'){if(saving||uploading)return;saveDraft();onChange?.();return;}
     if(action === 'request_change'){if(saving||uploading)return;if(hasDraft()){$('.review-send-error').textContent='请先发送当前补充，再转为本轮变更；草稿已保留。';saveDraft();input.focus();return;}saveDraft();onChange?.();return;}
     if (action === 'details' || action === 'related') { if (uploading || saving) return; saveDraft(); onDetails(action==='related'?button.dataset.task:undefined); return; }
     if (action === 'decline' || action === 'close-task' || action === 'reopen') { closeMenu(); if (uploading || saving) return; saveDraft(); onResolve?.(action==='decline'?'decline':action==='reopen'?'reopen':'close'); return; }
