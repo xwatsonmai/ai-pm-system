@@ -1219,16 +1219,20 @@ async function openTask(taskID) {
 }
 // Links such as /?task=<id> from the to-do page open that task in its project.
 async function openLinkedTask(taskID) {
-  history.replaceState(null, "", "/");
+  const messageID = new URLSearchParams(location.search).get("review_message");
+  history.replaceState(null, "", appURL("/"));
   const { task } = await api(`/tasks/${encodeURIComponent(taskID)}`);
   if (state.project?.id !== task.project_id) await switchProject(task.project_id);
-  if (state.project?.id === task.project_id) await openTask(task.id);
+  if (state.project?.id === task.project_id) {
+    if (messageID) await openRequirementReview(task.id, task, () => true, messageID);
+    else await openTask(task.id);
+  }
 }
-async function openRequirementReview(taskID, savedTask, stillCurrent = () => true) {
+async function openRequirementReview(taskID, savedTask, stillCurrent = () => true, messageID = '') {
  const task = savedTask || (await api(`/tasks/${taskID}`)).task;
  if (!stillCurrent()) return;
  modal(task.requirement_change?.status === "reviewing" ? "本轮需求变更" : task.parent_requirement_id ? "测试 Bug 评审" : task.alignment ? "开发对齐" : "需求评审",requirementReviewHTML(task),{review:true});
- requirementReview = mountRequirementReview($(".requirement-review"),{task,api,userID:state.auth?.user?.id || "local-owner",onDetails:id=>openTask(id || taskID).catch(e=>toast(e.message)),onResolve:action=>taskResolutionForm(taskID,action).catch(e=>toast(e.message)),onChange:()=>requirementChangeForm(taskID).catch(e=>toast(e.message)),onConfirmed:()=>{toast("评审状态已更新");void refresh().then(render).catch(e=>toast(e.message));}});
+ requirementReview = mountRequirementReview($(".requirement-review"),{task,api,messageID,userID:state.auth?.user?.id || "local-owner",onDetails:id=>openTask(id || taskID).catch(e=>toast(e.message)),onResolve:action=>taskResolutionForm(taskID,action).catch(e=>toast(e.message)),onChange:()=>requirementChangeForm(taskID).catch(e=>toast(e.message)),onConfirmed:()=>{toast("评审状态已更新");void refresh().then(render).catch(e=>toast(e.message));}});
 }
 async function requirementChangeForm(taskID) {
  const {task}=await api(`/tasks/${taskID}`);

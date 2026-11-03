@@ -198,6 +198,15 @@ func (d *DB) GetDelivery(c context.Context, id string) (notify.Delivery, error) 
 }
 func (d *DB) PutDelivery(c context.Context, v notify.Delivery) error { return putDelivery(c, d.db, v) }
 
+func (d *DB) QueueDelivery(c context.Context, v notify.Delivery) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	_, err = d.db.ExecContext(c, "INSERT OR IGNORE INTO notify_deliveries(id,todo_id,state,next_at,payload) VALUES(?,?,?,?,?)", v.ID, v.TodoID, v.State, v.NextAt, string(b))
+	return err
+}
+
 func (d *DB) binding(c context.Context, q string, args ...any) (notify.Binding, error) {
 	var b notify.Binding
 	err := d.db.QueryRowContext(c, q, args...).Scan(&b.Channel, &b.UserID, &b.ExternalID, &b.At)

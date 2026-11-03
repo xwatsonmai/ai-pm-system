@@ -2,6 +2,7 @@ import { iterationContextHTML } from './requirement-iterations.mjs';
 import { createID } from './id.mjs';
 import { renderMarkdown, renderDocumentMarkdown } from './markdown.mjs';
 import { BASE } from './base.mjs';
+import { mountReviewMentions } from './review-mentions.mjs';
 import { answerRows, askIsOpen, chatTimeline, currentTopic, hasAnswerDraft, hasReviewDraft, hasQuestionNotes, lineDiff, proposalStates, questionCardStatus, questionIsActive, questionReplies, sameAnswerSheet, sameQuestionNotes, taskActive, taskTerminated } from './requirement-review-state.mjs';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -37,7 +38,9 @@ export function requirementReviewHTML(task) {
         <form class="review-composer">
           <p class="review-composer-note" hidden></p>
           <p class="rc-composer-hint" hidden></p>
-          <textarea id="review-input" rows="2" aria-label="发消息" placeholder="直接回答、提问或纠正理解。看不懂可以问：这是什么意思？"></textarea>
+          <div class="rc-mention-editor"><div class="rc-mention-popup" hidden></div><textarea id="review-input" rows="2" aria-label="发消息" aria-autocomplete="list" aria-controls="review-mention-options" aria-expanded="false" placeholder="直接回答、提问或纠正理解，输入 @ 可提及项目成员。"></textarea></div>
+          <p class="rc-mention-tip">输入 @ 提及项目成员 · ↑↓ 选择，Enter 确认</p>
+          <div class="rc-mention-selected" hidden></div>
           <div class="review-pending-files"></div>
           <div class="review-send-error" role="status" aria-live="polite"></div>
           <div class="rc-composer-row"><button type="button" data-review-action="attach">添加截图 / 文档</button><input type="file" class="review-file-input" multiple hidden accept="image/png,image/jpeg,image/webp,image/gif,.txt,.md,.csv,.json,.log,.pdf,.docx"><span class="review-draft-status">草稿自动保存在此浏览器</span><button type="submit" class="primary review-send">发送</button></div>
@@ -73,7 +76,17 @@ function answerHTML(questions, values, notes = {}, project) {
   return `<dl class="review-saved-answers">${answerRows(questions,values,notes).map(row=>`<div class="review-answer-row"><dt>${esc(row.label)}</dt><dd class="${row.values.length?'':'review-answer-empty'}">${row.values.length?row.values.map(esc).join('、'):'未填写'}</dd>${row.note?`<dd class="review-answer-question-note">${row.note.body?`<p class="prewrap">补充：${esc(row.note.body)}</p>`:''}${attachments(row.note.attachments || row.note.files,project)}</dd>`:''}</div>`).join('')}</dl>`;
 }
 
-export function mountRequirementReview(root, {task,api,userID,onDetails,onConfirmed,onResolve,onChange}) {
+export function reviewMessageHTML(message, text = message.body) {
+  let html = '', end = 0;
+  for (const m of message.mentions || []) {
+    if (m.start < end || m.end > text.length || text.slice(m.start,m.end) !== '@'+m.name) continue;
+    html += esc(text.slice(end,m.start))+`<span class="rc-mention" title="提及 ${esc(m.name)}">${esc(text.slice(m.start,m.end))}</span>`;
+    end = m.end;
+  }
+  return html + esc(text.slice(end));
+}
+
+export function mountRequirementReview(root, {task,api,userID,messageID = '',onDetails,onConfirmed,onResolve,onChange}) {
   const $ = selector => root.querySelector(selector), feed = $('.review-feed'), input = $('#review-input');
   const key = `ai-pm:review-draft:${userID}:${task.project_id}:${task.id}`;
   let draft; try { draft = JSON.parse(localStorage.getItem(key)||'null'); } catch {}
@@ -84,6 +97,7 @@ export function mountRequirementReview(root, {task,api,userID,onDetails,onConfir
   const signatures = new WeakMap();
   let sourceView = null; // null: closed; {kind:'current'|'snapshot'|'diff', message}
   input.value = draft?.body || '';
+  const mentionEditor = mountReviewMentions(root,{input,api,projectID:task.project_id,initial:draft?.mentions || [],changed(){saveDraft();updateActions();}});
   const endpoint = `/tasks/${encodeURIComponent(task.id)}/requirement-review`;
   const source = () => v?.source || task;
   const activeForm = () => v?.messages.findLast(message => message.result?.questions?.length && questionIsActive(v,message));
@@ -102,7 +116,7 @@ export function mountRequirementReview(root, {task,api,userID,onDetails,onConfir
   function saveDraft() {
     if (disposed) return;
     try {
-      localStorage.setItem(key,JSON.stringify({body:input.value,files,answers,question_notes:notes,pending,operations}));
+      localStorage.setItem(key,JSON.stringify({body:input.value,mentions:mentionEditor.mentions,files,answers,question_notes:notes,pending,operations}));
       $('.review-draft-status').textContent = '草稿已保存在此浏览器';
     } catch { $('.review-draft-status').textContent = '浏览器无法保存草稿，请及时发送'; }
   }
@@ -222,10 +236,11 @@ export function mountRequirementReview(root, {task,api,userID,onDetails,onConfir
       const sheet = Object.keys(message.answers || {}).length || hasQuestionNotes(message.question_notes);
       if (sheet) {
         const parent = v.messages.find(m=>m.id === message.reply_to), topic = topicOf(parent?.result?.ask?.topic_id);
-        body = `<div class="rc-bubble rc-submission"><div class="rc-submission-head">${topic?`提交了「${esc(topic.title)}」`:'提交了表单回答'}</div>${answerHTML(parent?.result?.questions || [],message.answers || {},message.question_notes,task.project_id)}${message.body?`<p class="prewrap">${esc(message.body)}</p>`:''}</div>`;
-      } else if (message.body.length > 600) body = `<div class="rc-bubble prewrap">${esc([...message.body].slice(0,240).join(''))}…</div><details class="rc-analysis" data-key="${esc(message.id)}:body"><summary>展开全文（${[...message.body].length} 字）</summary><div class="rc-long prewrap">${esc(message.body)}</div></details>`;
-      else if (message.body) body = `<div class="rc-bubble prewrap">${esc(message.body)}</div>`;
+        body = `<div class="rc-bubble rc-submission"><div class="rc-submission-head">${topic?`提交了「${esc(topic.title)}」`:'提交了表单回答'}</div>${answerHTML(parent?.result?.questions || [],message.answers || {},message.question_notes,task.project_id)}${message.body?`<p class="prewrap">${reviewMessageHTML(message)}</p>`:''}</div>`;
+      } else if (message.body.length > 600) body = `<div class="rc-bubble prewrap">${reviewMessageHTML(message,[...message.body].slice(0,240).join(''))}…</div><details class="rc-analysis" data-key="${esc(message.id)}:body"><summary>展开全文（${[...message.body].length} 字）</summary><div class="rc-long prewrap">${reviewMessageHTML(message)}</div></details>`;
+      else if (message.body) body = `<div class="rc-bubble prewrap">${reviewMessageHTML(message)}</div>`;
       body += attachments(message.attachments,task.project_id);
+      if (item.mine && message.mention_warnings?.length) body += `<p class="rc-mention-delivery" role="status">${message.mention_warnings.map(esc).join('；')}</p>`;
     } else {
       const result = message.result || {};
       body = agentBody(message);
@@ -358,6 +373,7 @@ export function mountRequirementReview(root, {task,api,userID,onDetails,onConfir
     hint.textContent = pending ? '上次发送的结果还不确定，内容已保留；重试会核对保存结果，不会重复发送。' : count && !readOnly() ? `发送时会一并提交「${topicOf(form.result.ask?.topic_id)?.title || '当前问题'}」里已填的 ${count} 项` : '';
     hint.hidden = !hint.textContent;
     input.readOnly = saving || readOnly();
+    mentionEditor.refresh();
     const send = $('.review-send');
     send.textContent = saving ? '正在保存…' : pending ? '重试保存' : '发送';
     send.disabled = saving || uploading || (readOnly() && !pending);
@@ -378,7 +394,7 @@ export function mountRequirementReview(root, {task,api,userID,onDetails,onConfir
   function render(next) {
     if (disposed || next.version < lastVersion) return;
     // Progress changes while the review version stays the same during a round.
-    const extra = JSON.stringify([next.needs_recheck,next.recheck_reason,next.compaction,next.incoming_relations,next.creator,next.progress,next.source?.version]);
+    const extra = JSON.stringify([next.needs_recheck,next.recheck_reason,next.compaction,next.incoming_relations,next.creator,next.progress,next.source?.version,next.messages?.map(m=>m.mention_warnings)]);
     if (next.version === lastVersion && extra === lastExtra) return;
     v = next; lastVersion = next.version; lastExtra = extra;
     const nearEnd = feed.scrollHeight-feed.scrollTop-feed.clientHeight < 120;
@@ -393,6 +409,10 @@ export function mountRequirementReview(root, {task,api,userID,onDetails,onConfir
       feed.scrollTop = Math.min(top, feed.scrollHeight);
       if (appended.offsetHeight < feed.clientHeight) feed.scrollTop = feed.scrollHeight;
     } else if (nearEnd) feed.scrollTop = feed.scrollHeight;
+    if (messageID) {
+      const target = node(messageID);
+      if (target) { target.scrollIntoView({block:'center'}); target.classList.add('rc-flash'); messageID = ''; }
+    }
   }
   function setSaving(value) { saving = value; updateActions(); }
   async function command(payload) {
@@ -415,13 +435,13 @@ export function mountRequirementReview(root, {task,api,userID,onDetails,onConfir
     if (!pending && !input.value.trim() && !files.length && !Object.keys(values).length && !hasQuestionNotes(questionNotes)) {
       $('.review-send-error').textContent = '请输入说明，或回答至少一个问题。'; input.focus(); return;
     }
-    pending ||= {action:'message',generation:v?.generation,request_id:createID(),body:input.value,reply_to:reply,answers:values,question_notes:questionNotes,attachment_ids:files.map(file=>file.id)};
+    pending ||= {action:'message',generation:v?.generation,request_id:createID(),body:input.value,mentions:mentionEditor.mentions,reply_to:reply,answers:values,question_notes:questionNotes,attachment_ids:files.map(file=>file.id)};
     saveDraft(); setSaving(true); $('.review-send-error').textContent = '正在保存消息…';
     const submitted = pending;
     try {
       await command(submitted);
       if (disposed) return;
-      if (input.value === submitted.body) input.value = '';
+      if (input.value === submitted.body) { input.value = ''; mentionEditor.clear(); }
       files = files.filter(file=>!submitted.attachment_ids.includes(file.id));
       if (submitted.reply_to && JSON.stringify(answers[submitted.reply_to] || {}) === JSON.stringify(submitted.answers)) delete answers[submitted.reply_to];
       if (submitted.reply_to && sameQuestionNotes(notes[submitted.reply_to],submitted.question_notes)) delete notes[submitted.reply_to];
@@ -578,5 +598,5 @@ export function mountRequirementReview(root, {task,api,userID,onDetails,onConfir
     if (!disposed) $('.review-send-error').textContent = `需求已保存，评审暂时无法打开：${error.message}。可稍后重新进入。`;
   });
   const timer = setInterval(poll,1500);
-  return {get busy(){return uploading;},destroy(){saveDraft();disposed = true;clearInterval(timer);}};
+  return {get busy(){return uploading;},destroy(){saveDraft();disposed = true;mentionEditor.destroy();clearInterval(timer);}};
 }

@@ -20,6 +20,7 @@ test:
 	node --check internal/web/static/requirement-editor.mjs
 	node --check internal/web/static/requirement-review.mjs
 	node --check internal/web/static/requirement-review-state.mjs
+	node --check internal/web/static/review-mentions.mjs
 	node --check internal/web/static/requirement-intake.mjs
 	node --check internal/web/static/project-versions.mjs
 	node --check internal/web/static/project-timeline.mjs
