@@ -248,3 +248,56 @@ func TestSettingExistingDefaultCannotIgnoreConcurrentReplacement(t *testing.T) {
 		t.Fatal("rejected default action retained a write")
 	}
 }
+
+func TestClosingPlannedVersionPreservesMissingDefaultRead(t *testing.T) {
+	for _, inserted := range []string{"none", "empty", "active"} {
+		t.Run(inserted, func(t *testing.T) {
+			s, p := setup(t)
+			c := context.Background()
+			// The storage contract permits legacy/adapter-created plans before a
+			// default row exists, even though current creation APIs start active.
+			planned := domain.ProjectVersion{ID: "planned", ProjectID: p.ID, Name: "旧计划", Status: "planned", Version: 1}
+			if e := s.Store.CommitVersionPlan(c, []domain.VersionWrite{{Value: planned}}, nil, nil, nil); e != nil {
+				t.Fatal(e)
+			}
+			initial, e := s.Store.GetCurrentMilestone(c, p.ID)
+			if e != nil || initial.Version != 0 || initial.VersionID != "" {
+				t.Fatal("fixture already has a default row", initial, e)
+			}
+			base := s.Store
+			other := &app.Service{Store: base}
+			s.Store = &interleaveVersionCommit{Store: base, before: func() {
+				switch inserted {
+				case "empty":
+					e = base.CommitVersionPlan(c, nil, nil, nil, nil, domain.MilestoneBatch{State: &domain.CurrentMilestone{ProjectID: p.ID, Version: 1}})
+				case "active":
+					_, e = other.SaveProjectVersion(c, app.Human(), p.ID, "", app.ProjectVersionInput{Name: "新版本", RequestID: "new-default"})
+				}
+				if e != nil {
+					t.Fatal(e)
+				}
+			}}
+			in := app.ProjectVersionAction{Action: "close", Version: planned.Version, Body: "关闭旧计划", RequestID: "close-plan"}
+			_, e = s.ActProjectVersion(c, app.Human(), planned.ID, in)
+			stored, _ := base.GetProjectVersion(c, planned.ID)
+			if inserted == "none" {
+				if e != nil || stored.Status != "closed" {
+					t.Fatal("closing a plan incorrectly requires a default row", stored, e)
+				}
+				state, _ := base.GetCurrentMilestone(c, p.ID)
+				if state != initial {
+					t.Fatal("closing a non-default plan created a default row")
+				}
+			} else {
+				if !errors.Is(e, domain.ErrConflict) || !reflect.DeepEqual(stored, planned) {
+					t.Fatal("concurrent default insertion ignored or partially committed", stored, e)
+				}
+				// A rejected absent-row read must not leave a receipt that prevents
+				// the same request from succeeding after it reads the inserted row.
+				if _, e = s.ActProjectVersion(c, app.Human(), planned.ID, in); e != nil {
+					t.Fatal("rejected read retained a receipt or write", e)
+				}
+			}
+		})
+	}
+}
