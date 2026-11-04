@@ -35,7 +35,7 @@ func (s *Service) RequirementReview(c context.Context, a domain.Actor, id string
 	if err != nil {
 		return domain.RequirementReview{}, err
 	}
-	if err = s.CheckProject(c, a, t.ProjectID, false); err != nil {
+	if err = s.RequirePages(c, a, t.ProjectID, "tasks", "reviews", "versions"); err != nil {
 		return domain.RequirementReview{}, err
 	}
 	v, err := s.Store.GetRequirementReview(c, id)
@@ -141,7 +141,7 @@ func (s *Service) saveRequirementReview(c context.Context, a domain.Actor, id st
 	if err != nil {
 		return domain.RequirementReview{}, err
 	}
-	if err = s.CheckProject(c, a, t.ProjectID, false); err != nil {
+	if err = s.RequirePages(c, a, t.ProjectID, "tasks"); err != nil {
 		return domain.RequirementReview{}, err
 	}
 	if a.Kind != "human" && authorization == nil && !(a.Kind == "platform" && in.Action == "start") {

@@ -59,7 +59,7 @@ func (s *Service) actDevelopmentAlignment(c context.Context, a domain.Actor, id 
 	if err != nil {
 		return domain.Mutation{}, err
 	}
-	if err = s.CheckProject(c, a, t.ProjectID, false); err != nil {
+	if err = s.RequirePages(c, a, t.ProjectID, "tasks"); err != nil {
 		return domain.Mutation{}, err
 	}
 	if !nonempty(in.RequestID) {

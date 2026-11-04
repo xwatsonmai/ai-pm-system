@@ -55,6 +55,8 @@ type Store interface {
 	ListProjects(context.Context) ([]domain.Project, error)
 	GetProject(context.Context, string) (domain.Project, error)
 	PutProject(context.Context, domain.Project) error
+	CommitProjectAccess(context.Context, domain.Project, int) error
+	ListProjectRolesPage(context.Context, string, int, int, string) ([]domain.ProjectRole, int, error)
 	ListTasks(context.Context, string) ([]domain.Task, error)
 	GetTask(context.Context, string) (domain.Task, error)
 	// CommitTask atomically compares version, stores the task, appends the event

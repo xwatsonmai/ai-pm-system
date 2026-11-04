@@ -126,7 +126,10 @@ func (d *DB) migrate() error {
  CREATE TABLE IF NOT EXISTS channel_bindings (channel TEXT NOT NULL,user_id TEXT NOT NULL,external_id TEXT NOT NULL,at INTEGER NOT NULL,PRIMARY KEY(channel,user_id),UNIQUE(channel,external_id));
  INSERT OR IGNORE INTO schema_migrations(version) VALUES(14);
  `)
-	return err
+	if err != nil {
+		return err
+	}
+	return d.migrateProjectAccess()
 }
 func decode[T any](s string) (T, error) { var v T; err := json.Unmarshal([]byte(s), &v); return v, err }
 func get[T any](ctx context.Context, d *DB, kind, id string) (T, error) {
@@ -183,7 +186,7 @@ func (d *DB) GetProject(c context.Context, id string) (domain.Project, error) {
 	return get[domain.Project](c, d, "project", id)
 }
 func (d *DB) PutProject(c context.Context, p domain.Project) error {
-	return d.put(c, "project", p.ID, p.ID, p)
+	return d.put(c, "project", p.ID, p.ID, domain.NormalizeProjectAccess(p))
 }
 func (d *DB) ListArtifacts(c context.Context, p string) ([]domain.Artifact, error) {
 	return list[domain.Artifact](c, d, "artifact", p)

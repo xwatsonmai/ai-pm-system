@@ -255,6 +255,9 @@ func (s *Service) CreateTask(c context.Context, a domain.Actor, p string, v Task
 	return s.createTask(c, a, p, v, nil)
 }
 func (s *Service) createTask(c context.Context, a domain.Actor, p string, v TaskInput, authorization *domain.TaskActionAuthorization) (domain.Mutation, error) {
+	if e := s.RequirePages(c, a, p, "tasks"); e != nil {
+		return domain.Mutation{}, e
+	}
 	if e := s.CheckProject(c, a, p, false); e != nil {
 		return domain.Mutation{}, e
 	}
@@ -330,7 +333,7 @@ func (s *Service) editTask(c context.Context, a domain.Actor, id string, v TaskI
 	if e != nil {
 		return domain.Mutation{}, e
 	}
-	if e = s.CheckProject(c, a, t.ProjectID, false); e != nil {
+	if e = s.RequirePages(c, a, t.ProjectID, "tasks"); e != nil {
 		return domain.Mutation{}, e
 	}
 	if v.RequestID == "" {
@@ -454,7 +457,7 @@ func (s *Service) actTask(c context.Context, a domain.Actor, id string, in Actio
 	if e != nil {
 		return domain.Mutation{}, e
 	}
-	if e = s.CheckProject(c, a, t.ProjectID, false); e != nil {
+	if e = s.RequireTaskAction(c, a, t, in.Action); e != nil {
 		return domain.Mutation{}, e
 	}
 	if in.RequestID == "" {
@@ -855,6 +858,9 @@ func (s *Service) Context(c context.Context, a domain.Actor, p, id string) (map[
 		out["requirement_reviews"] = reviews
 	}
 	if id != "" {
+		if e := s.RequirePages(c, a, p, "tasks", "reviews", "versions"); e != nil {
+			return nil, e
+		}
 		t, e := s.Store.GetTask(c, id)
 		if e != nil {
 			return nil, e
@@ -874,7 +880,7 @@ func (s *Service) Context(c context.Context, a domain.Actor, p, id string) (map[
 		}
 		out["iteration_history"] = history
 	}
-	return out, nil
+	return FilterContext(a, project, out), nil
 }
 func (s *Service) CreateToken(c context.Context, p, name string) (domain.Token, string, error) {
 	if _, e := s.Store.GetProject(c, p); e != nil {

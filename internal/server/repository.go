@@ -5,7 +5,9 @@ import (
 	"ai-pm-system/internal/credential"
 	"ai-pm-system/internal/domain"
 	"ai-pm-system/internal/gitrepo"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"reflect"
@@ -43,7 +45,7 @@ func (s *Server) repositorySecret(r *http.Request, in repositoryInput) (credenti
 		if e != nil {
 			return secret, "", e
 		}
-		if !app.CanRead(a, old) {
+		if !app.CanAccessPage(a, old, "git") {
 			return secret, "", domain.ErrForbidden
 		}
 	}
@@ -115,11 +117,71 @@ func (s *Server) saveProject(w http.ResponseWriter, r *http.Request) {
 		Auth        credential.Secret `json:"repository_auth"`
 		GeneratedID string            `json:"generated_credential_id"`
 	}
-	if e := read(r, &in); e != nil {
+	var raw json.RawMessage
+	if e := read(r, &raw); e != nil {
 		fail(w, e)
 		return
 	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if e := decoder.Decode(&in); e != nil {
+		fail(w, e)
+		return
+	}
+	fields := map[string]json.RawMessage{}
+	_ = json.Unmarshal(raw, &fields)
 	in.ID = r.PathValue("id")
+	if in.ID != "" {
+		old, e := s.App.Store.GetProject(r.Context(), in.ID)
+		if e != nil {
+			fail(w, e)
+			return
+		}
+		// Legacy PUT clients may send only one page's fields. Missing fields retain
+		// their stored values and cannot implicitly clear another page's settings.
+		for key, target := range map[string]*string{"name": &in.Name, "description": &in.Description, "repository": &in.Repository, "branch": &in.Branch, "agent_read_mode": &in.AgentReadMode, "agent_ref": &in.AgentRef, "auth_mode": &in.AuthMode, "credential_id": &in.CredentialID} {
+			if _, ok := fields[key]; !ok {
+				switch key {
+				case "name":
+					*target = old.Name
+				case "description":
+					*target = old.Description
+				case "repository":
+					*target = old.Repository
+				case "branch":
+					*target = old.Branch
+				case "agent_read_mode":
+					*target = old.AgentReadMode
+				case "agent_ref":
+					*target = old.AgentRef
+				case "auth_mode":
+					*target = old.AuthMode
+				case "credential_id":
+					*target = old.CredentialID
+				}
+			}
+		}
+		if (in.Name != old.Name || in.Description != old.Description) && !app.CanAccessPage(s.actor(r), old, "settings") {
+			fail(w, domain.ErrForbidden)
+			return
+		}
+		_, hasAuth := fields["repository_auth"]
+		changed := hasAuth || in.GeneratedID != "" || in.Repository != old.Repository || in.Branch != old.Branch || in.AgentReadMode != old.AgentReadMode || in.AgentRef != old.AgentRef || in.AuthMode != old.AuthMode || in.CredentialID != old.CredentialID
+		if !changed {
+			p, e := s.App.SaveProjectAs(r.Context(), s.actor(r), in.Project)
+			if e != nil {
+				fail(w, e)
+				return
+			}
+			respond(w, s.repositoryProjectFor(r, p))
+			return
+		}
+		if !app.CanAccessPage(s.actor(r), old, "git") {
+			fail(w, domain.ErrForbidden)
+			return
+		}
+	}
+
 	secret, id, e := s.repositorySecret(r, repositoryInput{Repository: in.Repository, ProjectID: in.ID, Auth: in.Auth, GeneratedID: in.GeneratedID})
 	if e != nil {
 		fail(w, e)
@@ -150,7 +212,7 @@ func (s *Server) saveProject(w http.ResponseWriter, r *http.Request) {
 	if p.Repository != "" && p.SyncedAt == 0 && s.Git != nil {
 		s.Git.SyncAsync(r.Context(), p.ID)
 	}
-	respond(w, s.repositoryProject(r.Context(), p))
+	respond(w, s.repositoryProjectFor(r, p))
 }
 func (s *Server) repositoryRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/projects/{id}/repository-status", s.projectAccess(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -159,7 +221,7 @@ func (s *Server) repositoryRoutes(mux *http.ServeMux) {
 			fail(w, e)
 			return
 		}
-		respond(w, s.repositoryProject(r.Context(), p))
+		respond(w, s.repositoryProjectFor(r, p))
 	})))
 	mux.HandleFunc("GET /api/users", s.onlyAdmin(func(w http.ResponseWriter, r *http.Request) {
 		users, e := s.App.Store.ListUsers(r.Context())

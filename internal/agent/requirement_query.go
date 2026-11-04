@@ -46,6 +46,11 @@ func (m *Manager) initialContext(c context.Context, a domain.Actor, r domain.Run
 	if r.Kind != "question" {
 		return m.App.Context(c, a, r.ProjectID, r.TaskID)
 	}
+	owner, e := m.questionReadActor(c, r)
+	if e != nil {
+		return nil, e
+	}
+	a = owner
 	proposals, files, err := m.App.ConversationIntakeContext(c, r)
 	if err != nil {
 		return nil, err
@@ -119,6 +124,14 @@ func (m *Manager) questionProjectContext(c context.Context, a domain.Actor, r do
 	}
 	// Project knowledge/evidence remains readable on demand even though it is no
 	// longer injected into every question. Task evidence lives in the detail tool.
+	p, err := m.App.Store.GetProject(c, r.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if !app.CanAccessPage(a, p, "reviews") {
+		out["project_artifacts"] = []domain.Artifact{}
+		return out, nil
+	}
 	artifacts, err := m.App.Store.ListArtifacts(c, r.ProjectID)
 	if err != nil {
 		return nil, err
