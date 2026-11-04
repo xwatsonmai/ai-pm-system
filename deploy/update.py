@@ -204,7 +204,7 @@ class Update:
             time.sleep(0.1)
         raise RuntimeError("HTTP health did not recover within 60 seconds")
 
-    def apply(self):
+    def apply(self, automatic_image_rollback=True):
         if (self.directory / "result.json").exists():
             raise RuntimeError("This release has already been applied")
         prepared = json.loads((self.directory / "prepared.json").read_text())
@@ -240,9 +240,14 @@ class Update:
             result.update(outcome="deployed", image=prepared["target_image"],
                           stop_to_http_seconds=round(time.monotonic() - started, 3))
         except BaseException:
-            # Retain all current business data; only undo image selection.
-            result["outcome"] = "rollback_failed"
+            # Old writers may be unsafe after an incompatible migration. In
+            # that mode stop the target and retain its data and image selection
+            # for explicit recovery, instead of starting an old application.
+            result["outcome"] = "rollback_failed" if automatic_image_rollback else "manual_recovery_required"
             self.compose("stop", "app")
+            if not automatic_image_rollback:
+                raise
+            # Compatible updates retain all business data; undo image only.
             shutil.copy2(str(self.directory / "env.before"), str(self.root / ".env"))
             self.compose("up", "-d", "--no-deps", "--force-recreate", "--pull", "never", "app")
             self.wait_http()
@@ -268,6 +273,8 @@ def main():
     parser.add_argument("--release", required=True)
     parser.add_argument("--image", help="Already built and tested local image, required for prepare")
     parser.add_argument("--health-url", default="http://127.0.0.1:8090/api/health")
+    parser.add_argument("--no-image-rollback", action="store_true",
+                        help="On apply failure stop the target and preserve data for explicit recovery; do not start the old image")
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", args.release):
         parser.error("Invalid release name")
@@ -279,7 +286,7 @@ def main():
     with open(str(root / ".deploy.lock"), "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         update = Update(root, args.release, args.health_url)
-        update.prepare(args.image) if args.mode == "prepare" else update.apply()
+        update.prepare(args.image) if args.mode == "prepare" else update.apply(automatic_image_rollback=not args.no_image_rollback)
 
 
 if __name__ == "__main__":
