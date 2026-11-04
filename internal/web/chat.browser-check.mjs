@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import net from "node:net";
 import { once } from "node:events";
+import { chatConversations } from "./static/conversations.mjs";
 
 const load = createRequire(process.env.AI_PM_QA_NODE_MODULES
   ? join(process.env.AI_PM_QA_NODE_MODULES, "package.json") : import.meta.url);
@@ -50,16 +51,22 @@ function currentRun() {
     + `已完成第 ${iteration} 步分析。`, steps: [{ name: "repository_read", status: "done" }] };
 }
 await page.route("**/api/**", async (route) => {
-  const request = route.request(), path = new URL(request.url()).pathname;
+  const request = route.request(),url=new URL(request.url()),path=url.pathname;
+ const paged=items=>{if(!url.searchParams.has('page')&&!url.searchParams.has('page_size'))return items;const size=Number(url.searchParams.get('page_size'))||20,page=Number(url.searchParams.get('page'))||1;return {items:items.slice((page-1)*size,page*size),total:items.length,page,page_size:size}};
+ const allRuns=activeRun?[...runs,currentRun()]:runs;
   let body;
   if (path === "/api/auth/session") body = { enabled: false };
-  else if (path === "/api/projects") body = [project];
+  else if (path === "/api/projects") body = paged([project]);
  else if (path === "/api/agent/status") body = {configured:true,profile_id:"fixture"};
-  else if (path === "/api/profiles" || path === "/api/users") body = [];
-  else if (path.endsWith("/collaborations")) body = collaborations;
+  else if (path === "/api/profiles" || path === "/api/users") body = paged([]);
+  else if (path.endsWith("/collaborations")) body = paged(collaborations);
   else if (path === "/api/collaborations/collab_fixture") body = collaborations[0];
   else if (path === "/api/collaborations/collab_fixture/cancel") { collaborations[0] = { ...collaborations[0], status: "canceled" }; body = { collaboration: collaborations[0] }; }
-  else if (path.endsWith("/context")) body = { project, tasks: [], events: [],
+  else if(path.endsWith('/access'))body={pages:['overview','tasks','reviews','versions','timeline','chat','code','settings','git','access'],roles:[],responsibilities:['product','developer','tester'],version:1,can_manage:true,recovery:false};
+  else if(path.endsWith('/conversations'))body=paged(chatConversations(allRuns).map(c=>({id:c.id,title:c.title,updatedAt:c.updatedAt,active:c.active,naming:c.naming,legacy:c.legacy,reply_event_ids:c.turns.filter(r=>r.trigger_type==='collaboration_result'&&r.status==='succeeded').map(r=>r.source_event_id),turns:[]})));
+  else if(path.endsWith('/requirement-intakes')||path===`/api/projects/${project.id}/tasks`||path===`/api/projects/${project.id}/events`)body=paged([]);
+  else if(path===`/api/projects/${project.id}/artifacts`)body=paged([]);
+  else if (path.endsWith("/context")||path.endsWith('/summary')) body = { project, tasks: [], events: [],stats:{total:0,by_status:{},attention:0,review_pending:0},project_versions:[],requirement_reviews:[],
     artifacts: [{ id: "external_update", kind: "analysis", body: `外部活动 ${++contexts}` }] };
   else if (path === `/api/projects/${project.id}/runs` && request.method() === "POST") {
     const input = request.postDataJSON();
@@ -67,7 +74,10 @@ await page.route("**/api/**", async (route) => {
       conversation_id: "conversation_fixture", owner_id: "local-owner",
       started_at: Date.now(), prompt: input.prompt, output: markdown, steps: [] };
     body = activeRun;
-  } else if (path === `/api/projects/${project.id}/runs`) body = activeRun ? [...runs, currentRun()] : runs;
+  } else if (path === `/api/projects/${project.id}/runs`) {
+   const selected=url.searchParams.get('conversation_id');let visible=selected?allRuns.filter(r=>(r.conversation_id||r.id)===selected):allRuns;
+   visible=visible.slice().sort((a,b)=>b.started_at-a.started_at||b.id.localeCompare(a.id));body=paged(visible);
+  }
   else if (path === "/api/runs/run_stream") { reads++; body = currentRun(); }
   // Exercise compatibility with a server/proxy that cannot stream.
   else if (path.endsWith("/events")) { await route.fulfill({ status: 503, body: "stream unavailable" }); return; }
@@ -187,7 +197,7 @@ try {
   const other = page.locator('[data-action="select-conversation"][data-id="other-conversation"]');
   await other.locator(".reply-unread").waitFor({ timeout: 12000 });
   await other.click();
-  assert.equal(await other.locator(".reply-unread").count(), 0);
+  await other.locator(".reply-unread").waitFor({state:"detached"});
   await page.locator('[data-action="select-conversation"][data-id="conversation_fixture"]').click();
   assert.equal(await input.inputValue(), "保留这份排查后的草稿");
   report.collaboration_unread = "other conversation gets unread badge and marks read when viewed";

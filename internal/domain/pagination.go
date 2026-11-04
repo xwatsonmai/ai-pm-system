@@ -61,4 +61,5 @@ type ListDocumentQuery struct {
 	ArtifactMode     string
 	ExcludeGit       bool
 	ExcludeGitEvents bool
+	Summary          bool
 }
