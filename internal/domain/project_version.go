@@ -57,6 +57,14 @@ type VersionWrite struct {
 	Expected int
 }
 
+// ProjectVersionCheck validates a version read by a plan without modifying it.
+type ProjectVersionCheck struct {
+	ID        string
+	ProjectID string
+	Version   int
+	Status    string
+}
+
 type VersionTaskWrite struct {
 	Value    Task
 	Expected int
@@ -83,6 +91,7 @@ type CurrentMilestone struct {
 }
 type MilestoneBatch struct {
 	CheckState *CurrentMilestone
+	Checks     []ProjectVersionCheck
 	State      *CurrentMilestone
 	Expected   int
 	Versions   []VersionWrite
