@@ -2,6 +2,7 @@ import { createID as id } from "./id.mjs";
 import { BASE, appURL } from "./base.mjs";
 import { chatConversations, conversationID } from "./conversations.mjs";
 import { renderMarkdown } from "./markdown.mjs";
+import { mountVersionPicker } from "./version-picker.mjs";
 import { pagerHTML, pageQuery, patchKeyedHTML } from "./pagination.mjs";
 import { patchHTML, mergeRunRefresh } from "./dom-update.mjs";
 import { requirementFormHTML, mountRequirementEditor } from "./requirement-editor.mjs";
@@ -382,8 +383,14 @@ function updateBusinessPage() {
  if(state.page==='timeline'){timelineUI.refreshIfNeeded();return;}
  if(state.page==='versions'){projectVersionUI.loadPage().catch(e=>toast(e.message));return;}
  const renderer={tasks:tasksPage,reviews:reviewsPage,overview,platform:platformPage}[state.page];
- if(renderer)patchKeyedHTML($('#page'),renderer());
+ if(renderer){
+  if(state.page==='tasks'){
+   patchKeyedHTML($('#task-table'),tasksTable());
+   const pager=$('[data-pager="tasks"]');if(pager){const holder=document.createElement('div');holder.innerHTML=pagerHTML(listResult('tasks'),'tasks');patchKeyedHTML(pager,holder.firstElementChild.innerHTML);}
+  }else patchKeyedHTML($('#page'),renderer());
+ }
  patchKeyedHTML($('.requirement-nav-badge'),reviewNavBadge());
+ const pendingOption=$('#task-filter option[value="review_pending"]');if(pendingOption)pendingOption.textContent=`待确认${pendingConfirmations()?`（${pendingConfirmations()}）`:""}`;
  const reviewButton=$('[data-action=navigate][data-page=reviews]');
  if(reviewButton){const count=state.context?.stats?.by_status?.review||0;let badge=$('.nav-count',reviewButton);if(count){if(!badge){badge=document.createElement('span');badge.className='nav-count';reviewButton.append(badge);}if(badge.textContent!==String(count))badge.textContent=count;}else badge?.remove();}
  updateRepositoryStatus();
@@ -542,6 +549,7 @@ function renderPage() {
   $("#page").innerHTML = renderer();
   if(state.page==='timeline')timelineUI.load();
   if(state.page==='versions')projectVersionUI.loadPage();
+  if(state.page==='tasks')mountTaskVersionFilter();
   if (state.page === "chat") {
     updateComposer();
     const feed = $(".chat-feed");
@@ -599,6 +607,10 @@ function tasksTable() {
   const groups=[...new Set(tasks.map(t=>t.project_version_id||''))].map(id=>({id,name:versionName(state.context.project_versions||[],id)}));
   return groups.map(g=>{const items=tasks.filter(t=>(t.project_version_id||'')===g.id);return items.length?`<section class="pv-pool-group" data-key="version:${escape(g.id)}"><div class="pv-pool-heading"><h2>${escape(g.name)} <span class="muted small">${items.length} 项</span></h2>${g.id?action('pv-open','查看版本','ghost',`data-id="${g.id}"`):''}</div>${table(items)}</section>`:''}).join('')+`<div class="queue-footer">${listResult("tasks").total} 个需求 · 以实际验收结果确认业务完成</div>`;
 }
+function mountTaskVersionFilter(){
+ const host=$('[data-task-version-picker]');if(!host)return;
+ mountVersionPicker(host,{api,projectID:state.project.id,selected:state.versionFilter,name:'task_version_filter',label:'筛选目标版本',status:'',emptyLabel:'所有版本',onChange:value=>{state.versionFilter=value;setListPage('tasks');void loadBusinessPage().catch(e=>toast(e.message));}});
+}
 function tasksPage() {
   return `<div class="page">${heading("需求池", "集中管理迭代需求与 Bug 修复。评审在后台进行，有结论后标记待确认。", action("new-task", icon("plus") + " 创建需求", "primary"))}<div class="toolbar"><input id="task-search" placeholder="搜索标题、描述或负责人…" aria-label="搜索需求" value="${escape(state.search)}"><select id="task-filter" aria-label="筛选状态"><option value="">所有状态</option><option value="attention" ${state.filter === "attention" ? "selected" : ""}>需要我处理</option><option value="review_pending" ${state.filter === "review_pending" ? "selected" : ""}>待确认${pendingConfirmations() ? `（${pendingConfirmations()}）` : ""}</option>${Object.entries(
     states,
@@ -609,7 +621,7 @@ function tasksPage() {
     )
     .join(
       "",
-    )}</select><select id="kind-filter" aria-label="筛选类型"><option value="">所有类型</option><option value="requirement" ${state.kind === "requirement" ? "selected" : ""}>迭代需求</option><option value="bug" ${state.kind === "bug" ? "selected" : ""}>Bug 修复</option></select><select id="version-filter" aria-label="筛选目标版本">${versionOptions(state.context.project_versions||[],state.versionFilter,{all:true})}</select></div><div class="pv-pool-tools">${action("pv-assign-selected","归入当前里程碑")}${action("toggle-version-group",state.versionGrouping?"切换平铺列表":"按版本分组","ghost")}</div><div id="task-table">${tasksTable()}</div>${pagerHTML(listResult("tasks"),"tasks")}</div>`;
+    )}</select><select id="kind-filter" aria-label="筛选类型"><option value="">所有类型</option><option value="requirement" ${state.kind === "requirement" ? "selected" : ""}>迭代需求</option><option value="bug" ${state.kind === "bug" ? "selected" : ""}>Bug 修复</option></select><div data-task-version-picker></div></div><div class="pv-pool-tools">${action("pv-assign-selected","归入当前里程碑")}${action("toggle-version-group",state.versionGrouping?"切换平铺列表":"按版本分组","ghost")}</div><div id="task-table">${tasksTable()}</div>${pagerHTML(listResult("tasks"),"tasks")}</div>`;
 }
 function reviewsPage() {
   const tasks = state.context.tasks.filter((t) => t.status === "review");
@@ -1115,7 +1127,7 @@ async function loadMCP() {
   } catch (e) { if ($("#mcp-grants")) $("#mcp-grants").textContent = e.message; }
 }
 function platformPage() {
-  return `<div class="page">${heading("平台设置", "统一配置平台 Agent，管理平台管理员和成员项目授权。")}<div class="settings-grid"><section class="settings-section"><h2>平台 Agent</h2><p>所有项目使用同一平台 Agent 模型配置。</p><form id="platform-form">${field("默认模型", `<select name="profile_id"><option value="">暂不启用 Agent</option>${state.profiles.map((p) => `<option value="${escape(p.id)}" ${state.platform.profile_id === p.id ? "selected" : ""}>${escape(p.name)} · ${escape(p.model)}</option>`).join("")}</select>`)}<div class="form-error"></div><button type="submit" class="primary">保存平台配置</button></form><div class="divider"></div><div class="row between"><h3>模型配置</h3>${action("new-profile", icon("plus") + " 添加", "ghost")}</div>${state.profiles.map((p) => `<div class="profile-row"><span class="dot ${p.has_key ? "live" : ""}"></span><div class="grow">${escape(p.name)}<p class="hint">${escape(p.provider)} / ${escape(p.model)}</p></div>${action("edit-profile", "编辑", "ghost", `data-id="${escape(p.id)}"`)}</div>`).join("") || '<p class="hint">先添加模型配置，再选为默认模型。</p>'}${pagerHTML(listResult("profiles"),"profiles")}<p class="hint">API Key 仅保存在服务器，不会回显。</p></section><div><section class="settings-section"><div class="row between"><h2>成员项目授权</h2>${state.auth?.directory?.syncable ? action("sync-directory", icon("refresh") + ` 同步 ${escape(state.auth.directory.label)}`, "ghost") : ""}</div><p>选择项目，搜索成员并分配产品、开发、测试或管理员角色，可多选。</p>${state.platformProjects.map((p) => `<div class="profile-row"><div class="grow"><strong>${escape(p.name)}</strong><p class="hint">${escape(p.description)}</p></div>${action("manage-project-members", "管理成员", "", `data-project="${escape(p.id)}"`)}</div>`).join("") || '<p class="hint">还没有项目。</p>'}${pagerHTML(listResult('platform-projects'),'platform-projects')}</section>${accountsSection()}${channelsSection()}<section class="settings-section"><div class="row between"><h2>平台管理员</h2>${action("add-platform-admin", icon("plus") + " 添加", "ghost")}</div><p>平台管理员可进入此页面、配置 Agent 并管理所有项目成员。</p>${state.admins.map((u) => `<div class="profile-row"><div class="grow">${escape(u.name)}<p class="hint">${escape(u.login_id)}</p></div>${u.id !== "local-owner" ? action("remove-platform-admin", "移除", "ghost danger", `data-user="${escape(u.id)}" data-name="${escape(u.name)}"`) : ""}</div>`).join("")}${pagerHTML(listResult("admins"),"admins")}</section></div></div></div>`;
+  return `<div class="page">${heading("平台设置", "统一配置平台 Agent，管理平台管理员和成员项目授权。")}<div class="settings-grid"><section class="settings-section"><h2>平台 Agent</h2><p>所有项目使用同一平台 Agent 模型配置。</p><form id="platform-form">${field("默认模型", `<select name="profile_id"><option value="">暂不启用 Agent</option>${state.platform.profile_id&&!state.profiles.some(p=>p.id===state.platform.profile_id)?`<option value="${escape(state.platform.profile_id)}" selected>${escape(state.platform.name||state.platform.profile_id)} · ${escape(state.platform.model)}</option>`:""}${state.profiles.map((p) => `<option value="${escape(p.id)}" ${state.platform.profile_id === p.id ? "selected" : ""}>${escape(p.name)} · ${escape(p.model)}</option>`).join("")}</select>`)}<div class="form-error"></div><button type="submit" class="primary">保存平台配置</button></form><div class="divider"></div><div class="row between"><h3>模型配置</h3>${action("new-profile", icon("plus") + " 添加", "ghost")}</div>${state.profiles.map((p) => `<div class="profile-row"><span class="dot ${p.has_key ? "live" : ""}"></span><div class="grow">${escape(p.name)}<p class="hint">${escape(p.provider)} / ${escape(p.model)}</p></div>${action("edit-profile", "编辑", "ghost", `data-id="${escape(p.id)}"`)}</div>`).join("") || '<p class="hint">先添加模型配置，再选为默认模型。</p>'}${pagerHTML(listResult("profiles"),"profiles")}<p class="hint">API Key 仅保存在服务器，不会回显。</p></section><div><section class="settings-section"><div class="row between"><h2>成员项目授权</h2>${state.auth?.directory?.syncable ? action("sync-directory", icon("refresh") + ` 同步 ${escape(state.auth.directory.label)}`, "ghost") : ""}</div><p>选择项目，搜索成员并分配产品、开发、测试或管理员角色，可多选。</p>${state.platformProjects.map((p) => `<div class="profile-row"><div class="grow"><strong>${escape(p.name)}</strong><p class="hint">${escape(p.description)}</p></div>${action("manage-project-members", "管理成员", "", `data-project="${escape(p.id)}"`)}</div>`).join("") || '<p class="hint">还没有项目。</p>'}${pagerHTML(listResult('platform-projects'),'platform-projects')}</section>${accountsSection()}${channelsSection()}<section class="settings-section"><div class="row between"><h2>平台管理员</h2>${action("add-platform-admin", icon("plus") + " 添加", "ghost")}</div><p>平台管理员可进入此页面、配置 Agent 并管理所有项目成员。</p>${state.admins.map((u) => `<div class="profile-row"><div class="grow">${escape(u.name)}<p class="hint">${escape(u.login_id)}</p></div>${u.id !== "local-owner" ? action("remove-platform-admin", "移除", "ghost danger", `data-user="${escape(u.id)}" data-name="${escape(u.name)}"`) : ""}</div>`).join("")}${pagerHTML(listResult("admins"),"admins")}</section></div></div></div>`;
 }
 function channelsSection() {
   if (!state.channels?.length) return "";
@@ -1161,30 +1173,20 @@ function codePage() {
   return `<div class="page">${heading("代码与变更", `默认分支 ${escape(state.project.branch)} · ${date(state.project.synced_at)}`, action("sync", icon("refresh") + " 同步仓库", "primary"))}${!state.project.sha ? empty(state.project.syncing ? "正在同步代码仓库" : "尚未读取代码", state.project.syncing ? "首次同步完成后会自动显示文件列表。" : "在 Git 设置中填写仓库地址，然后同步。", action("navigate", "Git 设置", "", 'data-page="git"')) : `<div class="toolbar"><input id="code-search" placeholder="搜索代码内容…" aria-label="代码搜索">${action("search-code", "搜索")}${action("git-log", "最近提交", "ghost")}<span class="mono muted">${state.project.sha.slice(0, 12)}</span></div><div class="file-browser"><div class="file-list" id="file-list"><p class="hint">正在读取目录…</p></div><div class="file-content" id="file-content"><p class="context-note">选择文件查看当前版本内容。</p></div></div>`}</div>`;
 }
 async function loadFiles() {
-  try {
-    const data = await api(`/projects/${state.project.id}/code?action=tree`);
-    if (!$("#file-list")) return;
-    state.files = data.text.trim().split("\n").filter(Boolean);
-    $("#file-list").innerHTML =
-      state.files
-        .slice(0, 600)
-        .map((path) =>
-          action(
-            "open-file",
-            escape(path),
-            "",
-            `data-path="${escape(path)}" title="${escape(path)}"`,
-          ),
-        )
-        .join("") +
-      (data.truncated
-        ? '<p class="hint">目录已截断，可用搜索定位文件。</p>'
-        : "");
-  } catch (e) {
-    if ($("#file-list")) $("#file-list").textContent = e.message;
-  }
+ const projectID=state.project?.id,params=listParams('files',{action:'tree'});
+ try{
+  const data=await api(`/projects/${projectID}/code?${params}`);if(projectID!==state.project?.id||!$('#file-list'))return;
+  businessLists.set(listScope('files'),data);state.files=data.items;
+  patchKeyedHTML($('#file-list'),data.items.map(path=>`<button type="button" data-key="${escape(path)}" data-action="open-file" data-path="${escape(path)}" title="${escape(path)}">${escape(path)}</button>`).join('')+pagerHTML(data,'files'));
+ }catch(e){if($('#file-list'))$('#file-list').textContent=e.message;}
 }
-
+let codeResultQuery=null;
+async function loadCodeResults(page=1,size){
+ if(!codeResultQuery)return;setListPage('code-results',page,size);
+ const projectID=state.project.id,params=listParams('code-results',codeResultQuery),v=await api(`/projects/${projectID}/code?${params}`);
+ if(projectID!==state.project?.id||!$('#file-content'))return;businessLists.set(listScope('code-results'),v);codeResultQuery.ref=v.sha;
+ patchKeyedHTML($('#file-content'),`<div class="mono muted small">${escape(v.path||'')} · ${escape(v.sha.slice(0,12))}</div><div class="divider"></div><pre>${escape(v.text||'没有匹配结果')}</pre>${v.truncated?'<p class="hint">个别行过长，当前仅显示前 64KB；可打开源文件查看。</p>':''}${pagerHTML(v,'code-results')}`);
+}
 async function openTask(taskID) {
   const ctx = await api(`/tasks/${taskID}?compact=true`);
   const t = ctx.task;
@@ -1560,6 +1562,8 @@ document.addEventListener("click", async (event) => {
     }
     if(a==='list-page'){
       const key=button.dataset.list;
+      if(key==='files'){setListPage(key,Number(button.dataset.page));await loadFiles();return;}
+      if(key==='code-results'){await loadCodeResults(Number(button.dataset.page));return;}
       if(key.startsWith('detail-')){await loadDetailPage(key,Number(button.dataset.page));return;}
       if(!['tasks','testing','releases','acceptance','evidence','overview-tasks','overview-events','projects','profiles','platform-projects','admins','accounts','conversations','mcp-grants'].includes(key)&&!key.startsWith('messages:')&&!key.startsWith('intakes:')&&!key.startsWith('collaborations:'))return;
       setListPage(key,Number(button.dataset.page));
@@ -1899,6 +1903,7 @@ document.addEventListener("click", async (event) => {
       });
       if (a === "open-file") params.set("path", button.dataset.path);
       if (a === "search-code") params.set("query", $("#code-search").value);
+      if(a!=='open-file'){codeResultQuery=Object.fromEntries(params);await loadCodeResults();return;}
       $("#file-content").textContent = "正在读取…";
       const v = await api(`/projects/${state.project.id}/code?${params}`);
       $("#file-content").innerHTML =
@@ -2026,7 +2031,7 @@ document.addEventListener("drop", (event) => {
   addChatFiles([...(event.dataTransfer?.files || [])]);
 });
 document.addEventListener("change", async (event) => {
- if(event.target.matches('[data-page-size]')){const key=event.target.dataset.pageSize;if(key.startsWith('detail-')){void loadDetailPage(key,1,Number(event.target.value)).catch(e=>toast(e.message));return;}setListPage(key,1,Number(event.target.value));if(['profiles','projects','platform-projects','admins','accounts'].includes(key)){void refresh().then(updateBusinessPage).catch(e=>toast(e.message));}else if(key==='mcp-grants'){void loadMCP();}else void loadBusinessPage().catch(e=>toast(e.message));return;}
+ if(event.target.matches('[data-page-size]')){const key=event.target.dataset.pageSize;if(key==='files'){setListPage(key,1,Number(event.target.value));void loadFiles();return;}if(key==='code-results'){void loadCodeResults(1,Number(event.target.value)).catch(e=>toast(e.message));return;}if(key.startsWith('detail-')){void loadDetailPage(key,1,Number(event.target.value)).catch(e=>toast(e.message));return;}setListPage(key,1,Number(event.target.value));if(['profiles','projects','platform-projects','admins','accounts'].includes(key)){void refresh().then(updateBusinessPage).catch(e=>toast(e.message));}else if(key==='mcp-grants'){void loadMCP();}else void loadBusinessPage().catch(e=>toast(e.message));return;}
 
  if(['tl-end','tl-days','tl-grain'].includes(event.target.id)){await timelineUI.change(event.target);return;}
  if (event.target.id === "department-filter") {await searchEmployees(1);return;}

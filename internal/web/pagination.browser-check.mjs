@@ -7,12 +7,12 @@ import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import net from 'node:net';
 import {once} from 'node:events';
-const load=createRequire(join(process.env.AI_PM_QA_NODE_MODULES||'/Users/xuan/.codex/node_modules','package.json'));
+const load=createRequire(process.env.AI_PM_QA_NODE_MODULES?join(process.env.AI_PM_QA_NODE_MODULES,'package.json'):import.meta.url);
 const {chromium}=load('playwright');
 const data=await mkdtemp(join(tmpdir(),'ai-pm-pagination-'));
 const reservation=net.createServer().listen(0,'127.0.0.1');await once(reservation,'listening');const port=reservation.address().port;await new Promise(done=>reservation.close(done));
 const base=`http://127.0.0.1:${port}`;
-const server=spawn(resolve(process.env.AI_PM_QA_BIN||'/tmp/ai-pm-overall-lists'),['-addr',`127.0.0.1:${port}`,'-data',data,'-sync-interval','0'],{stdio:['ignore','ignore','pipe']});server.stderr.resume();
+const server=spawn(resolve(process.env.AI_PM_QA_BIN||'bin/ai-pm-pagination-check'),['-addr',`127.0.0.1:${port}`,'-data',data,'-sync-interval','0'],{stdio:['ignore','ignore','pipe']});server.stderr.resume();
 const browser=await chromium.launch({headless:true}),page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
 page.on('pageerror',e=>errors.push(e.message));
 const api=async(path,body,method)=>{const r=await fetch(base+'/api'+path,{method:method||(body?'POST':'GET'),headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const v=await r.json();assert(r.ok,JSON.stringify(v));return v;};
@@ -38,6 +38,17 @@ try{
  await page.waitForFunction(()=>document.querySelector('#task-table')?.textContent.includes('已更新'),{timeout:18000});
  assert(await page.evaluate(()=>window.savedShell===document.querySelector('.layout')&&window.savedSearch===document.querySelector('#task-search')&&window.savedRow.isConnected&&window.savedCheckbox.checked));
  await page.locator(`tr[data-id="${id}"] input`).uncheck();await page.locator(`tr[data-id="${id}"]`).click();await page.locator('.detail-title').waitFor();assert(await page.locator('#task-detail-events [data-pager]').count());
+ await page.getByRole('button',{name:'关闭',exact:true}).click();
+ // A long requirement room starts with a bounded window; older windows retain
+ // the actual input node, draft and current workflow state.
+ for(let i=0;i<45;i++)await api(`/tasks/${id}/actions`,{action:'report',report_kind:'progress',body:`历史记录 ${i}`,request_id:`history-${i}`});
+ const reviewPage=await api(`/tasks/${id}/requirement-review?message_limit=20`);assert.equal(reviewPage.messages.length,20);assert(reviewPage.message_page.has_more);
+ await page.locator(`tr[data-id="${id}"]`).click();await page.getByRole('button',{name:'继续需求评审',exact:true}).click();
+ await page.locator('[data-review-action=history-more]').waitFor();await page.locator('#review-input').fill('历史翻页保留的草稿');
+ await page.evaluate(()=>window.reviewInput=document.querySelector('#review-input'));
+ const beforeHistory=await page.locator('.review-feed>[data-key]').count();await page.locator('[data-review-action=history-more]').click();
+ await page.waitForFunction(n=>document.querySelectorAll('.review-feed>[data-key]').length>n,beforeHistory);
+ assert(await page.evaluate(()=>window.reviewInput===document.querySelector('#review-input')&&window.reviewInput.value==='历史翻页保留的草稿'));
  await page.getByRole('button',{name:'关闭',exact:true}).click();
  // Current page and responsive layout survive navigation-independent polling.
  await page.setViewportSize({width:390,height:844});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
