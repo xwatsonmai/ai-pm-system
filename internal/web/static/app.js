@@ -1309,7 +1309,9 @@ async function taskForm(taskID, iterationSourceID, bugParentID,targetVersionID =
     const linked=parent?parentVersion:associated;
     holder.innerHTML=`<span>所属版本</span><strong>${escape(linked?.name||'历史版本')}</strong>${parent?`<input type="hidden" name="project_version_id" value="${escape(parent.project_version_id)}">`:''}<small class="hint">${parent?'关联 Bug 跟随所属需求版本。':'请通过安排目标版本调整需求归属。已结束版本的后续工作进入指定或默认版本。'}</small>`;
   } else {
-    const selected=form.dataset.projectVersionId||targetVersionID||(state.context.project_versions||[]).find(v=>v.id===state.versionFilter&&v.status==='active')?.id||current?.id||'';
+    // A recovered draft keeps the exact original destination, including an
+    // empty automatic default, so a lost-response retry retains its request ID.
+    const selected=form.dataset.hasRequirementDraft==='true' ? form.dataset.projectVersionId : targetVersionID||(state.context.project_versions||[]).find(v=>v.id===state.versionFilter&&v.status==='active')?.id||current?.id||'';
     await mountVersionPicker(holder,{api,projectID,selected,label:'所属版本',emptyLabel:'使用项目默认版本（没有时自动创建）'});
     if(parent)holder.insertAdjacentHTML('beforeend','<small class="hint">原版本已结束：需求及本次 Bug 的后续修复将一起进入所选版本，原上线快照保留。</small>');
   }
