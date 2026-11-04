@@ -271,7 +271,18 @@ func (s *Service) CreateTask(c context.Context, a domain.Actor, p string, v Task
 	return s.createTask(c, a, p, v, nil)
 }
 func (s *Service) createTask(c context.Context, a domain.Actor, p string, v TaskInput, authorization *domain.TaskActionAuthorization) (domain.Mutation, error) {
-	if e := s.RequirePages(c, a, p, "tasks"); e != nil {
+	pages := []string{"tasks"}
+	if v.Kind == "bug" && v.ParentRequirementID != "" {
+		parent, e := s.Store.GetTask(c, v.ParentRequirementID)
+		if e != nil {
+			return domain.Mutation{}, e
+		}
+		if parent.ProjectID != p {
+			return domain.Mutation{}, domain.ErrForbidden
+		}
+		pages = append(pages, "reviews")
+	}
+	if e := s.RequirePages(c, a, p, pages...); e != nil {
 		return domain.Mutation{}, e
 	}
 	if e := s.CheckProject(c, a, p, false); e != nil {
@@ -349,7 +360,11 @@ func (s *Service) editTask(c context.Context, a domain.Actor, id string, v TaskI
 	if e != nil {
 		return domain.Mutation{}, e
 	}
-	if e = s.RequirePages(c, a, t.ProjectID, "tasks"); e != nil {
+	pages := []string{"tasks"}
+	if t.ParentRequirementID != "" {
+		pages = append(pages, "reviews")
+	}
+	if e = s.RequirePages(c, a, t.ProjectID, pages...); e != nil {
 		return domain.Mutation{}, e
 	}
 	if v.RequestID == "" {
@@ -914,6 +929,13 @@ func (s *Service) CreateToken(c context.Context, p, name string) (domain.Token, 
 	return t, raw, s.Store.PutToken(c, t)
 }
 func (s *Service) Artifact(c context.Context, a domain.Actor, v domain.Artifact) (domain.Artifact, error) {
+	pages := []string{"reviews"}
+	if v.Kind == "analysis" || v.Kind == "question" || v.Kind == "knowledge" {
+		pages = []string{"overview", "chat"}
+	}
+	if e := s.RequirePages(c, a, v.ProjectID, pages...); e != nil {
+		return v, e
+	}
 	if e := s.CheckProject(c, a, v.ProjectID, false); e != nil {
 		return v, e
 	}

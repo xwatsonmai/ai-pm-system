@@ -514,6 +514,12 @@ func (m *Manager) execute(ctx context.Context, r domain.Run, profile domain.Prof
 			r.CodeRef = ""
 		}
 	}
+	if r.Kind == "question" {
+		guarded, stop := context.WithCancel(ctx)
+		defer stop()
+		ctx = guarded
+		go m.guardQuestionPermissions(ctx, stop, r, r.CodeSnapshot != nil)
+	}
 	contextData, e := m.initialContext(ctx, actor, r)
 	if e != nil {
 		m.fail(ctx, r, e)
@@ -1030,7 +1036,11 @@ func (m *Manager) callTool(c context.Context, a domain.Actor, r domain.Run, call
 		if r.CodeSnapshot != nil {
 			args["sha"] = r.CodeSnapshot.SHA
 		}
-		return m.App.Artifact(c, a, domain.Artifact{ID: "analysis_" + r.ID + "_" + app.Hash(callID)[:12], ProjectID: r.ProjectID, TaskID: r.TaskID, Kind: args["kind"], Title: args["title"], Body: args["body"], SHA: args["sha"]})
+		writer := a
+		if r.Kind == "question" {
+			writer = domain.Actor{ID: "platform", Name: "平台 Agent", Kind: "platform", ProjectID: r.ProjectID}
+		}
+		return m.App.Artifact(c, writer, domain.Artifact{ID: "analysis_" + r.ID + "_" + app.Hash(callID)[:12], ProjectID: r.ProjectID, TaskID: r.TaskID, Kind: args["kind"], Title: args["title"], Body: args["body"], SHA: args["sha"]})
 	case "create_bug":
 		if r.Kind != "triage" {
 			return nil, domain.ErrForbidden

@@ -46,7 +46,9 @@ func (h *Hub) reconcileMentions(ctx context.Context, t domain.Task) error {
 			continue
 		}
 		for _, mention := range m.Mentions {
-			if !slices.ContainsFunc(domain.ProjectMembers(p), func(member domain.ProjectMember) bool { return member.UserID == mention.UserID }) {
+			if !slices.ContainsFunc(domain.ProjectMembers(p), func(member domain.ProjectMember) bool {
+				return member.UserID == mention.UserID && domain.MemberHasProjectPage(p, member.UserID, "tasks", "reviews", "versions")
+			}) {
 				continue
 			}
 			for _, name := range h.enabled() {
@@ -81,7 +83,9 @@ func (h *Hub) canDeliverMention(ctx context.Context, d Delivery) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if !slices.ContainsFunc(domain.ProjectMembers(p), func(m domain.ProjectMember) bool { return m.UserID == d.UserID }) {
+	if !slices.ContainsFunc(domain.ProjectMembers(p), func(m domain.ProjectMember) bool {
+		return m.UserID == d.UserID && domain.MemberHasProjectPage(p, m.UserID, "tasks", "reviews", "versions")
+	}) {
 		return false, nil
 	}
 	v, err := h.Data.GetRequirementReview(ctx, d.Mention.TaskID)

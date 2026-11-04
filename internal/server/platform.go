@@ -64,6 +64,9 @@ func (s *Server) platformRoutes(mux *http.ServeMux) {
 			fail(w, e)
 			return
 		}
+		for i := range p {
+			p[i] = app.ProjectForActor(s.actor(r), p[i])
+		}
 		respond(w, p)
 	}))
 	mux.HandleFunc("GET /api/platform/admins", s.onlyAdmin(func(w http.ResponseWriter, r *http.Request) {

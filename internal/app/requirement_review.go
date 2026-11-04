@@ -141,7 +141,11 @@ func (s *Service) saveRequirementReview(c context.Context, a domain.Actor, id st
 	if err != nil {
 		return domain.RequirementReview{}, err
 	}
-	if err = s.RequirePages(c, a, t.ProjectID, "tasks"); err != nil {
+	pages := []string{"tasks"}
+	if t.ParentRequirementID != "" {
+		pages = append(pages, "reviews")
+	}
+	if err = s.RequirePages(c, a, t.ProjectID, pages...); err != nil {
 		return domain.RequirementReview{}, err
 	}
 	if a.Kind != "human" && authorization == nil && !(a.Kind == "platform" && in.Action == "start") {

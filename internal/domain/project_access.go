@@ -56,3 +56,23 @@ func (m ProjectMember) ResponsibleFor(duty string) bool {
 	} // pre-migration values only
 	return slices.Contains(m.Responsibilities, duty)
 }
+
+func MemberHasProjectPage(p Project, user string, pages ...string) bool {
+	p = NormalizeProjectAccess(p)
+	for _, m := range p.Memberships {
+		if m.UserID != user {
+			continue
+		}
+		for _, role := range p.ProjectRoles {
+			if !slices.Contains(m.Roles, role.ID) {
+				continue
+			}
+			for _, page := range pages {
+				if slices.Contains(role.Pages, page) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
