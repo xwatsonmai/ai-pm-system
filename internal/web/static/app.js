@@ -504,7 +504,13 @@ setInterval(async () => {
     Object.assign(state.project, receipt);
     if (state.context?.project?.id === projectID) Object.assign(state.context.project, receipt);
     updateRepositoryStatus();
-    if(!p.syncing){if(state.page==="overview")updateBusinessPage();else if(state.page==="code"&&!$("#file-list button"))void loadFiles();}
+    if(!p.syncing){
+      if(state.page==="overview")updateBusinessPage();
+      else if(state.page==="code"){
+        if(!$("#file-list"))renderPage();
+        else void loadFiles();
+      }
+    }
   } catch { /* Keep the last known state until the next successful status read. */ }
   finally { repositoryRefreshing = false; }
 }, 2500);
