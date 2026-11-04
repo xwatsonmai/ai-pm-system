@@ -138,6 +138,10 @@ func TestDocumentPagesApplyPrivacyBeforeCountAndLimit(t *testing.T) {
 func TestTodosBeyondHundredAndPermissionFiltering(t *testing.T) {
 	d := paginationDB(t)
 	c := context.Background()
+	p := domain.NormalizeProjectAccess(domain.Project{ID: "p", Name: "P", Memberships: []domain.ProjectMember{{UserID: "alice", Roles: []string{"product"}}}})
+	if e := d.PutProject(c, p); e != nil {
+		t.Fatal(e)
+	}
 	for i := 0; i < 130; i++ {
 		project := "p"
 		if i < 10 {
@@ -158,6 +162,15 @@ func TestTodosBeyondHundredAndPermissionFiltering(t *testing.T) {
 	}
 	v, e = d.QueryTodos(c, "alice", true, domain.PageQuery{}, nil)
 	if e != nil || v.Total != 0 {
+		t.Fatal(v, e)
+	}
+	// Old recipient rows must not expose counts or items after page revocation.
+	p.ProjectRoles[0].Pages = []string{}
+	if e := d.PutProject(c, p); e != nil {
+		t.Fatal(e)
+	}
+	v, e = d.QueryTodos(c, "alice", true, domain.PageQuery{}, []string{"p"})
+	if e != nil || v.Total != 0 || len(v.Items) != 0 {
 		t.Fatal(v, e)
 	}
 }

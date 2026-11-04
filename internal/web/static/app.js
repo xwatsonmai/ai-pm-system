@@ -357,7 +357,7 @@ async function readWorkspace(projectID,page=state.page) {
   const saved=chatSelections.get(chatScope(projectID))??localStorage.getItem(`pm-chat:${chatScope(projectID)}`);
   const selected=saved===''?'':saved||conversations.items[0]?.id||'';
   if(selected){
-   const [messages,ints,cols]=await Promise.all([get(`messages:${selected}`,`/projects/${projectID}/runs`,{conversation_id:selected}),get(`intakes:${selected}`,`/projects/${projectID}/requirement-intakes`,{conversation_id:selected}),get(`collaborations:${selected}`,`/projects/${projectID}/collaborations`,{conversation_id:selected})]);
+   const [messages,ints,cols]=await Promise.all([get(`messages:${selected}`,`/projects/${projectID}/runs`,{conversation_id:selected}),mayReadPage(access,'tasks')?get(`intakes:${selected}`,`/projects/${projectID}/requirement-intakes`,{conversation_id:selected}):emptyPage(),get(`collaborations:${selected}`,`/projects/${projectID}/collaborations`,{conversation_id:selected})]);
    runs=messages.items;intakes=ints.items;collaborations=cols.items;
   }
   chatSelections.set(chatScope(projectID),selected);
@@ -380,6 +380,7 @@ async function loadBusinessPage() {
 function updateBusinessPage() {
  if(state.page==='chat'){updateChat();return;}
  if(state.page==='timeline'){timelineUI.refreshIfNeeded();return;}
+ if(state.page==='versions'){projectVersionUI.loadPage().catch(e=>toast(e.message));return;}
  const renderer={tasks:tasksPage,reviews:reviewsPage,overview,platform:platformPage}[state.page];
  if(renderer)patchKeyedHTML($('#page'),renderer());
  patchKeyedHTML($('.requirement-nav-badge'),reviewNavBadge());
@@ -1491,11 +1492,27 @@ async function pollRun(runID) {
 let refreshing=false;
 async function pollWorkspace() {
  if(refreshing||document.hidden||state.switchingProject||!state.project)return;
- if(['settings','git','access','code','mcp','platform'].includes(state.page))return;
  refreshing=true;
- try { await loadBusinessPage();pollActiveRuns(); }
- catch { /* Keep the last successful page and retry on the next cycle. */ }
- finally {refreshing=false;}
+ const projectID=state.project.id;
+ try {
+  const access=await api(`/projects/${encodeURIComponent(projectID)}/access`);
+  if(state.project?.id!==projectID||state.switchingProject)return;
+  const changed=JSON.stringify(access.pages)!==JSON.stringify(state.project_access?.pages);
+  state.project_access=access;
+  if(changed){
+   closeModal();stopRunUpdates();ensurePageAccess();
+   expandNavigationGroup();await refresh();render();pollActiveRuns();return;
+  }
+  if(['settings','git','access','code','mcp','platform'].includes(state.page))return;
+  await loadBusinessPage();pollActiveRuns();
+ } catch(e) {
+  if((e.status===403||e.status===404)&&state.project?.id===projectID){
+   stopRunUpdates();closeModal();state.project=null;state.project_access=null;state.context=null;
+   try {localStorage.removeItem('pm-project');}catch{}
+   const url=new URL(location.href);url.searchParams.delete('project');history.replaceState(null,'',url.pathname+url.search);
+   await refresh().then(render).catch(()=>render());
+  }
+ } finally {refreshing=false;}
 }
 setInterval(pollWorkspace,6000);
 async function navigate(page, {historyMode='push'}={}) {
@@ -2270,7 +2287,7 @@ window.addEventListener("popstate", async () => {
   try {
     const route=routeFromURL(location.href);
     if(route.project && route.project!==state.project?.id)await switchProject(route.project,{updateURL:false});
-    await navigate(route.page,{historyMode:"none"});
+    await navigate(route.page,{historyMode:"none"});syncRoute();
   } catch(e) {toast(e.message);}
 });
 try {

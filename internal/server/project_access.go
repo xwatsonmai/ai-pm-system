@@ -251,6 +251,8 @@ func (s *Server) authorizeProjectRoute(r *http.Request, id string, manage bool, 
 			pages = []string{"versions"}
 		case "milestone":
 			pages = []string{"tasks", "reviews", "versions", "overview"}
+		case "version-options":
+			pages = []string{"tasks", "reviews", "versions"}
 		case "timeline":
 			pages = []string{"timeline"}
 		case "runs", "conversations", "collaborations":

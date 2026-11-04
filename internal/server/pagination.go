@@ -92,7 +92,7 @@ func (s *Server) pagedList(w http.ResponseWriter, r *http.Request, resource stri
 			fail(w, e)
 			return true
 		}
-		respond(w, map[string]any{"items": items.Items, "total": items.Total, "page": items.Page, "page_size": items.PageSize, "can_manage": app.CanManage(a, p)})
+		respond(w, map[string]any{"items": items.Items, "total": items.Total, "page": items.Page, "page_size": items.PageSize, "can_manage": app.CanManage(a, p), "version": p.AccessVersion})
 		return true
 	}
 	if resource == "artifacts" && r.URL.Query().Get("delivery") == "true" {
@@ -106,6 +106,8 @@ func (s *Server) pagedList(w http.ResponseWriter, r *http.Request, resource stri
 			return true
 		}
 		query.LegacyOwner = a.Kind == "human" && (p.OwnerID == a.ID || (p.OwnerID == "" && a.ID == "local-owner"))
+		query.ExcludeQuestions = !app.CanAccessPage(a, p, "chat")
+		query.OnlyQuestions = !app.CanAccessAnyPage(a, p, "tasks", "reviews", "versions")
 	}
 	out, e := store.QueryDocuments(r.Context(), query)
 	if e != nil {
@@ -119,7 +121,7 @@ func (s *Server) pagedList(w http.ResponseWriter, r *http.Request, resource stri
 				fail(w, e)
 				return true
 			}
-			out.Items[i], e = json.Marshal(s.repositoryProject(r.Context(), p))
+			out.Items[i], e = json.Marshal(s.repositoryProjectFor(r, p))
 			if e != nil {
 				fail(w, e)
 				return true
@@ -158,33 +160,39 @@ func (s *Server) projectSummary(w http.ResponseWriter, r *http.Request) {
 		fail(w, e)
 		return
 	}
-	stats, e := store.TaskListStats(r.Context(), project)
-	if e != nil {
-		fail(w, e)
-		return
-	}
-	options, e := store.QueryDocuments(r.Context(), domain.ListDocumentQuery{Resource: "version-options", ProjectID: project, Active: true, PageQuery: domain.PageQuery{Page: 1, PageSize: 100}})
-	if e != nil {
-		fail(w, e)
-		return
-	}
-	current, e := s.App.Store.GetCurrentMilestone(r.Context(), project)
-	if e != nil && !errors.Is(e, domain.ErrNotFound) {
-		fail(w, e)
-		return
-	}
-	var milestone any
-	for _, raw := range options.Items {
-		var v map[string]any
-		if e = json.Unmarshal(raw, &v); e != nil {
+	a := s.actor(r)
+	stats := domain.TaskListStats{ByStatus: map[string]int{}}
+	if app.CanAccessAnyPage(a, p, "overview", "tasks", "reviews", "versions") {
+		stats, e = store.TaskListStats(r.Context(), project)
+		if e != nil {
 			fail(w, e)
 			return
 		}
-		if v["id"] == current.VersionID {
-			milestone = v
+	}
+	choices := []app.VersionChoice{}
+	var milestone any
+	if app.CanAccessAnyPage(a, p, "overview", "tasks", "reviews", "versions") {
+		options, err := s.App.ProjectVersionChoices(r.Context(), a, project, domain.VersionListQuery{PageQuery: domain.PageQuery{Page: 1, PageSize: 20}, Status: "active"})
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		choices = options.Items
+		current, err := s.App.Store.GetCurrentMilestone(r.Context(), project)
+		if err != nil && !errors.Is(err, domain.ErrNotFound) {
+			fail(w, err)
+			return
+		}
+		if current.VersionID != "" {
+			choice, err := s.App.ProjectVersionChoice(r.Context(), a, project, current.VersionID)
+			if err != nil {
+				fail(w, err)
+				return
+			}
+			milestone = choice
 		}
 	}
-	respond(w, map[string]any{"project": s.repositoryProject(r.Context(), p), "stats": stats, "tasks": []domain.Task{}, "artifacts": []domain.Artifact{}, "events": []domain.Event{}, "requirement_reviews": []domain.RequirementReviewSummary{}, "project_versions": options.Items, "current_milestone": milestone})
+	respond(w, map[string]any{"project": s.repositoryProjectFor(r, p), "stats": stats, "tasks": []domain.Task{}, "artifacts": []domain.Artifact{}, "events": []domain.Event{}, "requirement_reviews": []domain.RequirementReviewSummary{}, "project_versions": choices, "current_milestone": milestone})
 }
 
 // Compact detail is opt-in for the web UI. The legacy context endpoint remains
@@ -247,6 +255,14 @@ func (s *Server) compactTaskContext(w http.ResponseWriter, r *http.Request) bool
 	if e != nil {
 		fail(w, e)
 		return true
+	}
+	p, e := s.App.Store.GetProject(r.Context(), t.ProjectID)
+	if e != nil {
+		fail(w, e)
+		return true
+	}
+	if !app.CanAccessPage(a, p, "reviews") {
+		artifacts = domain.Page[json.RawMessage]{Items: []json.RawMessage{}, Page: 1, PageSize: 20}
 	}
 	respond(w, map[string]any{"task": t, "tasks": tasks, "artifacts": artifacts.Items, "events": events.Items, "requirement_reviews": reviews, "iteration_history": history, "related_bugs": map[string]any{"items": related.Items, "total": related.Total, "page": related.Page, "page_size": related.PageSize, "open_total": opened.Total}, "artifact_page": artifacts, "event_page": events})
 	return true

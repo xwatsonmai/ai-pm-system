@@ -262,6 +262,12 @@ func (d *DB) QueryDocuments(c context.Context, q domain.ListDocumentQuery) (doma
 		from = `FROM documents d LEFT JOIN documents meta ON meta.kind='conversation' AND meta.project_id=d.project_id AND meta.id=` + cid
 		where = `d.kind='run' AND d.project_id=? AND COALESCE(json_extract(meta.payload,'$.deleted_at'),0)=0 AND (json_extract(d.payload,'$.kind')<>'question' OR (COALESCE(json_extract(d.payload,'$.owner_id'),'')<>'' AND json_extract(d.payload,'$.owner_id')=? AND json_extract(d.payload,'$.owner_kind')=?) OR (COALESCE(json_extract(d.payload,'$.owner_id'),'')='' AND ?))`
 		args = append(args, q.ProjectID, q.UserID, q.ActorKind, q.LegacyOwner)
+		if q.ExcludeQuestions {
+			where += ` AND json_extract(d.payload,'$.kind')<>'question'`
+		}
+		if q.OnlyQuestions {
+			where += ` AND json_extract(d.payload,'$.kind')='question'`
+		}
 		order = "COALESCE(json_extract(d.payload,'$.started_at'),0) DESC,d.id DESC"
 		projection = `CASE WHEN COALESCE(json_extract(meta.payload,'$.title'),'')<>'' THEN json_set(d.payload,'$.conversation_title',json_extract(meta.payload,'$.title'),'$.title_status','manual') ELSE d.payload END`
 		if q.ConversationID != "" {
@@ -327,7 +333,7 @@ func (d *DB) QueryMembers(c context.Context, p string, q domain.PageQuery) (doma
 		where += ` AND instr(lower(COALESCE(json_extract(u.payload,'$.name'),'')||' '||COALESCE(json_extract(u.payload,'$.login_id'),'')||' '||json_extract(m.value,'$.user_id')),lower(?))>0`
 		args = append(args, q.Query)
 	}
-	projection := `json_object('user',json(COALESCE(u.payload,json_object('id',json_extract(m.value,'$.user_id'),'name',CASE json_extract(m.value,'$.user_id') WHEN 'local-owner' THEN '本地管理员' ELSE json_extract(m.value,'$.user_id') END))),'roles',json(COALESCE(json_extract(m.value,'$.roles'),json_array(json_extract(m.value,'$.role')))),'department_name','')`
+	projection := `json_object('user',json(COALESCE(u.payload,json_object('id',json_extract(m.value,'$.user_id'),'name',CASE json_extract(m.value,'$.user_id') WHEN 'local-owner' THEN '本地管理员' ELSE json_extract(m.value,'$.user_id') END))),'roles',json(COALESCE(json_extract(m.value,'$.roles'),json_array(json_extract(m.value,'$.role')))),'responsibilities',json(COALESCE(json_extract(m.value,'$.responsibilities'),'[]')),'department_name','')`
 	return queryJSONPage(c, d, projection, from, where, "CAST(m.key AS INTEGER)", args, page)
 }
 func (d *DB) QueryTodos(c context.Context, user string, open bool, q domain.PageQuery, projects []string) (domain.Page[json.RawMessage], error) {
@@ -350,6 +356,20 @@ func (d *DB) QueryTodos(c context.Context, user string, open bool, q domain.Page
 			args = append(args, p)
 		}
 		where += " AND json_extract(t.payload,'$.project_id') IN (" + strings.Join(marks, ",") + ")"
+	}
+	// Apply page grants before both COUNT and LIMIT. Historical recipients can
+	// remain after a role changes, so recipient membership alone is insufficient.
+	if user != "local-owner" {
+		where += ` AND EXISTS(SELECT 1 FROM documents p,json_each(p.payload,'$.memberships') m
+		 WHERE p.kind='project' AND p.id=json_extract(t.payload,'$.project_id') AND json_extract(m.value,'$.user_id')=?
+		 AND (COALESCE(json_extract(p.payload,'$.access_version'),0)=0 OR EXISTS(
+		 SELECT 1 FROM json_each(p.payload,'$.project_roles') role,json_each(role.value,'$.pages') grant_page
+		 WHERE EXISTS(SELECT 1 FROM json_each(m.value,'$.roles') member_role WHERE member_role.value=json_extract(role.value,'$.id'))
+		 AND CASE WHEN json_extract(t.payload,'$.kind') IN ('test','retest','verify','acceptance') THEN grant_page.value='reviews'
+		 WHEN json_extract(t.payload,'$.kind')='release' THEN grant_page.value IN ('reviews','versions')
+		 WHEN json_extract(t.payload,'$.kind')='bug_rejection' THEN grant_page.value IN ('tasks','reviews')
+		 ELSE grant_page.value='tasks' END)))`
+		args = append(args, user)
 	}
 	return queryJSONPage(c, d, "t.payload", "FROM notify_todos t", where, "t.created_at DESC,t.id DESC", args, page)
 }
