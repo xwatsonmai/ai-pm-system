@@ -70,15 +70,30 @@ func (s *Server) pagedList(w http.ResponseWriter, r *http.Request, resource stri
 			return true
 		}
 		ids := []string{}
+		options := []app.VersionChoice{}
+		seenVersions := map[string]bool{}
 		for _, t := range tasks.Items {
 			ids = append(ids, t.ID)
+			if t.ProjectVersionID == "" || seenVersions[t.ProjectVersionID] {
+				continue
+			}
+			seenVersions[t.ProjectVersionID] = true
+			choice, err := s.App.ProjectVersionChoice(r.Context(), a, project, t.ProjectVersionID)
+			if errors.Is(err, domain.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				fail(w, err)
+				return true
+			}
+			options = append(options, choice)
 		}
 		reviews, e := store.QueryReviewSummaries(r.Context(), ids)
 		if e != nil {
 			fail(w, e)
 			return true
 		}
-		respond(w, map[string]any{"items": tasks.Items, "total": tasks.Total, "page": tasks.Page, "page_size": tasks.PageSize, "requirement_reviews": reviews})
+		respond(w, map[string]any{"items": tasks.Items, "total": tasks.Total, "page": tasks.Page, "page_size": tasks.PageSize, "requirement_reviews": reviews, "version_options": options})
 		return true
 	}
 	if resource == "members" {

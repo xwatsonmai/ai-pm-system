@@ -362,6 +362,9 @@ async function readWorkspace(projectID,page=state.page) {
   }
   chatSelections.set(chatScope(projectID),selected);
  }
+ const names=new Map((context.project_versions||[]).map(v=>[v.id,v]));
+ for(const result of lists.values())for(const v of result.version_options||[])names.set(v.id,v);
+ context.project_versions=[...names.values()];
  return {revision,projectID,page,context,access,lists,runs,intakes,collaborations,runsAtStart};
 }
 function applyWorkspace(snapshot) {
@@ -375,12 +378,12 @@ async function loadBusinessPage() {
  if(!state.project)return;
  const projectID=state.project.id,page=state.page,snapshot=await readWorkspace(projectID,page);
  if(state.project?.id!==projectID||state.page!==page)return;
- if(applyWorkspace(snapshot))updateBusinessPage();
+ if(applyWorkspace(snapshot))await updateBusinessPage();
 }
 function updateBusinessPage() {
  if(state.page==='chat'){updateChat();return;}
  if(state.page==='timeline'){timelineUI.refreshIfNeeded();return;}
- if(state.page==='versions'){projectVersionUI.loadPage().catch(e=>toast(e.message));return;}
+ if(state.page==='versions')return projectVersionUI.loadPage();
  const renderer={tasks:tasksPage,reviews:reviewsPage,overview,platform:platformPage}[state.page];
  if(renderer){
   if(state.page==='tasks'){
@@ -610,7 +613,7 @@ function tasksTable() {
   const table=items=>`<div class="table-scroll"><table class="task-table"><thead><tr><th class="task-checkbox">选择</th><th>状态</th><th>需求</th><th>优先级</th><th>负责人</th><th>更新</th></tr></thead><tbody>${items.map(t=>`<tr data-key="${t.id}" tabindex="0" data-action="open-task" data-id="${t.id}"><td><input type="checkbox" data-plan-task value="${t.id}" aria-label="选择需求 ${escape(t.title)}" ${taskFinished(t)||t.status==='review'?'disabled':''}></td><td>${status(t)}</td><td class="task-title"><span class="badge ${t.kind==='bug'?'bug':''}">${t.kind==='bug'?(t.parent_requirement_id?'需求测试 Bug':'平台 Bug'):'迭代需求'}</span> ${escape(t.title)}${t.blocker?' <span class="badge blocked">阻塞</span>':''}<div class="task-id">${short(t.id)}${t.iteration?` · 迭代自 ${short(t.iteration.parent_task_id)}`:""} · R${t.revision} · ${escape(versionName(state.context.project_versions||[],t.project_version_id))}</div></td><td><span class="priority-mark ${t.priority}">${t.priority === "now" ? "▰▰▰" : t.priority === "next" ? "▰▰▱" : "▰▱▱"}</span> ${priorities[t.priority]}</td><td>${escape(t.owner||'未认领')}</td><td class="muted small">${date(t.updated_at)}</td></tr>`).join('')}</tbody></table></div>`;
   if(!state.versionGrouping||state.versionFilter)return table(tasks)+`<div class="queue-footer">${listResult("tasks").total} 个需求</div>`;
   const groups=[...new Set(tasks.map(t=>t.project_version_id||''))].map(id=>({id,name:versionName(state.context.project_versions||[],id)}));
-  return groups.map(g=>{const items=tasks.filter(t=>(t.project_version_id||'')===g.id);return items.length?`<section class="pv-pool-group" data-key="version:${escape(g.id)}"><div class="pv-pool-heading"><h2>${escape(g.name)} <span class="muted small">${items.length} 项</span></h2>${g.id?action('pv-open','查看版本','ghost',`data-id="${g.id}"`):''}</div>${table(items)}</section>`:''}).join('')+`<div class="queue-footer">${listResult("tasks").total} 个需求 · 以实际验收结果确认业务完成</div>`;
+  return groups.map(g=>{const items=tasks.filter(t=>(t.project_version_id||'')===g.id);return items.length?`<section class="pv-pool-group" data-key="version:${escape(g.id)}"><div class="pv-pool-heading"><h2>${escape(g.name)} <span class="muted small">${items.length} 项</span></h2>${g.id&&allowedPage('versions',state.project_access)?action('pv-open','查看版本','ghost',`data-id="${g.id}"`):''}</div>${table(items)}</section>`:''}).join('')+`<div class="queue-footer">${listResult("tasks").total} 个需求 · 以实际验收结果确认业务完成</div>`;
 }
 function mountTaskVersionFilter(){
  const host=$('[data-task-version-picker]');if(!host)return;
@@ -626,7 +629,7 @@ function tasksPage() {
     )
     .join(
       "",
-    )}</select><select id="kind-filter" aria-label="筛选类型"><option value="">所有类型</option><option value="requirement" ${state.kind === "requirement" ? "selected" : ""}>迭代需求</option><option value="bug" ${state.kind === "bug" ? "selected" : ""}>Bug 修复</option></select><div data-task-version-picker></div></div><div class="pv-pool-tools">${action("pv-assign-selected","归入当前里程碑")}${action("toggle-version-group",state.versionGrouping?"切换平铺列表":"按版本分组","ghost")}</div><div id="task-table">${tasksTable()}</div>${pagerHTML(listResult("tasks"),"tasks")}</div>`;
+    )}</select><select id="kind-filter" aria-label="筛选类型"><option value="">所有类型</option><option value="requirement" ${state.kind === "requirement" ? "selected" : ""}>迭代需求</option><option value="bug" ${state.kind === "bug" ? "selected" : ""}>Bug 修复</option></select><div data-task-version-picker></div></div><div class="pv-pool-tools">${allowedPage("versions",state.project_access)?action("pv-assign-selected","安排目标版本"):""}${action("toggle-version-group",state.versionGrouping?"切换平铺列表":"按版本分组","ghost")}</div><div id="task-table">${tasksTable()}</div>${pagerHTML(listResult("tasks"),"tasks")}</div>`;
 }
 function reviewsPage() {
   const tasks = state.context.tasks.filter((t) => t.status === "review");
