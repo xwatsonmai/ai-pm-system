@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -41,7 +42,7 @@ func TestArtifactPaginationKeepsPageGrantsOnEveryPage(t *testing.T) {
 	if e = db.PutProject(c, p); e != nil {
 		t.Fatal(e)
 	}
-	for _, v := range []domain.Artifact{{ID: "analysis", ProjectID: p.ID, Kind: "analysis", Body: "PUBLIC_ANALYSIS", At: 1}, {ID: "task-analysis", ProjectID: p.ID, TaskID: made.Task.ID, Kind: "analysis", Body: "PRIVATE_TASK_ANALYSIS", At: 2}, {ID: "delivery", ProjectID: p.ID, TaskID: made.Task.ID, Kind: "deployment", Body: "PRIVATE_DELIVERY", At: 3}, {ID: "git", ProjectID: p.ID, Kind: "git", Body: "PRIVATE_GIT", Data: json.RawMessage(`{"commits":["PRIVATE_GIT_DATA"]}`), At: 4}} {
+	for _, v := range []domain.Artifact{{ID: "analysis", ProjectID: p.ID, Kind: "analysis", Body: "PUBLIC_ANALYSIS", At: 1}, {ID: "analysis-next", ProjectID: p.ID, Kind: "analysis", Body: "PUBLIC_ANALYSIS_SECOND", At: 5}, {ID: "task-analysis", ProjectID: p.ID, TaskID: made.Task.ID, Kind: "analysis", Body: "PRIVATE_TASK_ANALYSIS", At: 2}, {ID: "delivery", ProjectID: p.ID, TaskID: made.Task.ID, Kind: "deployment", Body: "PRIVATE_DELIVERY", At: 3}, {ID: "git", ProjectID: p.ID, Kind: "git", Body: "PRIVATE_GIT", Data: json.RawMessage(`{"commits":["PRIVATE_GIT_DATA"]}`), At: 4}} {
 		if e = db.PutArtifact(c, v); e != nil {
 			t.Fatal(e)
 		}
@@ -62,11 +63,28 @@ func TestArtifactPaginationKeepsPageGrantsOnEveryPage(t *testing.T) {
 		return w.Body.String()
 	}
 	base := "/api/projects/" + p.ID
-	for _, page := range []string{"1", "2"} {
+	// Exercise two actual readable pages, not two requests that both normalize
+	// to a single last page. Exact IDs detect duplicated/ignored page offsets.
+	for i, expected := range []string{"analysis-next", "analysis"} {
+		page := strconv.Itoa(i + 1)
 		raw := call("overview", base+"/artifacts?page="+page+"&page_size=1", 200)
-		if !strings.Contains(raw, "PUBLIC_ANALYSIS") || strings.Contains(raw, "PRIVATE_") || !strings.Contains(raw, `"total":1`) {
-			t.Fatal("overview page crossed evidence scope", raw)
+		var result domain.Page[domain.Artifact]
+		if e := json.Unmarshal([]byte(raw), &result); e != nil {
+			t.Fatal(e)
 		}
+		if result.Page != i+1 || result.PageSize != 1 || result.Total != 2 || len(result.Items) != 1 || result.Items[0].ID != expected || strings.Contains(raw, "PRIVATE_") {
+			t.Fatal("overview pagination duplicated rows or crossed evidence scope", raw)
+		}
+	}
+	// The shared pager intentionally returns the last valid page when an item
+	// was deleted or a filter shrank the list. It must report that actual page.
+	raw := call("overview", base+"/artifacts?page=3&page_size=1", 200)
+	var normalized domain.Page[domain.Artifact]
+	if e := json.Unmarshal([]byte(raw), &normalized); e != nil {
+		t.Fatal(e)
+	}
+	if normalized.Page != 2 || normalized.PageSize != 1 || normalized.Total != 2 || len(normalized.Items) != 1 || normalized.Items[0].ID != "analysis" || strings.Contains(raw, "PRIVATE_") {
+		t.Fatal("out-of-range response misreported its page or crossed scope", raw)
 	}
 	call("overview", base+"/artifacts?delivery=true&page=1", 403)
 	taskPage := call("tasks", base+"/artifacts?task_id="+made.Task.ID+"&page=1", 200)
@@ -78,11 +96,11 @@ func TestArtifactPaginationKeepsPageGrantsOnEveryPage(t *testing.T) {
 		t.Fatal("compact detail leaked evidence", compact)
 	}
 	review := call("reviews", base+"/artifacts?page=1", 200)
-	if !strings.Contains(review, "PRIVATE_DELIVERY") || strings.Contains(review, "PRIVATE_GIT") || !strings.Contains(review, `"total":3`) {
+	if !strings.Contains(review, "PRIVATE_DELIVERY") || strings.Contains(review, "PRIVATE_GIT") || !strings.Contains(review, `"total":4`) {
 		t.Fatal("review page Git filtering failed", review)
 	}
 	source := call("source-reviewer", base+"/artifacts?page=1", 200)
-	if !strings.Contains(source, "PRIVATE_GIT") || !strings.Contains(source, `"total":4`) {
+	if !strings.Contains(source, "PRIVATE_GIT") || !strings.Contains(source, `"total":5`) {
 		t.Fatal(source)
 	}
 	for _, path := range []string{base + "/context", base + "/events?page=1"} {
