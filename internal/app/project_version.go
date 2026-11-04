@@ -603,6 +603,7 @@ func (s *Service) actProjectVersion(c context.Context, a domain.Actor, id string
 		if current.Status != "active" || in.DefaultVersion != plan.stateExpected {
 			return ProjectVersionMutation{}, fmt.Errorf("%w: 默认版本或目标版本已变化，请刷新", domain.ErrConflict)
 		}
+		plan.stateRead = true
 		plan.state.VersionID = id
 		if reason == "" {
 			reason = "设置为新需求的默认版本"
@@ -618,6 +619,7 @@ func (s *Service) actProjectVersion(c context.Context, a domain.Actor, id string
 		}
 		current.Status = "completed"
 		current.EndedAt = plan.now
+		plan.stateRead = true
 		if plan.state.VersionID == id {
 			if e := plan.replaceDefault(id, in.DestinationVersionID, in.DestinationVersion); e != nil {
 				return ProjectVersionMutation{}, e
@@ -645,6 +647,7 @@ func (s *Service) actProjectVersion(c context.Context, a domain.Actor, id string
 		}
 		current.Status, current.EndedAt = "closed", plan.now
 		destination := ""
+		plan.stateRead = true
 		wasDefault := plan.state.VersionID == id
 		if wasDefault {
 			plan.state.VersionID = ""

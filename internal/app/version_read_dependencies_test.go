@@ -198,3 +198,53 @@ func TestClosedVersionLinkedBugContinuationMovesParentAtomically(t *testing.T) {
 		})
 	}
 }
+
+func TestEndingVersionCannotBecomeDefaultBeforeItsCommit(t *testing.T) {
+	for _, action := range []string{"complete", "close"} {
+		t.Run(action, func(t *testing.T) {
+			s, p := setup(t)
+			c := context.Background()
+			a := parallelVersion(t, s, p.ID, "A")
+			b := parallelVersion(t, s, p.ID, "B")
+			base := s.Store
+			other := &app.Service{Store: base}
+			s.Store = &interleaveVersionCommit{Store: base, before: func() {
+				if _, e := other.ActProjectVersion(c, app.Human(), a.ID, app.ProjectVersionAction{Action: "complete", Version: a.Version, DestinationVersionID: b.ID, DestinationVersion: b.Version, Body: "结束 A，交给 B", RequestID: "end-A"}); e != nil {
+					t.Fatal(e)
+				}
+			}}
+			_, e := s.ActProjectVersion(c, app.Human(), b.ID, app.ProjectVersionAction{Action: action, Version: b.Version, Body: "结束 B", RequestID: "end-B"})
+			if !errors.Is(e, domain.ErrConflict) {
+				t.Fatal("ending version ignored its concurrent promotion to default", e)
+			}
+			state, _ := base.GetCurrentMilestone(c, p.ID)
+			stored, _ := base.GetProjectVersion(c, b.ID)
+			if state.VersionID != b.ID || !reflect.DeepEqual(stored, b) {
+				t.Fatal("default points at an ended version", state, stored)
+			}
+		})
+	}
+}
+
+func TestSettingExistingDefaultCannotIgnoreConcurrentReplacement(t *testing.T) {
+	s, p := setup(t)
+	c := context.Background()
+	a := parallelVersion(t, s, p.ID, "A")
+	b := parallelVersion(t, s, p.ID, "B")
+	state, _ := s.Store.GetCurrentMilestone(c, p.ID)
+	base := s.Store
+	other := &app.Service{Store: base}
+	s.Store = &interleaveVersionCommit{Store: base, before: func() {
+		if _, e := other.ActProjectVersion(c, app.Human(), b.ID, app.ProjectVersionAction{Action: "set_default", Version: b.Version, DefaultVersion: state.Version, RequestID: "default-B"}); e != nil {
+			t.Fatal(e)
+		}
+	}}
+	_, e := s.ActProjectVersion(c, app.Human(), a.ID, app.ProjectVersionAction{Action: "set_default", Version: a.Version, DefaultVersion: state.Version, RequestID: "default-A"})
+	if !errors.Is(e, domain.ErrConflict) {
+		t.Fatal("setting the previous default reported success after its replacement", e)
+	}
+	stored, _ := base.GetProjectVersion(c, a.ID)
+	if !reflect.DeepEqual(stored, a) {
+		t.Fatal("rejected default action retained a write")
+	}
+}
