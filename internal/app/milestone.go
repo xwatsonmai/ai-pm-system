@@ -18,11 +18,13 @@ func (p *versionPlan) ensureCurrent() (*domain.ProjectVersion, error) {
 		if v == nil || v.Status != "active" {
 			return nil, domain.ErrConflict
 		}
+		p.check(v)
 		return v, nil
 	}
 	active := p.otherActive("")
 	if len(active) == 1 {
 		p.state.VersionID = active[0].ID
+		p.check(active[0])
 		return active[0], nil
 	}
 	if len(active) > 1 {
@@ -184,9 +186,9 @@ func (s *Service) taskMilestoneBatch(c context.Context, a domain.Actor, t *domai
 				return nil, errors.New("关联 Bug 必须跟随所属需求版本")
 			}
 			target = parent.ProjectVersionID
-		} else if t.Version <= 1 {
-			// Filing an acceptance Bug in an ended version starts follow-up work in
-			// the chosen/default active version, retaining the immutable release.
+		} else {
+			// Filing or reopening an acceptance Bug in an ended version starts
+			// follow-up work for both parent and Bug, retaining the release.
 			old := parent.Version
 			parent.Version++
 			parent.UpdatedAt = p.now
@@ -274,6 +276,7 @@ func (p *versionPlan) replaceDefault(exclude, target string, expected int) error
 			return fmt.Errorf("%w: 后继默认版本已变化", domain.ErrConflict)
 		}
 		p.state.VersionID = target
+		p.check(v)
 		return nil
 	}
 	active := p.otherActive(exclude)
@@ -283,6 +286,7 @@ func (p *versionPlan) replaceDefault(exclude, target string, expected int) error
 	p.state.VersionID = ""
 	if len(active) == 1 {
 		p.state.VersionID = active[0].ID
+		p.check(active[0])
 	}
 	return nil
 }

@@ -202,6 +202,7 @@ type versionPlan struct {
 	p             string
 	versions      map[string]*domain.ProjectVersion
 	expected      map[string]int
+	checks        map[string]domain.ProjectVersionCheck
 	tasks         []domain.VersionTaskWrite
 	events        []domain.Event
 	now           int64
@@ -223,7 +224,7 @@ func (s *Service) newVersionPlan(c context.Context, a domain.Actor, p string) (*
 	if e != nil {
 		return nil, e
 	}
-	plan := &versionPlan{state: state, stateExpected: state.Version, stateOriginal: state.VersionID, s: s, c: c, a: a, p: p, versions: map[string]*domain.ProjectVersion{}, expected: map[string]int{}, tasks: []domain.VersionTaskWrite{}, events: []domain.Event{}, now: domain.Now()}
+	plan := &versionPlan{state: state, stateExpected: state.Version, stateOriginal: state.VersionID, s: s, c: c, a: a, p: p, versions: map[string]*domain.ProjectVersion{}, expected: map[string]int{}, checks: map[string]domain.ProjectVersionCheck{}, tasks: []domain.VersionTaskWrite{}, events: []domain.Event{}, now: domain.Now()}
 	for _, v := range vs {
 		copy := v
 		plan.versions[v.ID] = &copy
@@ -238,6 +239,9 @@ func (p *versionPlan) touch(id string) *domain.ProjectVersion {
 		}
 	}
 	return v
+}
+func (p *versionPlan) check(v *domain.ProjectVersion) {
+	p.checks[v.ID] = domain.ProjectVersionCheck{ID: v.ID, ProjectID: v.ProjectID, Version: v.Version, Status: v.Status}
 }
 func (p *versionPlan) history(v *domain.ProjectVersion, action, body string, ids []string, instruction string) {
 	userID := p.a.UserID
@@ -264,6 +268,14 @@ func (p *versionPlan) batch() domain.MilestoneBatch {
 		writes = append(writes, domain.VersionWrite{Value: *v, Expected: p.expected[id]})
 	}
 	batch := domain.MilestoneBatch{Versions: writes, Events: p.events}
+	for id, check := range p.checks {
+		// A write already validates the same snapshot with CAS. New versions do
+		// not exist in storage until this batch is applied.
+		if _, written := p.expected[id]; !written {
+			batch.Checks = append(batch.Checks, check)
+		}
+	}
+	sort.Slice(batch.Checks, func(i, j int) bool { return batch.Checks[i].ID < batch.Checks[j].ID })
 	if p.state.VersionID != p.stateOriginal {
 		state := p.state
 		state.Version = p.stateExpected + 1
@@ -659,6 +671,7 @@ func (s *Service) actProjectVersion(c context.Context, a domain.Actor, id string
 					return ProjectVersionMutation{}, fmt.Errorf("%w: 后继版本已变化", domain.ErrConflict)
 				}
 				destination = target.ID
+				plan.check(target)
 				if wasDefault {
 					plan.state.VersionID = target.ID
 				}
