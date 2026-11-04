@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Prepare a live backup, then briefly restart one data-compatible app instance.
 
-Uses the sqlite3 CLI so the server's Python 3.6 also gets SQLite's online backup
-API. Never tar/copy a live database or restore an old database automatically.
+Uses the packaged database maintenance tool for hosts with older SQLite. Legacy
+packages fall back to the sqlite3 CLI. Never copy a live database or restore an
+old database automatically.
 """
 import argparse
 from contextlib import closing
@@ -42,9 +43,12 @@ def save(path, value):
         target.write("\n")
 
 
-def online_backup(source, destination):
+def online_backup(source, destination, helper=None):
     if not source.is_file() or destination.exists():
         raise RuntimeError("Backup source missing or destination already exists")
+    if helper is not None:
+        run([str(helper), "backup", str(source), str(destination)])
+        return
     # Dot commands accept C-style quoted strings. Pass stdin, never a shell.
     commands = '.timeout 5000\n.backup ' + json.dumps(str(destination)) + '\n'
     subprocess.run(["sqlite3", str(source)], input=commands,
@@ -63,13 +67,16 @@ def online_backup(source, destination):
         os.chown(str(destination), owner.st_uid, owner.st_gid)
 
 
-def idle(root):
-    with closing(sqlite3.connect("file:" + str(root / "shared/data/ai-pm.db") + "?mode=ro", uri=True)) as db:
-        for table in ("documents", "requirement_reviews", "reply_jobs"):
-            query = "select payload from documents where kind='run'" if table == "documents" else "select payload from " + table
-            if any(json.loads(row[0]).get("status") in ("running", "queued", "pending")
-                   for row in db.execute(query)):
-                raise RuntimeError("Active Agent work; retry after it finishes")
+def idle(root, helper=None):
+    if helper is not None:
+        run([str(helper), "idle", str(root / "shared/data/ai-pm.db")])
+    else:
+        with closing(sqlite3.connect("file:" + str(root / "shared/data/ai-pm.db") + "?mode=ro", uri=True)) as db:
+            for table in ("documents", "requirement_reviews", "reply_jobs"):
+                query = "select payload from documents where kind='run'" if table == "documents" else "select payload from " + table
+                if any(json.loads(row[0]).get("status") in ("running", "queued", "pending")
+                       for row in db.execute(query)):
+                    raise RuntimeError("Active Agent work; retry after it finishes")
     label = hashlib.sha256(str(root / "shared/data").encode()).hexdigest()[:24]
     if run(["docker", "ps", "-q", "--filter", "label=ai-pm.runner=" + label]):
         raise RuntimeError("Active sandbox worker; retry after it finishes")
@@ -111,8 +118,9 @@ class Probe:
 
 
 class Update:
-    def __init__(self, root, release, url):
+    def __init__(self, root, release, url, sqlite_helper=None):
         self.root, self.directory, self.url = root, root / "releases" / release, url
+        self.sqlite_helper = Path(sqlite_helper).resolve() if sqlite_helper is not None else None
         self.compose_files = [root / "compose.yaml"]
         if (root / "compose.sandbox.yaml").exists():
             self.compose_files.append(root / "compose.sandbox.yaml")
@@ -139,6 +147,11 @@ class Update:
             paths.append(runner)
         return paths
 
+    def helper_identity(self):
+        if self.sqlite_helper is None:
+            return None
+        return {"path": str(self.sqlite_helper), "sha256": digest(self.sqlite_helper)}
+
     def prepare(self, image):
         self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         if (self.directory / "prepared.json").exists() or (self.directory / "backup").exists():
@@ -146,7 +159,8 @@ class Update:
         current, target = self.current(), self.image(image)
         if not healthy(self.url):
             raise RuntimeError("Current HTTP health check failed")
-        idle(self.root)
+        idle(self.root, self.sqlite_helper)
+        helper_identity = self.helper_identity()
         configuration = {str(p): digest(p) for p in self.config_files()}
         environment = dict(os.environ, AI_PM_IMAGE=target)
         self.compose("config", "--quiet", env=environment)
@@ -157,13 +171,15 @@ class Update:
         copy = ["rsync", "-a", "--exclude=/data/ai-pm.db", "--exclude=/data/ai-pm.db-wal",
                 "--exclude=/data/ai-pm.db-shm", str(self.root / "shared") + "/", str(stage / "shared") + "/"]
         run(copy)
-        idle(self.root)
-        online_backup(self.root / "shared/data/ai-pm.db", stage / "shared/data/ai-pm.db")
+        idle(self.root, self.sqlite_helper)
+        online_backup(self.root / "shared/data/ai-pm.db", stage / "shared/data/ai-pm.db", self.sqlite_helper)
         snapshot_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
         for path in self.config_files():
             shutil.copy2(str(path), str(stage / path.name))
         if configuration != {str(p): digest(p) for p in self.config_files()}:
             raise RuntimeError("Configuration changed during backup; prepare again")
+        if helper_identity != self.helper_identity():
+            raise RuntimeError("Database helper changed during backup; prepare again")
         before = self.directory / "env.before"
         shutil.copy2(str(self.root / ".env"), str(before))
         lines = before.read_text().splitlines()
@@ -190,6 +206,7 @@ class Update:
                 pass
         prepared = {"created_at": time.time(), "database_snapshot_at": snapshot_at,
                     "previous_image": current["Image"], "target_image": target,
+                    "database_helper": helper_identity,
                     "target_reference": image, "configuration": configuration,
                     "backup": str(archive), "backup_sha256": digest(archive),
                     "env_before_sha256": digest(before), "env_next_sha256": digest(next_env)}
@@ -210,6 +227,8 @@ class Update:
         prepared = json.loads((self.directory / "prepared.json").read_text())
         if not 0 <= time.time() - prepared["created_at"] <= 900:
             raise RuntimeError("Prepared backup expired; prepare a fresh release")
+        if prepared.get("database_helper") != self.helper_identity():
+            raise RuntimeError("Database helper changed since preparation")
         for path, expected in prepared["configuration"].items():
             if digest(Path(path)) != expected:
                 raise RuntimeError("Deployment configuration changed since preparation")
@@ -220,7 +239,7 @@ class Update:
                                (self.directory / "env.next", prepared["env_next_sha256"])):
             if digest(path) != expected:
                 raise RuntimeError("Prepared artifact changed")
-        idle(self.root)
+        idle(self.root, self.sqlite_helper)
         if not healthy(self.url):
             raise RuntimeError("Current HTTP health check failed")
         self.compose("config", "--quiet", env=dict(os.environ, AI_PM_IMAGE=prepared["target_image"]))
@@ -273,6 +292,7 @@ def main():
     parser.add_argument("--release", required=True)
     parser.add_argument("--image", help="Already built and tested local image, required for prepare")
     parser.add_argument("--health-url", default="http://127.0.0.1:8090/api/health")
+    parser.add_argument("--sqlite-helper", help="Database maintenance binary; defaults to ai-pm-db-maintenance beside this script")
     parser.add_argument("--no-image-rollback", action="store_true",
                         help="On apply failure stop the target and preserve data for explicit recovery; do not start the old image")
     args = parser.parse_args()
@@ -287,7 +307,10 @@ def main():
     root = Path(args.root).resolve()
     with open(str(root / ".deploy.lock"), "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        update = Update(root, args.release, args.health_url)
+        helper = Path(args.sqlite_helper) if args.sqlite_helper else Path(__file__).resolve().with_name("ai-pm-db-maintenance")
+        if not args.sqlite_helper and not helper.is_file():
+            helper = None
+        update = Update(root, args.release, args.health_url, helper)
         update.prepare(args.image) if args.mode == "prepare" else update.apply(automatic_image_rollback=not args.no_image_rollback)
 
 
