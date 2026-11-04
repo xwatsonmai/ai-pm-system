@@ -149,7 +149,7 @@ let state = {
 };
 const drafts = new Map();
 const accessUI = mountProjectAccess({api,modal,closeModal,getProject:()=>state.project,getAccess:()=>state.project_access,onAccessChange:refreshProjectAccess,heading,field,action,escape,toast});
-const projectVersionUI=mountProjectVersions({api,modal,closeModal,getContext:()=>state.context,getProject:()=>state.project,getUser:()=>state.auth?.user?.id||'local-owner',refresh:async()=>{await refresh();render();},onTask:openTask,onCreate:versionID=>taskForm(null,null,null,versionID),onPool:async filter=>{await navigate('tasks');state.versionFilter=filter;setListPage('tasks',1);await loadBusinessPage();},toast});
+const projectVersionUI=mountProjectVersions({api,modal,closeModal,getContext:()=>state.context,getProject:()=>state.project,getUser:()=>state.auth?.user?.id||'local-owner',canAccessPage:page=>allowedPage(page,state.project_access,isPlatformAdmin()),refresh:async()=>{await refresh();render();},onTask:openTask,onCreate:versionID=>taskForm(null,null,null,versionID),onPool:async filter=>{await navigate('tasks');state.versionFilter=filter;setListPage('tasks',1);await loadBusinessPage();},toast});
 const timelineUI = mountProjectTimeline({
   api, getProject: () => state.project, onTask: openTask,
   onVersion: id => projectVersionUI.open(id),
@@ -537,7 +537,7 @@ function renderPage() {
     overview: overview,
     tasks: tasksPage,
     timeline:()=>timelineUI.page(),
-    versions:()=>projectVersionsPage(state.context,state.auth?.user?.id||'local-owner'),
+    versions:()=>projectVersionsPage(state.context,state.auth?.user?.id||'local-owner',page=>allowedPage(page,state.project_access,isPlatformAdmin())),
     chat: chatPage,
     reviews: reviewsPage,
     settings: settingsPage,

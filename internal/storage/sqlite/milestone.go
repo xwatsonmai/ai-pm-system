@@ -23,11 +23,14 @@ func writeMilestoneBatches(c context.Context, tx *sql.Tx, batches []domain.Miles
 		if b.CheckState != nil {
 			var version int
 			e := tx.QueryRowContext(c, "SELECT version FROM current_milestones WHERE project_id=? AND version_id=?", b.CheckState.ProjectID, b.CheckState.VersionID).Scan(&version)
-			if errors.Is(e, sql.ErrNoRows) || version != b.CheckState.Version {
+			if errors.Is(e, sql.ErrNoRows) {
 				return domain.ErrConflict
 			}
 			if e != nil {
 				return e
+			}
+			if version != b.CheckState.Version {
+				return domain.ErrConflict
 			}
 		}
 		if b.State != nil {

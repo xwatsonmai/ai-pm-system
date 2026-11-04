@@ -524,6 +524,9 @@ func (s *Service) actTask(c context.Context, a domain.Actor, id string, in Actio
 			return domain.Mutation{}, fmt.Errorf("%w: 目标发布版本已调整，请重新读取需求", domain.ErrConflict)
 		}
 	}
+	if in.DestinationVersionID != "" && in.Action != "reopen" && in.Action != "reject" {
+		return domain.Mutation{}, errors.New("仅重新打开或验收退回可指定后续版本，其他调整请使用安排目标版本")
+	}
 	human := a.Kind == "human"
 	if domain.TaskTerminated(t.Status) && in.Action != "reopen" {
 		return domain.Mutation{}, fmt.Errorf("%w: 需求已拒绝或关闭，不能继续处理；请读取最新状态", domain.ErrConflict)

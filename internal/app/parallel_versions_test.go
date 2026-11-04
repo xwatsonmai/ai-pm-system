@@ -171,3 +171,29 @@ func TestParallelVersionCloseExplicitSuccessorIterationAndIntake(t *testing.T) {
 		t.Fatal("intake ignored explicit version")
 	}
 }
+
+func TestParallelVersionReopenDestinationAndClosedTarget(t *testing.T) {
+	s, p := setup(t)
+	c := context.Background()
+	a := parallelVersion(t, s, p.ID, "A")
+	b := parallelVersion(t, s, p.ID, "B")
+	task := versionTask(t, s, p.ID, a.ID)
+	closed, e := s.Act(c, app.Human(), task.ID, app.Action{Action: "close", Body: "待后续处理", RequestID: "end"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	reopened, e := s.Act(c, app.Human(), task.ID, app.Action{Action: "reopen", Version: closed.Task.Version, DestinationVersionID: b.ID, Body: "B版继续", RequestID: "reopen"})
+	if e != nil || reopened.Task.ProjectVersionID != b.ID || reopened.Task.Revision != 2 {
+		t.Fatal(reopened, e)
+	}
+	a = versionDetail(t, s, a.ID).ProjectVersion
+	if _, e = s.ActProjectVersion(c, app.Human(), a.ID, app.ProjectVersionAction{Action: "complete", Version: a.Version, Body: "A归档", RequestID: "complete-A"}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = s.CreateTask(c, app.Human(), p.ID, app.TaskInput{Title: "不可误入已结束版", ProjectVersionID: a.ID, RequestID: "invalid-closed"}); !errors.Is(e, domain.ErrConflict) {
+		t.Fatal("closed target silently fell back", e)
+	}
+	if got := versionDetail(t, s, a.ID).ProjectVersion.Scope[0]; got.Task.Status != "closed" || got.Task.Revision != 1 || got.DetachedRevision != 2 {
+		t.Fatal("reopen rewrote ended scope", got)
+	}
+}
