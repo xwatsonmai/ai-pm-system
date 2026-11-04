@@ -80,8 +80,13 @@ func TestMilestoneAutomaticCreationAndConcurrentAppend(t *testing.T) {
 	if e != nil || state.VersionID != versions[0].ID {
 		t.Fatal(state, e)
 	}
-	if _, e = s.SaveProjectVersion(c, app.Human(), p.ID, "", app.ProjectVersionInput{Name: "第二个并行", RequestID: "parallel"}); !errors.Is(e, domain.ErrConflict) {
-		t.Fatal("parallel opened", e)
+	parallel, e := s.SaveProjectVersion(c, app.Human(), p.ID, "", app.ProjectVersionInput{Name: "第二个并行", RequestID: "parallel"})
+	if e != nil || parallel.ProjectVersion.Status != "active" {
+		t.Fatal("parallel version rejected", e)
+	}
+	state, _ = s.Store.GetCurrentMilestone(c, p.ID)
+	if state.VersionID != versions[0].ID {
+		t.Fatal("parallel creation changed default")
 	}
 }
 func TestMilestoneAppendAfterReleaseAndImmutableHistory(t *testing.T) {
@@ -146,8 +151,12 @@ func TestMilestoneEndCloseCarryAndReopen(t *testing.T) {
 	if e != nil || again.Tasks[0].ProjectVersionID != next {
 		t.Fatal("close retry created successor twice", e)
 	}
-	if _, e = s.ActProjectVersion(c, app.Human(), v.ID, app.ProjectVersionAction{Action: "reopen", Version: closed.ProjectVersion.Version, Body: "恢复", RequestID: "unsafe-reopen"}); !errors.Is(e, domain.ErrConflict) && e == nil {
-		t.Fatal("two active milestones")
+	reopenedVersion, e := s.ActProjectVersion(c, app.Human(), v.ID, app.ProjectVersionAction{Action: "reopen", Version: closed.ProjectVersion.Version, Body: "恢复并行推进", RequestID: "reopen-version"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = s.ActProjectVersion(c, app.Human(), v.ID, app.ProjectVersionAction{Action: "close", Version: reopenedVersion.ProjectVersion.Version, Body: "本版继续归档", RequestID: "archive-reopened-version"}); e != nil {
+		t.Fatal(e)
 	}
 	ended, e := s.Act(c, app.Human(), doing.ID, app.Action{Action: "close", Body: "本次不做", RequestID: "end-task"})
 	if e != nil {

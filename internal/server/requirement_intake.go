@@ -7,6 +7,9 @@ import (
 )
 
 func (s *Server) listRequirementIntakes(w http.ResponseWriter, r *http.Request) {
+	if s.pagedList(w, r, "intakes") {
+		return
+	}
 	v, err := s.App.RequirementIntakes(r.Context(), s.actor(r), r.PathValue("id"))
 	if err != nil {
 		fail(w, err)

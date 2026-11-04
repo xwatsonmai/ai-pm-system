@@ -150,6 +150,7 @@ func (s *Service) SaveProfile(c context.Context, p domain.Profile, key string) (
 }
 
 type TaskInput struct {
+	ProjectVersionID    string   `json:"project_version_id,omitempty"`
 	ParentRequirementID string   `json:"parent_requirement_id,omitempty"`
 	ParentVersion       int      `json:"parent_version,omitempty"`
 	Title               string   `json:"title"`
@@ -241,7 +242,22 @@ func (s *Service) commit(c context.Context, a domain.Actor, t domain.Task, old i
 	if len(note) > 0 {
 		ev.ReviewNote = note[0]
 	}
-	m, e := s.commitWithMilestone(c, a, t, old, ev, key, fp, claim)
+	var destination struct {
+		ProjectVersionID     string `json:"project_version_id"`
+		DestinationVersionID string `json:"destination_version_id"`
+		Input                struct {
+			ProjectVersionID string `json:"project_version_id"`
+		} `json:"input"`
+	}
+	_ = json.Unmarshal(payload, &destination)
+	target := destination.DestinationVersionID
+	if old == 0 {
+		target = destination.ProjectVersionID
+		if target == "" {
+			target = destination.Input.ProjectVersionID
+		}
+	}
+	m, e := s.commitWithMilestone(c, a, t, old, ev, key, fp, claim, target)
 	if e == nil {
 		if a.Kind != "platform" {
 			s.notify(t.ProjectID, t.ID, kind)
@@ -296,7 +312,7 @@ func (s *Service) createTask(c context.Context, a domain.Actor, p string, v Task
 	if e != nil {
 		return domain.Mutation{}, e
 	}
-	t := domain.Task{ID: domain.ID("tsk_"), ProjectID: p, Title: v.Title, Kind: v.Kind, Description: v.Description, Attachments: attachments, Acceptance: v.Acceptance, Priority: v.Priority, Reviewer: v.Reviewer, Status: "clarify", Revision: 1, CreatedAt: domain.Now()}
+	t := domain.Task{ID: domain.ID("tsk_"), ProjectID: p, ProjectVersionID: v.ProjectVersionID, Title: v.Title, Kind: v.Kind, Description: v.Description, Attachments: attachments, Acceptance: v.Acceptance, Priority: v.Priority, Reviewer: v.Reviewer, Status: "clarify", Revision: 1, CreatedAt: domain.Now()}
 	creator := reviewActor(a, authorization)
 	t.Creator = &creator
 	if v.ParentRequirementID != "" {
@@ -367,6 +383,9 @@ func (s *Service) editTask(c context.Context, a domain.Actor, id string, v TaskI
 	}
 	if v.Version != t.Version {
 		return domain.Mutation{}, domain.ErrConflict
+	}
+	if v.ProjectVersionID != "" && v.ProjectVersionID != t.ProjectVersionID {
+		return domain.Mutation{}, errors.New("请通过安排目标版本调整归属，不能在编辑内容时更换版本")
 	}
 	if domain.TaskTerminated(t.Status) {
 		return domain.Mutation{}, fmt.Errorf("%w: 需求已结束，请先重新打开再编辑；原内容仍保留", domain.ErrConflict)
@@ -441,23 +460,24 @@ func (s *Service) editTask(c context.Context, a domain.Actor, id string, v TaskI
 }
 
 type Action struct {
-	SubmissionSHA    string                       `json:"submission_sha,omitempty"`
-	UserConfirmed    bool                         `json:"user_confirmed,omitempty"`
-	UserInstruction  string                       `json:"user_instruction,omitempty"`
-	TestVerification *domain.TestVerification     `json:"test_verification,omitempty"`
-	Questions        []domain.RequirementQuestion `json:"questions,omitempty"`
-	ProjectVersionID string                       `json:"project_version_id,omitempty"`
-	Action           string                       `json:"action"`
-	RequestID        string                       `json:"request_id"`
-	ClaimID          string                       `json:"claim_id,omitempty"`
-	Revision         int                          `json:"revision,omitempty"`
-	Version          int                          `json:"version,omitempty"`
-	Body             string                       `json:"body,omitempty"`
-	Branch           string                       `json:"branch,omitempty"`
-	ReportKind       string                       `json:"report_kind,omitempty"`
-	Submission       *domain.Submission           `json:"submission,omitempty"`
-	Deployment       *domain.Deployment           `json:"deployment,omitempty"`
-	Review           *domain.Review               `json:"review,omitempty"`
+	DestinationVersionID string                       `json:"destination_version_id,omitempty"`
+	SubmissionSHA        string                       `json:"submission_sha,omitempty"`
+	UserConfirmed        bool                         `json:"user_confirmed,omitempty"`
+	UserInstruction      string                       `json:"user_instruction,omitempty"`
+	TestVerification     *domain.TestVerification     `json:"test_verification,omitempty"`
+	Questions            []domain.RequirementQuestion `json:"questions,omitempty"`
+	ProjectVersionID     string                       `json:"project_version_id,omitempty"`
+	Action               string                       `json:"action"`
+	RequestID            string                       `json:"request_id"`
+	ClaimID              string                       `json:"claim_id,omitempty"`
+	Revision             int                          `json:"revision,omitempty"`
+	Version              int                          `json:"version,omitempty"`
+	Body                 string                       `json:"body,omitempty"`
+	Branch               string                       `json:"branch,omitempty"`
+	ReportKind           string                       `json:"report_kind,omitempty"`
+	Submission           *domain.Submission           `json:"submission,omitempty"`
+	Deployment           *domain.Deployment           `json:"deployment,omitempty"`
+	Review               *domain.Review               `json:"review,omitempty"`
 }
 
 func (s *Service) Act(c context.Context, a domain.Actor, id string, in Action) (domain.Mutation, error) {

@@ -60,6 +60,9 @@ func (o Observed) PutProject(c context.Context, p domain.Project) error {
 	return err
 }
 
+// UnderlyingStore exposes optional read-only query capabilities without bypassing write observation.
+func (o Observed) UnderlyingStore() storage.Store { return o.Store }
+
 func (o Observed) CommitProjectAccess(c context.Context, p domain.Project, expected int) error {
 	err := o.Store.CommitProjectAccess(c, p, expected)
 	if err == nil {

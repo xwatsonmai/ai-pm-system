@@ -43,6 +43,20 @@ func askAlignment(t *testing.T, s *app.Service, d domain.Actor, m domain.Mutatio
 	return res
 }
 
+// Workflow events can share a millisecond with the form and appear last in the
+// projected timeline. Select the form by identity rather than its list position.
+func currentAlignmentFormID(t *testing.T, v domain.RequirementReview) string {
+	t.Helper()
+	for i := len(v.Messages) - 1; i >= 0; i-- {
+		m := v.Messages[i]
+		if m.Action == "request_alignment" && m.Generation == v.Generation && m.FormExpiredAt == 0 && m.Result != nil {
+			return m.ID
+		}
+	}
+	t.Fatal("current development alignment form not found")
+	return ""
+}
+
 func productReply(t *testing.T, s *app.Service, m domain.Mutation, body string, answers map[string][]string) domain.Mutation {
 	t.Helper()
 	c := context.Background()
@@ -52,7 +66,7 @@ func productReply(t *testing.T, s *app.Service, m domain.Mutation, body string, 
 	}
 	in := app.RequirementReviewInput{Action: "message", RequestID: domain.ID("reply_"), Body: body, Answers: answers, Generation: v.Generation}
 	if len(answers) > 0 {
-		in.ReplyTo = v.Messages[len(v.Messages)-1].ID
+		in.ReplyTo = currentAlignmentFormID(t, v)
 	}
 	v, e = s.SaveRequirementReview(c, app.Human(), m.Task.ID, in)
 	if e != nil {
@@ -176,7 +190,7 @@ func TestDevelopmentAlignmentReopenClaimAppendsAndRevokes(t *testing.T) {
 	if _, e = s.Act(c, d, m.Task.ID, app.Action{Action: "report", RequestID: "revoked", ClaimID: oldClaim, Body: "late write"}); !errors.Is(e, domain.ErrForbidden) {
 		t.Fatal(e)
 	}
-	if _, e = s.SaveRequirementReview(c, app.Human(), m.Task.ID, app.RequirementReviewInput{Action: "message", RequestID: "expired-form", Generation: initialGeneration, ReplyTo: v.Messages[len(v.Messages)-1].ID, Answers: map[string][]string{"scope": {"全部订单"}}}); !errors.Is(e, domain.ErrConflict) {
+	if _, e = s.SaveRequirementReview(c, app.Human(), m.Task.ID, app.RequirementReviewInput{Action: "message", RequestID: "expired-form", Generation: initialGeneration, ReplyTo: currentAlignmentFormID(t, v), Answers: map[string][]string{"scope": {"全部订单"}}}); !errors.Is(e, domain.ErrConflict) {
 		t.Fatal("old form revived", e)
 	}
 	other := d

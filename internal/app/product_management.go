@@ -57,7 +57,7 @@ func (s *Service) ManageProjectVersionFromMCP(c context.Context, a domain.Actor,
 	if e != nil {
 		return ProjectVersionMutation{}, e
 	}
-	if in.Action != "complete" && in.Action != "close" && in.Action != "reopen" && in.Action != "start" {
+	if in.Action != "complete" && in.Action != "close" && in.Action != "reopen" && in.Action != "start" && in.Action != "set_default" {
 		return ProjectVersionMutation{}, domain.ErrForbidden
 	}
 	if strings.TrimSpace(in.Body) == "" {
