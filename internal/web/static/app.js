@@ -362,6 +362,9 @@ async function readWorkspace(projectID,page=state.page) {
   }
   chatSelections.set(chatScope(projectID),selected);
  }
+ const names=new Map((context.project_versions||[]).map(v=>[v.id,v]));
+ for(const result of lists.values())for(const v of result.version_options||[])names.set(v.id,v);
+ context.project_versions=[...names.values()];
  return {revision,projectID,page,context,access,lists,runs,intakes,collaborations,runsAtStart};
 }
 function applyWorkspace(snapshot) {
@@ -375,12 +378,12 @@ async function loadBusinessPage() {
  if(!state.project)return;
  const projectID=state.project.id,page=state.page,snapshot=await readWorkspace(projectID,page);
  if(state.project?.id!==projectID||state.page!==page)return;
- if(applyWorkspace(snapshot))updateBusinessPage();
+ if(applyWorkspace(snapshot))await updateBusinessPage();
 }
 function updateBusinessPage() {
  if(state.page==='chat'){updateChat();return;}
  if(state.page==='timeline'){timelineUI.refreshIfNeeded();return;}
- if(state.page==='versions'){projectVersionUI.loadPage().catch(e=>toast(e.message));return;}
+ if(state.page==='versions')return projectVersionUI.loadPage();
  const renderer={tasks:tasksPage,reviews:reviewsPage,overview,platform:platformPage}[state.page];
  if(renderer){
   if(state.page==='tasks'){
@@ -610,7 +613,7 @@ function tasksTable() {
   const table=items=>`<div class="table-scroll"><table class="task-table"><thead><tr><th class="task-checkbox">选择</th><th>状态</th><th>需求</th><th>优先级</th><th>负责人</th><th>更新</th></tr></thead><tbody>${items.map(t=>`<tr data-key="${t.id}" tabindex="0" data-action="open-task" data-id="${t.id}"><td><input type="checkbox" data-plan-task value="${t.id}" aria-label="选择需求 ${escape(t.title)}" ${taskFinished(t)||t.status==='review'?'disabled':''}></td><td>${status(t)}</td><td class="task-title"><span class="badge ${t.kind==='bug'?'bug':''}">${t.kind==='bug'?(t.parent_requirement_id?'需求测试 Bug':'平台 Bug'):'迭代需求'}</span> ${escape(t.title)}${t.blocker?' <span class="badge blocked">阻塞</span>':''}<div class="task-id">${short(t.id)}${t.iteration?` · 迭代自 ${short(t.iteration.parent_task_id)}`:""} · R${t.revision} · ${escape(versionName(state.context.project_versions||[],t.project_version_id))}</div></td><td><span class="priority-mark ${t.priority}">${t.priority === "now" ? "▰▰▰" : t.priority === "next" ? "▰▰▱" : "▰▱▱"}</span> ${priorities[t.priority]}</td><td>${escape(t.owner||'未认领')}</td><td class="muted small">${date(t.updated_at)}</td></tr>`).join('')}</tbody></table></div>`;
   if(!state.versionGrouping||state.versionFilter)return table(tasks)+`<div class="queue-footer">${listResult("tasks").total} 个需求</div>`;
   const groups=[...new Set(tasks.map(t=>t.project_version_id||''))].map(id=>({id,name:versionName(state.context.project_versions||[],id)}));
-  return groups.map(g=>{const items=tasks.filter(t=>(t.project_version_id||'')===g.id);return items.length?`<section class="pv-pool-group" data-key="version:${escape(g.id)}"><div class="pv-pool-heading"><h2>${escape(g.name)} <span class="muted small">${items.length} 项</span></h2>${g.id?action('pv-open','查看版本','ghost',`data-id="${g.id}"`):''}</div>${table(items)}</section>`:''}).join('')+`<div class="queue-footer">${listResult("tasks").total} 个需求 · 以实际验收结果确认业务完成</div>`;
+  return groups.map(g=>{const items=tasks.filter(t=>(t.project_version_id||'')===g.id);return items.length?`<section class="pv-pool-group" data-key="version:${escape(g.id)}"><div class="pv-pool-heading"><h2>${escape(g.name)} <span class="muted small">${items.length} 项</span></h2>${g.id&&allowedPage('versions',state.project_access)?action('pv-open','查看版本','ghost',`data-id="${g.id}"`):''}</div>${table(items)}</section>`:''}).join('')+`<div class="queue-footer">${listResult("tasks").total} 个需求 · 以实际验收结果确认业务完成</div>`;
 }
 function mountTaskVersionFilter(){
  const host=$('[data-task-version-picker]');if(!host)return;
@@ -626,7 +629,7 @@ function tasksPage() {
     )
     .join(
       "",
-    )}</select><select id="kind-filter" aria-label="筛选类型"><option value="">所有类型</option><option value="requirement" ${state.kind === "requirement" ? "selected" : ""}>迭代需求</option><option value="bug" ${state.kind === "bug" ? "selected" : ""}>Bug 修复</option></select><div data-task-version-picker></div></div><div class="pv-pool-tools">${action("pv-assign-selected","归入当前里程碑")}${action("toggle-version-group",state.versionGrouping?"切换平铺列表":"按版本分组","ghost")}</div><div id="task-table">${tasksTable()}</div>${pagerHTML(listResult("tasks"),"tasks")}</div>`;
+    )}</select><select id="kind-filter" aria-label="筛选类型"><option value="">所有类型</option><option value="requirement" ${state.kind === "requirement" ? "selected" : ""}>迭代需求</option><option value="bug" ${state.kind === "bug" ? "selected" : ""}>Bug 修复</option></select><div data-task-version-picker></div></div><div class="pv-pool-tools">${allowedPage("versions",state.project_access)?action("pv-assign-selected","安排目标版本"):""}${action("toggle-version-group",state.versionGrouping?"切换平铺列表":"按版本分组","ghost")}</div><div id="task-table">${tasksTable()}</div>${pagerHTML(listResult("tasks"),"tasks")}</div>`;
 }
 function reviewsPage() {
   const tasks = state.context.tasks.filter((t) => t.status === "review");
@@ -698,7 +701,7 @@ function seenReplyIDs() {
 }
 function hasUnreadReply(conversation) {
   const seen = seenReplyIDs();
-  return conversation.turns.some((r) => r.trigger_type === "collaboration_result" && r.status === "succeeded" && !seen.has(r.source_event_id));
+  return (conversation.reply_event_ids||[]).some(id=>id&&!seen.has(id)) || conversation.turns.some((r) => r.trigger_type === "collaboration_result" && r.status === "succeeded" && !seen.has(r.source_event_id));
 }
 function markVisibleRepliesRead() {
   if (document.hidden || state.page !== "chat") return;
@@ -1192,7 +1195,10 @@ async function openTask(taskID) {
   if (t.project_id !== state.project.id) return;
   for(const [key,value] of [[`detail-bugs:${t.id}`,ctx.related_bugs],[`detail-artifacts:${t.id}`,ctx.artifact_page],[`detail-events:${t.id}`,ctx.event_page]])if(value)businessLists.set(listScope(key),value);
   const artifacts = ctx.artifacts.filter((a) => a.task_id === t.id);
-  const runs = state.runs.filter((r) => r.task_id === t.id);
+  const runKey=`detail-runs:${t.id}`,runPage=await api(`/projects/${t.project_id}/runs?${listParams(runKey,{task_id:t.id,summary:true})}`);
+  if(t.project_id!==state.project?.id)return;
+  businessLists.set(listScope(runKey),runPage);
+  const runs=runPage.items;
   let buttons = "";
   if (t.status === "done") buttons += action("iterate-task", "追加迭代", "primary", `data-id="${t.id}"`);
   if (t.status === "clarify")
@@ -1235,15 +1241,7 @@ async function openTask(taskID) {
   buttons=controls.innerHTML;
   modal(
     `<span class="mono muted">${short(t.id)} · ${t.kind === "bug" ? (t.parent_requirement_id ? "需求测试 Bug" : "平台 Bug") : "迭代需求"}</span>`,
-    `<h1 class="detail-title">${escape(t.title)}</h1><div class="detail-meta">${status(t)}<span class="badge">${priorities[t.priority]}</span><span class="badge">修订 R${t.revision}</span><span class="badge">${escape(t.owner || "未认领")}</span>${t.reviewer ? `<span class="badge">验收：${escape(t.reviewer)}</span>` : ""}</div>${t.blocker ? `<div class="notice">阻塞：${escape(t.blocker)}</div>` : ""}${t.status === "ready" && t.alignment?.status === "replied" ? `<div class="notice">产品已回复，等待原开发客户端确认。原客户端无法继续时，可重新开放领取；已有对齐记录会追加进需求正文。</div>` : ""}<div class="detail-actions">${buttons}</div>${t.resolution?`<section class="task-resolution notice"><strong>${states[t.status]} · ${states[t.resolution.from_status]}阶段结束</strong><p class="prewrap">${escape(t.resolution.reason)}</p><span class="small muted">${escape(t.resolution.actor)} · ${date(t.resolution.at)}</span></section>`:""}${testingDetails(t,ctx.tasks)}${iterationContextHTML(t.iteration)}<section class="detail-section"><h3>需求与背景</h3><div class="requirement-description markdown-content">${renderMarkdown(t.description || "尚未补充描述")}</div></section>${t.attachments?.length ? `<section class="detail-section"><h3>附件 · ${t.attachments.length}</h3>${sentAttachments(t)}</section>` : ""}<section class="detail-section"><h3>验收条件</h3>${t.acceptance.length ? `<ul class="acceptance-list">${t.acceptance.map((v) => `<li><i class="square ${t.status === "done" ? "checked" : ""}" aria-hidden="true">${t.status === "done" ? "✓" : ""}</i>${escape(v)}</li>`).join("")}</ul>` : '<p class="context-note">补充预期行为后，再进入待认领队列。</p>'}</section>${t.submission ? `<section class="detail-section"><h3>最近一次提交 · R${t.submission.revision}</h3><div class="prewrap">${escape(t.submission.summary)}</div><p class="mono muted">${escape(t.submission.sha)} · ${escape(t.submission.environment || "环境未说明")}</p><p class="prewrap">${escape(t.submission.tests)}</p>${t.submission.limitations ? `<div class="notice info">未完成或未验证：${escape(t.submission.limitations)}</div>` : ""}<p class="hint">本次提交版本的验证记录；后续测试、实际上线与业务验收分别记录。</p></section>` : ""}${t.deployment ? `<section class="detail-section"><h3>最近一次上线 · R${t.deployment.revision}</h3><p class="mono muted">${escape(t.deployment.sha)} · ${escape(t.deployment.environment)}</p><p class="prewrap">${escape(t.deployment.body)}</p><p class="hint">${escape(t.deployment.actor)} · ${t.deployment.source === "developer" ? "开发汇报" : "人工确认"} · ${date(t.deployment.at)}${t.deployment.revision !== t.revision ? " · 历史版本，当前需求需重新开发和上线" : ""}</p></section>` : ""}${t.review ? `<section class="detail-section"><h3>验收记录</h3><div class="prewrap">${t.review.accepted ? "通过" : "退回"} · ${escape(t.review.environment)} · ${date(t.review.at)}\n${escape(t.review.note)}</div></section>` : ""}${iterationHistoryHTML(ctx.iteration_history,t,state.context.project_versions)}<section class="detail-section"><h3>分析与证据</h3><div id="task-detail-artifacts">${artifacts.map((a) => `<div class="record"><div class="record-header"><span>${escape(a.title)} · ${escape(a.source)}</span><span>${date(a.at)}</span></div><div class="prewrap">${escape(a.body)}</div></div>`).join("") || '<p class="context-note">平台分析和相关证据会保留在这里。</p>'}${pagerHTML(ctx.artifact_page,`detail-artifacts:${t.id}`)}</div>${runs
-      .slice(0, 4)
-      .map(
-        (r) =>
-          `<div class="record row between"><span class="small muted">${kindNames[r.kind]} · ${runStates[r.status]}</span>${action("open-run", "查看运行", "ghost", `data-id="${r.id}"`)}</div>`,
-      )
-      .join(
-        "",
-      )}</section><section class="detail-section"><h3>工作记录与决定</h3><form id="report-form" data-id="${t.id}"><textarea name="body" aria-label="新增工作记录" placeholder="记录进展、补充决定或说明阻塞…" required></textarea><div class="row between"><select name="report_kind" aria-label="记录类型"><option value="progress">工作进展</option><option value="decision">确认的决定</option><option value="blocked">遇到阻塞</option><option value="unblocked">解除阻塞</option></select><button type="submit">添加记录</button></div><div class="form-error"></div></form><div id="task-detail-events">${[
+    `<h1 class="detail-title">${escape(t.title)}</h1><div class="detail-meta">${status(t)}<span class="badge">${priorities[t.priority]}</span><span class="badge">修订 R${t.revision}</span><span class="badge">${escape(t.owner || "未认领")}</span>${t.reviewer ? `<span class="badge">验收：${escape(t.reviewer)}</span>` : ""}</div>${t.blocker ? `<div class="notice">阻塞：${escape(t.blocker)}</div>` : ""}${t.status === "ready" && t.alignment?.status === "replied" ? `<div class="notice">产品已回复，等待原开发客户端确认。原客户端无法继续时，可重新开放领取；已有对齐记录会追加进需求正文。</div>` : ""}<div class="detail-actions">${buttons}</div>${t.resolution?`<section class="task-resolution notice"><strong>${states[t.status]} · ${states[t.resolution.from_status]}阶段结束</strong><p class="prewrap">${escape(t.resolution.reason)}</p><span class="small muted">${escape(t.resolution.actor)} · ${date(t.resolution.at)}</span></section>`:""}${testingDetails(t,ctx.tasks)}${iterationContextHTML(t.iteration)}<section class="detail-section"><h3>需求与背景</h3><div class="requirement-description markdown-content">${renderMarkdown(t.description || "尚未补充描述")}</div></section>${t.attachments?.length ? `<section class="detail-section"><h3>附件 · ${t.attachments.length}</h3>${sentAttachments(t)}</section>` : ""}<section class="detail-section"><h3>验收条件</h3>${t.acceptance.length ? `<ul class="acceptance-list">${t.acceptance.map((v) => `<li><i class="square ${t.status === "done" ? "checked" : ""}" aria-hidden="true">${t.status === "done" ? "✓" : ""}</i>${escape(v)}</li>`).join("")}</ul>` : '<p class="context-note">补充预期行为后，再进入待认领队列。</p>'}</section>${t.submission ? `<section class="detail-section"><h3>最近一次提交 · R${t.submission.revision}</h3><div class="prewrap">${escape(t.submission.summary)}</div><p class="mono muted">${escape(t.submission.sha)} · ${escape(t.submission.environment || "环境未说明")}</p><p class="prewrap">${escape(t.submission.tests)}</p>${t.submission.limitations ? `<div class="notice info">未完成或未验证：${escape(t.submission.limitations)}</div>` : ""}<p class="hint">本次提交版本的验证记录；后续测试、实际上线与业务验收分别记录。</p></section>` : ""}${t.deployment ? `<section class="detail-section"><h3>最近一次上线 · R${t.deployment.revision}</h3><p class="mono muted">${escape(t.deployment.sha)} · ${escape(t.deployment.environment)}</p><p class="prewrap">${escape(t.deployment.body)}</p><p class="hint">${escape(t.deployment.actor)} · ${t.deployment.source === "developer" ? "开发汇报" : "人工确认"} · ${date(t.deployment.at)}${t.deployment.revision !== t.revision ? " · 历史版本，当前需求需重新开发和上线" : ""}</p></section>` : ""}${t.review ? `<section class="detail-section"><h3>验收记录</h3><div class="prewrap">${t.review.accepted ? "通过" : "退回"} · ${escape(t.review.environment)} · ${date(t.review.at)}\n${escape(t.review.note)}</div></section>` : ""}${iterationHistoryHTML(ctx.iteration_history,t,state.context.project_versions)}<section class="detail-section"><h3>分析与证据</h3><div id="task-detail-artifacts">${artifacts.map((a) => `<div class="record"><div class="record-header"><span>${escape(a.title)} · ${escape(a.source)}</span><span>${date(a.at)}</span></div><div class="prewrap">${escape(a.body)}</div></div>`).join("") || '<p class="context-note">平台分析和相关证据会保留在这里。</p>'}${pagerHTML(ctx.artifact_page,`detail-artifacts:${t.id}`)}</div><div id="task-detail-runs">${taskRunRows(runs)}${pagerHTML(runPage,runKey)}</div></section><section class="detail-section"><h3>工作记录与决定</h3><form id="report-form" data-id="${t.id}"><textarea name="body" aria-label="新增工作记录" placeholder="记录进展、补充决定或说明阻塞…" required></textarea><div class="row between"><select name="report_kind" aria-label="记录类型"><option value="progress">工作进展</option><option value="decision">确认的决定</option><option value="blocked">遇到阻塞</option><option value="unblocked">解除阻塞</option></select><button type="submit">添加记录</button></div><div class="form-error"></div></form><div id="task-detail-events">${[
       ...ctx.events,
     ]
       .map(
@@ -1350,7 +1348,9 @@ async function taskForm(taskID, iterationSourceID, bugParentID,targetVersionID =
     const linked=parent?parentVersion:associated;
     holder.innerHTML=`<span>所属版本</span><strong>${escape(linked?.name||'历史版本')}</strong>${parent?`<input type="hidden" name="project_version_id" value="${escape(parent.project_version_id)}">`:''}<small class="hint">${parent?'关联 Bug 跟随所属需求版本。':'请通过安排目标版本调整需求归属。已结束版本的后续工作进入指定或默认版本。'}</small>`;
   } else {
-    const selected=form.dataset.projectVersionId||targetVersionID||(state.context.project_versions||[]).find(v=>v.id===state.versionFilter&&v.status==='active')?.id||current?.id||'';
+    // A recovered draft keeps the exact original destination, including an
+    // empty automatic default, so a lost-response retry retains its request ID.
+    const selected=form.dataset.hasRequirementDraft==='true' ? form.dataset.projectVersionId : targetVersionID||(state.context.project_versions||[]).find(v=>v.id===state.versionFilter&&v.status==='active')?.id||current?.id||'';
     await mountVersionPicker(holder,{api,projectID,selected,label:'所属版本',emptyLabel:'使用项目默认版本（没有时自动创建）'});
     if(parent)holder.insertAdjacentHTML('beforeend','<small class="hint">原版本已结束：需求及本次 Bug 的后续修复将一起进入所选版本，原上线快照保留。</small>');
   }
@@ -2319,13 +2319,14 @@ try {
 }
 
 function relatedBugRows(items){return items.map(b=>`<div class="record" data-key="${escape(b.id)}"><div class="row between">${action('open-task',escape(b.title),'',`data-id="${escape(b.id)}"`)}${status(b)}</div></div>`).join('');}
+function taskRunRows(items){return items.length?items.map(r=>`<div class="record row between" data-key="${escape(r.id)}"><span class="small muted">${escape(kindNames[r.kind]||r.kind)} · ${escape(runStates[r.status]||r.status)} · ${date(r.started_at)}</span>${action('open-run','查看运行','ghost',`data-id="${escape(r.id)}"`)}</div>`).join(''):'<p class="context-note">尚无分析运行记录。</p>';}
 function detailEventRows(items){return items.map(e=>`<div class="record" data-key="event:${e.seq}"><div class="record-header"><span>${escape(e.actor)} · ${escape(e.kind)}</span><span>${date(e.at)}</span></div><div class="prewrap">${escape(e.body)}</div></div>`).join('');}
 function detailArtifactRows(items){return items.map(a=>`<div class="record" data-key="${escape(a.id)}"><div class="record-header"><span>${escape(a.title)} · ${escape(a.source)}</span><span>${date(a.at)}</span></div><div class="prewrap">${escape(a.body)}</div></div>`).join('');}
 async function loadDetailPage(key,page,size){
  const [kind,taskID]=key.split(':');setListPage(key,page,size);const params=listParams(key),projectID=state.project.id;
- let path;if(kind==='detail-bugs'){path=`/projects/${projectID}/tasks`;params.set('parent_requirement_id',taskID);}else{path=`/projects/${projectID}/${kind==='detail-events'?'events':'artifacts'}`;params.set('task_id',taskID);}
+ let path;if(kind==='detail-bugs'){path=`/projects/${projectID}/tasks`;params.set('parent_requirement_id',taskID);}else{path=`/projects/${projectID}/${kind==='detail-events'?'events':kind==='detail-runs'?'runs':'artifacts'}`;params.set('task_id',taskID);if(kind==='detail-runs')params.set('summary','true');}
  const result=await api(`${path}?${params}`);if(state.project?.id!==projectID||!$('dialog'))return;businessLists.set(listScope(key),result);
- const target=$(`#task-${kind}`),rows=kind==='detail-bugs'?relatedBugRows(result.items):kind==='detail-events'?detailEventRows(result.items):detailArtifactRows(result.items);
+ const target=$(`#task-${kind}`),rows=kind==='detail-bugs'?relatedBugRows(result.items):kind==='detail-events'?detailEventRows(result.items):kind==='detail-runs'?taskRunRows(result.items):detailArtifactRows(result.items);
  patchKeyedHTML(target,rows+pagerHTML(result,key));
 }
 function testingDetails(t,tasks=[]) {

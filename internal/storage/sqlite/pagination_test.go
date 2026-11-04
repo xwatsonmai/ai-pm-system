@@ -93,7 +93,11 @@ func TestDocumentPagesApplyPrivacyBeforeCountAndLimit(t *testing.T) {
 		if i%2 == 0 {
 			owner = "bob"
 		}
-		r := domain.Run{ID: fmt.Sprintf("r%03d", i), ProjectID: "p", ConversationID: fmt.Sprintf("c%03d", i), Kind: "question", OwnerID: owner, OwnerKind: "human", Prompt: "question", StartedAt: 100 + int64(i), Status: "succeeded"}
+		r := domain.Run{ID: fmt.Sprintf("r%03d", i), ProjectID: "p", ConversationID: fmt.Sprintf("c%03d", i), Kind: "question", OwnerID: owner, OwnerKind: "human", Prompt: "question", Output: "RUN_SECRET_BODY", ProcessOutput: "RUN_SECRET_PROCESS", TaskID: "t", StartedAt: 100 + int64(i), Status: "succeeded"}
+		if i == 3 {
+			r.TriggerType = "collaboration_result"
+			r.SourceEventID = "result-later-page"
+		}
 		if e := d.PutRun(c, r); e != nil {
 			t.Fatal(e)
 		}
@@ -111,6 +115,20 @@ func TestDocumentPagesApplyPrivacyBeforeCountAndLimit(t *testing.T) {
 	if e != nil || len(v.Items) != 1 {
 		t.Fatal(v, e)
 	}
+	if !strings.Contains(string(v.Items[0]), "result-later-page") || strings.Contains(string(v.Items[0]), "RUN_SECRET") {
+		t.Fatal("conversation unread summary missing or leaked body", string(v.Items[0]))
+	}
+
+	q.Resource = "runs"
+	q.ConversationID = "c003"
+	q.Summary = true
+	q.TaskID = "t"
+	q.Page = 1
+	summary, err := d.QueryDocuments(c, q)
+	if err != nil || summary.Total != 1 || strings.Contains(string(summary.Items[0]), "RUN_SECRET") {
+		t.Fatal("run summary loaded output", summary, err)
+	}
+	q.Summary = false
 	q.Resource = "runs"
 	q.ConversationID = "c002"
 	q.Page = 1

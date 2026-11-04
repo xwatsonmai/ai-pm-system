@@ -74,8 +74,8 @@ try{
  task=(await api(`/tasks/${task.id}`)).task;assert.equal(task.kind,'bug');assert.equal(task.attachments.length,1);assert.equal(task.revision,2);assert(!task.description.includes('错误截图.png'));
  await page.getByRole('button',{name:'关闭',exact:true}).click();
  await page.getByRole('button',{name:'需求池',exact:true}).click();
- await page.locator('#kind-filter').selectOption('bug');assert.equal(await page.locator('.task-table tbody tr').count(),1);
- await page.locator('#kind-filter').selectOption('requirement');assert.equal(await page.locator('.task-table tbody tr').count(),1);
+ await page.locator('#kind-filter').selectOption('bug');await page.waitForFunction(()=>document.querySelectorAll('.task-table tbody tr').length===1);assert.equal(await page.locator('.task-table tbody tr').count(),1);
+ await page.locator('#kind-filter').selectOption('requirement');await page.locator('.task-table tbody tr').filter({hasText:'原有纯文本需求'}).waitFor();assert.equal(await page.locator('.task-table tbody tr').count(),1);
  report.revision='remove inline image, switch to Bug fix, revision increment and type filters passed';
  await page.locator('#page [data-action=new-task]').click();await prose.waitFor();
  await page.locator('label:has(input[value=bug])').click();await page.getByRole('button',{name:'插入填写模板',exact:true}).click();assert.equal(await prose.locator('h2').count(),4);
