@@ -48,9 +48,8 @@ try{
   await admin.reload();await admin.locator('.member-row').filter({hasText:'项目成员'}).waitFor();
   await admin.locator('.member-row').filter({hasText:'项目成员'}).locator('[data-action=access-edit-member]').click();await admin.locator('[data-role-choice]').first().waitFor();assert(await admin.locator('[name=responsibilities][value=developer]').isChecked());assert.equal(await admin.locator('.role-selected').innerText(),'版本审阅员 ×');await admin.locator('#access-member-form button[type=submit]').click();await admin.locator('#access-member-form').waitFor({state:'detached'});
 
-  const user=await browser.newPage({viewport:{width:1440,height:1050}});
   // Separate contexts are essential: this user must not share administrator cookies.
-  await user.close();const memberContext=await browser.newContext({viewport:{width:1440,height:1050}}),member=await memberContext.newPage();
+  const memberContext=await browser.newContext({viewport:{width:1440,height:1050}}),member=await memberContext.newPage();
   await api(member,'/auth/login',{username:'member',password:'temporary-1'});await api(member,'/auth/password',{current_password:'temporary-1',new_password:'member-own-pass'});
   await nav(member,'versions');assert.equal(await member.locator('.nav [data-page=tasks]').count(),0);assert.equal(await member.locator('.nav [data-page=access]').count(),0);assert.equal(await member.locator('.nav [data-group=management]').count(),0);
   await api(member,`/projects/${project.id}/git`,{branch:'unauthorized'},'PATCH',403);

@@ -35,7 +35,8 @@ export function mountProjectAccess({api,modal,closeModal,getProject,getAccess,on
     await onAccessChange(project);
   };
   function page() {
-    return `<div class="page access-page">${heading('角色与权限','为成员分配角色，按页面控制访问；待办职责单独设置。')}<section class="settings-section"><div class="row between"><h2>项目角色</h2>${action('access-create-role','添加角色','primary')}</div><p>成员拥有多个角色时，页面权限取并集。获得某页权限后，可使用该页已有的业务能力。</p><input data-access-search="roles" aria-label="搜索角色" placeholder="搜索角色名称"><div id="project-roles" aria-live="polite"><p class="hint">正在读取角色…</p></div></section><section class="settings-section"><div class="row between"><h2>项目成员</h2>${action('invite-member','添加成员','',`data-project="${escape(getProject().id)}"`)}</div><input data-access-search="members" aria-label="搜索项目成员" placeholder="搜索姓名或账号"><div id="project-members" aria-live="polite"><p class="hint">正在读取成员…</p></div></section></div>`;
+    const c=cache(getProject().id);
+    return `<div class="page access-page">${heading('角色与权限','为成员分配角色，按页面控制访问；待办职责单独设置。')}<section class="settings-section"><div class="row between"><h2>项目角色</h2>${action('access-create-role','添加角色','primary')}</div><p>成员拥有多个角色时，页面权限取并集。获得某页权限后，可使用该页已有的业务能力。</p><input data-access-search="roles" value="${escape(c.roleQuery)}" aria-label="搜索角色" placeholder="搜索角色名称"><div id="project-roles" aria-live="polite"><p class="hint">正在读取角色…</p></div></section><section class="settings-section"><div class="row between"><h2>项目成员</h2>${action('invite-member','添加成员','',`data-project="${escape(getProject().id)}"`)}</div><input data-access-search="members" value="${escape(c.memberQuery)}" aria-label="搜索项目成员" placeholder="搜索姓名或账号"><div id="project-members" aria-live="polite"><p class="hint">正在读取成员…</p></div></section></div>`;
   }
   async function loadRoles(project=getProject()?.id) {
     const root=document.querySelector('#project-roles'); if(!root || !project)return;
@@ -48,11 +49,11 @@ export function mountProjectAccess({api,modal,closeModal,getProject,getAccess,on
   }
   async function loadMembers(project=getProject()?.id, target='#project-members') {
     const root=document.querySelector(target); if(!root || !project)return;
-    const c=cache(project);
+    const c=cache(project),generation=(c.memberGeneration||0)+1;c.memberGeneration=generation;
     const [data,access]=await Promise.all([
       api(`/projects/${encodeURIComponent(project)}/members?${new URLSearchParams({page:c.memberPage,page_size:c.memberSize,q:c.memberQuery})}`),accessFor(project),
     ]);
-    if(!root.isConnected)return;
+    if(!root.isConnected || generation!==c.memberGeneration)return;
     c.members=data.items; c.version=data.version??access.version;
     if(c.memberPage>1 && !data.items.length){c.memberPage--;return loadMembers(project,target);}
     const names=new Map(access.roles.map(role=>[role.id,role.name]));
@@ -68,7 +69,8 @@ export function mountProjectAccess({api,modal,closeModal,getProject,getAccess,on
   }
   async function mountMemberForm(form,project,selected=[],duties=[]) {
     const access=await accessFor(project); if(!form.isConnected)return;
-    const s={project,selected:new Set(selected),page:1,q:'',size:20,version:access.version,names:new Map(access.roles.map(r=>[r.id,r.name])),generation:0};
+    const available=new Set(access.roles.map(r=>r.id));
+    const s={project,selected:new Set(selected.filter(id=>available.has(id))),page:1,q:'',size:20,version:access.version,names:new Map(access.roles.map(r=>[r.id,r.name])),generation:0};
     pickers.set(form,s);
     const root=form.querySelector('.member-role-picker');
     root.innerHTML=`<fieldset class="member-role-fieldset"><legend>项目角色</legend><input data-role-search aria-label="搜索可选角色" placeholder="搜索角色名称"><div class="role-selected" aria-live="polite"></div><div class="role-options"></div></fieldset>${dutiesHTML(duties)}`;
