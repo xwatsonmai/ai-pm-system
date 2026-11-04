@@ -8,7 +8,7 @@ import (
 )
 
 func (s *Service) SaveAttachment(c context.Context, a domain.Actor, project, name string, content []byte) (domain.Attachment, error) {
-	if err := s.RequirePages(c, a, project, "tasks", "chat"); err != nil {
+	if err := s.RequirePages(c, a, project, "tasks", "reviews", "chat"); err != nil {
 		return domain.Attachment{}, err
 	}
 	if _, err := s.Store.GetProject(c, project); err != nil {

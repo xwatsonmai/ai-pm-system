@@ -4,6 +4,7 @@ import (
 	"ai-pm-system/internal/domain"
 	"context"
 	"strings"
+	"time"
 )
 
 // A question's platform worker borrows the persisted owner's current page
@@ -35,7 +36,7 @@ func (m *Manager) authorizeQuestionTool(c context.Context, a domain.Actor, r dom
 	case strings.HasPrefix(name, "repository_") || name == "read" || name == "grep" || name == "find" || name == "ls":
 		pages = []string{"code"}
 	case name == "save_analysis":
-		pages = []string{"reviews"}
+		pages = []string{"overview", "chat"}
 	case name == "create_bug" || name == "resolve_requirement_proposal":
 		pages = []string{"tasks"}
 	}
@@ -43,4 +44,29 @@ func (m *Manager) authorizeQuestionTool(c context.Context, a domain.Actor, r dom
 		return nil
 	}
 	return m.App.RequirePages(c, a, r.ProjectID, pages...)
+}
+
+// Native sandbox tools execute in the worker. Stop that worker promptly when
+// its owner loses chat/source access; ordinary RPC tools recheck on every call.
+func (m *Manager) guardQuestionPermissions(c context.Context, cancel context.CancelFunc, r domain.Run, source bool) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.Done():
+			return
+		case <-ticker.C:
+			a, e := m.questionReadActor(c, r)
+			if e != nil {
+				cancel()
+				return
+			}
+			if source {
+				if e = m.App.RequirePages(c, a, r.ProjectID, "code"); e != nil {
+					cancel()
+					return
+				}
+			}
+		}
+	}
 }

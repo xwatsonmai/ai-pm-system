@@ -229,7 +229,7 @@ func hasProjectManager(p domain.Project) bool {
 
 func TaskActionPages(action string) []string {
 	switch action {
-	case "accept", "reject":
+	case "accept", "reject", "test_pass", "verify_bug", "return_bug", "start_retest":
 		return []string{"reviews"}
 	case "mark_deployed":
 		return []string{"reviews", "versions"}
@@ -238,5 +238,8 @@ func TaskActionPages(action string) []string {
 	}
 }
 func (s *Service) RequireTaskAction(c context.Context, a domain.Actor, t domain.Task, action string) error {
+	if t.ParentRequirementID != "" && (action == "close" || action == "decline" || action == "reopen") {
+		return s.RequirePages(c, a, t.ProjectID, "tasks", "reviews")
+	}
 	return s.RequirePages(c, a, t.ProjectID, TaskActionPages(action)...)
 }

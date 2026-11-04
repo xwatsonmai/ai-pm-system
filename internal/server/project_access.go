@@ -214,7 +214,7 @@ func (s *Server) authorizeProjectRoute(r *http.Request, id string, manage bool, 
 	case "tasks":
 		pages = []string{"tasks", "reviews", "versions"}
 		if r.Method != "GET" {
-			pages = []string{"tasks"}
+			pages = []string{"tasks", "reviews"}
 			if len(path) > 3 && path[3] == "actions" {
 				pages = []string{"tasks", "reviews", "versions"}
 			}
@@ -243,14 +243,16 @@ func (s *Server) authorizeProjectRoute(r *http.Request, id string, manage bool, 
 		case "tasks":
 			pages = []string{"tasks", "reviews", "versions"}
 			if r.Method != "GET" {
-				pages = []string{"tasks"}
+				pages = []string{"tasks", "reviews"}
 			}
 		case "requirement-intakes":
 			pages = []string{"tasks"}
+		case "version-options":
+			pages = []string{"tasks", "reviews", "versions", "overview"}
 		case "versions", "version-assignments":
 			pages = []string{"versions"}
 		case "milestone":
-			pages = []string{"tasks", "reviews", "versions", "overview"}
+			pages = []string{"versions"}
 		case "timeline":
 			pages = []string{"timeline"}
 		case "runs", "conversations", "collaborations":
@@ -259,9 +261,12 @@ func (s *Server) authorizeProjectRoute(r *http.Request, id string, manage bool, 
 				pages = []string{"chat", "tasks", "reviews", "versions"}
 			}
 		case "artifacts":
-			pages = []string{"reviews"}
+			pages = []string{"overview", "reviews"}
+			if r.URL.Query().Get("task_id") != "" {
+				pages = []string{"tasks", "reviews", "versions"}
+			}
 		case "events":
-			pages = []string{"timeline", "tasks", "reviews", "versions"}
+			pages = []string{"overview", "timeline", "tasks", "reviews", "versions"}
 		case "attachments":
 			pages = []string{"tasks", "reviews", "versions", "chat"}
 		default:
@@ -285,6 +290,8 @@ func (s *Server) authorizeMCPPage(c context.Context, a domain.Actor, name string
 		pages = []string{"versions"}
 	case name == "project_timeline":
 		pages = []string{"timeline"}
+	case name == "requirement_create" || name == "requirement_update" || name == "requirement_review_message" || name == "requirement_review_confirm" || name == "requirement_attachment_upload" || name == "task_decline" || name == "task_close" || name == "task_reopen":
+		pages = []string{"tasks", "reviews"}
 	case name == "task_mark_deployed" || name == "delivery_record":
 		pages = []string{"reviews", "versions"}
 	case strings.HasPrefix(name, "collaboration_") || name == "project_ask" || name == "analysis_get":
@@ -296,12 +303,9 @@ func (s *Server) authorizeMCPPage(c context.Context, a domain.Actor, name string
 }
 
 func (s *Server) canReadTodo(c context.Context, a domain.Actor, t notify.Todo) bool {
-	pages := []string{"tasks"}
-	switch t.Kind {
-	case "acceptance":
-		pages = []string{"reviews"}
-	case "release":
-		pages = []string{"reviews", "versions"}
+	linked := false
+	if task, e := s.App.Store.GetTask(c, t.TaskID); e == nil {
+		linked = task.ParentRequirementID != ""
 	}
-	return s.App.RequirePages(c, a, t.ProjectID, pages...) == nil
+	return s.App.RequirePages(c, a, t.ProjectID, notify.TodoPages(t.Kind, linked)...) == nil
 }
