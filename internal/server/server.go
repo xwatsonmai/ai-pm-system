@@ -77,6 +77,7 @@ func (s *Server) Handler() http.Handler {
 	s.authRoutes(mux)
 	s.accountRoutes(mux)
 	s.platformRoutes(mux)
+	s.projectRoleRoutes(mux)
 	s.notifyRoutes(mux)
 	s.oauthRoutes(mux)
 	s.repositoryRoutes(mux)
@@ -99,7 +100,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		projects := make([]repositoryProject, 0, len(v))
 		for _, p := range v {
-			projects = append(projects, s.repositoryProject(r.Context(), p))
+			projects = append(projects, s.repositoryProjectFor(r, p))
 		}
 		respond(w, projects)
 	})
@@ -111,7 +112,7 @@ func (s *Server) Handler() http.Handler {
 			fail(w, e)
 			return
 		}
-		v["project"] = s.repositoryProject(r.Context(), v["project"].(domain.Project))
+		v["project"] = s.repositoryProjectFor(r, v["project"].(domain.Project))
 		respond(w, v)
 	})
 	handle("POST /api/projects/{id}/sync", func(w http.ResponseWriter, r *http.Request) {
@@ -124,7 +125,7 @@ func (s *Server) Handler() http.Handler {
 			fail(w, e)
 			return
 		}
-		respond(w, s.repositoryProject(r.Context(), p))
+		respond(w, s.repositoryProjectFor(r, p))
 	})
 	handle("GET /api/projects/{id}/code", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -325,6 +326,14 @@ func (s *Server) Handler() http.Handler {
 			AttachmentIDs []string `json:"attachment_ids"`
 		}
 		if e := read(r, &in); e != nil {
+			fail(w, e)
+			return
+		}
+		page := "tasks"
+		if in.Kind == "question" {
+			page = "chat"
+		}
+		if e := s.App.RequirePages(r.Context(), s.actor(r), r.PathValue("id"), page); e != nil {
 			fail(w, e)
 			return
 		}

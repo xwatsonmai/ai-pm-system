@@ -150,7 +150,7 @@ type recipients struct {
 func (r recipients) role(role string) []string {
 	out := []string{}
 	for _, m := range r.members {
-		if m.Has(role) && m.UserID != "local-owner" {
+		if m.ResponsibleFor(role) && m.UserID != "local-owner" {
 			out = append(out, m.UserID)
 		}
 	}

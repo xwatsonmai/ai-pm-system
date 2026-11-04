@@ -110,7 +110,7 @@ func (s *Service) RequirementIntakes(c context.Context, a domain.Actor, project 
 	if a.Kind != "human" {
 		return nil, domain.ErrForbidden
 	}
-	if err := s.CheckProject(c, a, project, false); err != nil {
+	if err := s.RequirePages(c, a, project, "tasks"); err != nil {
 		return nil, err
 	}
 	items, err := s.Store.ListRequirementIntakes(c, project)
@@ -254,7 +254,7 @@ func (s *Service) resolveRequirementIntake(c context.Context, a domain.Actor, id
 	if a.Kind != "human" || a.ID != v.OwnerID {
 		return domain.RequirementIntake{}, domain.ErrForbidden
 	}
-	if err = s.CheckProject(c, a, v.ProjectID, false); err != nil {
+	if err = s.RequirePages(c, a, v.ProjectID, "tasks"); err != nil {
 		return v, err
 	}
 	if _, err = s.Store.GetRun(c, v.OriginRunID); err != nil {

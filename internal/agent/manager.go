@@ -155,7 +155,14 @@ func (m *Manager) startAtRef(c context.Context, a domain.Actor, p, t, kind, prom
 	if !app.CanRead(a, project) {
 		return domain.Run{}, domain.ErrForbidden
 	}
-	if project.AgentReadMode == "sandbox" && m.SandboxSocket == "" {
+	if kind == "question" {
+		if e := m.App.RequirePages(c, a, p, "chat"); e != nil {
+			return domain.Run{}, e
+		}
+	} else if e := m.App.RequirePages(c, a, p, "tasks"); e != nil {
+		return domain.Run{}, e
+	}
+	if project.AgentReadMode == "sandbox" && m.SandboxSocket == "" && (kind != "question" || app.CanAccessPage(a, project, "code")) {
 		return domain.Run{}, errors.New("该项目已启用隔离阅读，但沙盒 runner 尚未配置；不会回退到非隔离执行")
 	}
 	if codeRef != "" && project.AgentReadMode != "sandbox" && !(review != nil && ((review.Source.BugContext != nil && review.Source.BugContext.SHA == codeRef) || (review.Source.ReviewingChange() && review.Source.RequirementChange.SHA == codeRef) || (review.Mode == "discussion" && review.Source.Submission != nil && review.Source.Submission.SHA == codeRef))) {
@@ -255,7 +262,7 @@ func (m *Manager) startAtRef(c context.Context, a domain.Actor, p, t, kind, prom
 		}
 	}
 	r.CodeRef = strings.TrimSpace(codeRef)
-	if project.AgentReadMode == "sandbox" {
+	if project.AgentReadMode == "sandbox" && (kind != "question" || app.CanAccessPage(a, project, "code")) {
 		r.CodeSnapshot = &domain.CodeSnapshot{Status: "preparing"}
 	}
 	if review != nil {
@@ -489,6 +496,23 @@ func (m *Manager) execute(ctx context.Context, r domain.Run, profile domain.Prof
 	actor := domain.Actor{ID: "platform", Name: "平台 Agent", Kind: "platform", ProjectID: r.ProjectID}
 	if r.Kind == "requirement_review" {
 		r.ReviewEvidence = &domain.RequirementReviewEvidence{References: []domain.RequirementReviewReference{}}
+	}
+	if r.Kind == "question" {
+		owner, err := m.questionReadActor(ctx, r)
+		if err != nil {
+			m.fail(ctx, r, err)
+			return
+		}
+		actor = owner
+		p, err := m.App.Store.GetProject(ctx, r.ProjectID)
+		if err != nil {
+			m.fail(ctx, r, err)
+			return
+		}
+		if !app.CanAccessPage(actor, p, "code") {
+			r.CodeSnapshot = nil
+			r.CodeRef = ""
+		}
 	}
 	contextData, e := m.initialContext(ctx, actor, r)
 	if e != nil {
@@ -864,6 +888,17 @@ func (w *tailWriter) String() string { w.mu.Lock(); defer w.mu.Unlock(); return 
 var _ io.Writer = (*tailWriter)(nil)
 
 func (m *Manager) callTool(c context.Context, a domain.Actor, r domain.Run, callID, name string, raw json.RawMessage) (any, error) {
+	if r.Kind == "question" {
+		owner, e := m.questionReadActor(c, r)
+		if e != nil {
+			return nil, e
+		}
+		a = owner
+		if e = m.authorizeQuestionTool(c, a, r, name); e != nil {
+			return nil, e
+		}
+	}
+
 	if name == "propose_requirement" || name == "resolve_requirement_proposal" {
 		return m.requirementIntakeTool(c, r, name, raw)
 	}

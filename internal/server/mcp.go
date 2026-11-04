@@ -278,6 +278,9 @@ func (s *Server) MCP(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) developerCall(ctx context.Context, a domain.Actor, name string, args map[string]string) (any, error) {
 	p := a.ProjectID
+	if e := s.authorizeMCPPage(ctx, a, name); e != nil {
+		return nil, e
+	}
 	if e := s.App.CheckProject(ctx, a, p, false); e != nil {
 		return nil, e
 	}

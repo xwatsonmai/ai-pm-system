@@ -156,7 +156,7 @@ func (s *Server) todos(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []notify.Todo{}
 	for _, t := range list {
-		if s.App.CheckProject(r.Context(), a, t.ProjectID, false) == nil {
+		if s.canReadTodo(r.Context(), a, t) {
 			out = append(out, t)
 		}
 	}
@@ -172,7 +172,8 @@ func (s *Server) todo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a := s.actor(r)
-	if e = s.App.CheckProject(r.Context(), a, t.ProjectID, false); e != nil {
+	if !s.canReadTodo(r.Context(), a, t) {
+		e = domain.ErrForbidden
 		fail(w, e)
 		return
 	}
@@ -421,6 +422,9 @@ func (s *Server) IMAct(c context.Context, userID string, todo notify.Todo, reque
 	actor, err := s.userActor(c, users[i])
 	if err != nil {
 		return err
+	}
+	if !s.canReadTodo(c, actor, todo) {
+		return domain.ErrForbidden
 	}
 	t, err := s.App.Store.GetTask(c, todo.TaskID)
 	if err != nil {

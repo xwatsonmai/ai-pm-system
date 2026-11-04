@@ -5,21 +5,23 @@ import (
 	"slices"
 )
 
-// ProjectRoles lists the roles a project member can hold, in display order.
-// Roles decide who receives which to-dos; only admin grants extra permissions.
+// ProjectRoles retains legacy role IDs for old clients. New project roles and
+// their pages live in Project.ProjectRoles; to-do responsibilities are separate.
 var ProjectRoles = []string{"product", "developer", "tester", "admin"}
 
 type ProjectMember struct {
-	UserID string   `json:"user_id"`
-	Roles  []string `json:"roles"`
+	UserID           string   `json:"user_id"`
+	Roles            []string `json:"roles"`
+	Responsibilities []string `json:"responsibilities"`
 }
 
 // UnmarshalJSON also reads the single role stored before members could hold several.
 func (m *ProjectMember) UnmarshalJSON(b []byte) error {
 	var v struct {
-		UserID string   `json:"user_id"`
-		Roles  []string `json:"roles"`
-		Role   string   `json:"role"`
+		UserID           string   `json:"user_id"`
+		Roles            []string `json:"roles"`
+		Responsibilities []string `json:"responsibilities"`
+		Role             string   `json:"role"`
 	}
 	if err := json.Unmarshal(b, &v); err != nil {
 		return err
@@ -27,12 +29,13 @@ func (m *ProjectMember) UnmarshalJSON(b []byte) error {
 	if v.Roles == nil && v.Role != "" {
 		v.Roles = []string{v.Role}
 	}
-	*m = ProjectMember{UserID: v.UserID, Roles: v.Roles}
+	*m = ProjectMember{UserID: v.UserID, Roles: v.Roles, Responsibilities: v.Responsibilities}
 	return nil
 }
 
-// MarshalJSON retains a legacy role so existing clients and a rolled-back
-// server can still read memberships. New readers use the complete role set.
+// MarshalJSON retains a legacy role for existing clients. New readers use the
+// complete role IDs and independent responsibilities. Older servers do not enforce
+// custom page grants and are not a safe rollback after these grants are used.
 func (m ProjectMember) MarshalJSON() ([]byte, error) {
 	role := ""
 	for _, candidate := range []string{"admin", "product", "developer"} {
@@ -44,11 +47,16 @@ func (m ProjectMember) MarshalJSON() ([]byte, error) {
 	if role == "" && len(m.Roles) > 0 {
 		role = "developer"
 	}
+	var duties *[]string
+	if m.Responsibilities != nil {
+		duties = &m.Responsibilities
+	}
 	return json.Marshal(struct {
-		UserID string   `json:"user_id"`
-		Roles  []string `json:"roles"`
-		Role   string   `json:"role,omitempty"`
-	}{m.UserID, m.Roles, role})
+		UserID           string    `json:"user_id"`
+		Roles            []string  `json:"roles"`
+		Responsibilities *[]string `json:"responsibilities,omitempty"`
+		Role             string    `json:"role,omitempty"`
+	}{m.UserID, m.Roles, duties, role})
 }
 
 func (m ProjectMember) Has(role string) bool { return slices.Contains(m.Roles, role) }

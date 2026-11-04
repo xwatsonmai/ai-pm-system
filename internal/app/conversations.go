@@ -9,7 +9,10 @@ func CanReadRun(a domain.Actor, p domain.Project, r domain.Run) bool {
 		return false
 	}
 	if r.Kind != "question" {
-		return true
+		return CanAccessAnyPage(a, p, "tasks", "reviews", "versions")
+	}
+	if !CanAccessPage(a, p, "chat") {
+		return false
 	}
 	if r.OwnerID != "" {
 		return r.OwnerID == a.ID && r.OwnerKind == a.Kind

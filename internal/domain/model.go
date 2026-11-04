@@ -27,6 +27,8 @@ func ID(prefix string) string {
 func Now() int64 { return time.Now().UnixMilli() }
 
 type Project struct {
+	ProjectRoles  []ProjectRole   `json:"project_roles,omitempty"`
+	AccessVersion int             `json:"access_version"`
 	AgentReadMode string          `json:"agent_read_mode,omitempty"`
 	AgentRef      string          `json:"agent_ref,omitempty"`
 	OwnerID       string          `json:"owner_id"`
