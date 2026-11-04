@@ -55,5 +55,6 @@ type ListDocumentQuery struct {
 	LegacyOwner    bool
 	TaskID         string
 	ConversationID string
+	Summary        bool
 	Active         bool
 }

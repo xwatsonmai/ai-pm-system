@@ -24,20 +24,26 @@ try {
   const profile=await api("/profiles",{name:"本地测试",provider:"openai",model:"fixture",key:"fixture-only"});
   await api("/platform/settings",{profile_id:profile.id},"PUT");
   const project=await api("/projects",{name:"项目源码阅读验证"});
-  await page.goto(base);await page.getByRole("button",{name:"项目设置",exact:true}).click();
+  await page.goto(base);const management=page.locator('[data-action="toggle-nav-group"][data-group="management"]');await management.waitFor();if(await management.getAttribute('aria-expanded')==='false')await management.click();await page.getByRole("button",{name:"Git 设置",exact:true}).click();
   await page.locator("[name=agent_read_mode]").selectOption("sandbox");
   const sha="87a06f5b73a919c22ca966f98754ab1744c3f457";
   await page.locator("[name=agent_ref]").fill(sha);
-  await page.locator("#project-form button[type=submit]").click();
-  await page.getByText("项目已保存",{exact:true}).waitFor();
+  await page.locator("#git-form button[type=submit]").click();
+  await page.getByText("Git 设置已保存",{exact:true}).waitFor();
   const saved=(await api(`/projects/${project.id}/context`)).project;
   assert.equal(saved.agent_read_mode,"sandbox");assert.equal(saved.agent_ref,sha);
-  await page.reload();await page.getByRole("button",{name:"项目设置",exact:true}).click();await page.locator("[name=agent_ref]").waitFor();
+  await page.reload();if(await management.getAttribute('aria-expanded')==='false')await management.click();await page.getByRole("button",{name:"Git 设置",exact:true}).click();await page.locator("[name=agent_ref]").waitFor();
   assert.equal(await page.locator("[name=agent_read_mode]").inputValue(),"sandbox");
   assert.equal(await page.locator("[name=agent_ref]").inputValue(),sha);
   await page.screenshot({path:join(output,"settings-desktop.png"),fullPage:true,animations:"disabled"});
   const fixture={id:"run_ui_fixture",project_id:project.id,conversation_id:"conv_ui_fixture",kind:"question",status:"succeeded",prompt:"核对相框合成服务",conversation_title:"源码阅读核验",started_at:Date.now(),output:"已核对源码中的图层顺序。",code_snapshot:{sha,ref:"main",status:"ready",synced_at:Date.now(),submodules:[{path:"mobile",status:"not_expanded"}]},steps:[{name:"find",status:"done",path:"server/services",sha},{name:"read",status:"done",path:"server/services/photo-compositor/service.py",sha},{name:"read",status:"failed",path:"/state",error:"PATH_OUTSIDE_WORKSPACE"}]};
-  await page.route(`**/api/projects/${project.id}/runs`,route=>route.request().method()==="GET"?route.fulfill({contentType:"application/json",body:JSON.stringify([fixture])}):route.continue());
+  await page.route(`**/api/projects/${project.id}/runs*`,async route=>{
+   if(route.request().method()!=='GET')return route.continue();
+   const url=new URL(route.request().url());if(!url.pathname.endsWith('/runs'))return route.continue();
+   const size=Number(url.searchParams.get('page_size'))||20,pageNumber=Number(url.searchParams.get('page'))||1;
+   await route.fulfill({json:url.searchParams.has('page')?{items:[fixture],total:1,page:pageNumber,page_size:size}:[fixture]});
+  });
+  await page.route(`**/api/projects/${project.id}/conversations?*`,route=>route.fulfill({json:{items:[{id:fixture.conversation_id,title:fixture.conversation_title,updatedAt:fixture.started_at,active:false,legacy:true,turns:[]}],total:1,page:1,page_size:20}}));
   await page.getByRole("button",{name:"项目问答",exact:true}).click();
   await page.locator('[data-action="select-conversation"][data-id="conv_ui_fixture"]').click();
   await page.locator(".code-snapshot").waitFor();
@@ -56,4 +62,4 @@ try {
   assert.deepEqual(errors,[]);
   await writeFile(join(output,"report.json"),JSON.stringify({settings:"real API persistence and reload",reading:"synthetic SHA and native tool evidence rendered",mobile:"390px no overflow",failure:"runner unavailable reported, draft preserved",errors},null,2));
   console.log("sandbox UI passed: settings, version, native steps, mobile, fail-closed");
-} finally {await browser.close();server.kill("SIGTERM");await exited;await rm(data,{recursive:true,force:true});}
+}catch(e){console.error("SANDBOX BROWSER",errors,await page.locator("body").innerText());throw e;} finally {await browser.close();server.kill("SIGTERM");await exited;await rm(data,{recursive:true,force:true});}

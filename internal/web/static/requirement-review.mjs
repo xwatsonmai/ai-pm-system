@@ -112,7 +112,7 @@ export function mountRequirementReview(root, {task,api,userID,messageID = '',onD
   const alignmentDone = () => v?.mode === 'development_alignment' && v.status === 'alignment_completed';
   const closed = () => v?.status==='closed' || taskTerminated(source());
   const changeDone = () => v?.status==='change_canceled' || (v?.mode === 'testing_change' && source().requirement_change?.status !== 'reviewing');
-  const discussing = () => discussionAvailable(source());
+  const discussing = () => v?.mode !== 'development_alignment' && discussionAvailable(source());
   const readOnly = () => !discussing() && (closed() || bugReadOnly() || alignmentDone() || changeDone());
   const topicOf = id => (v?.agenda || []).find(t => t.id === id);
   const node = id => [...feed.children].find(child => child.dataset.key === id);

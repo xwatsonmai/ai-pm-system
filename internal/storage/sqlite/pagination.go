@@ -264,6 +264,9 @@ func (d *DB) QueryDocuments(c context.Context, q domain.ListDocumentQuery) (doma
 		args = append(args, q.ProjectID, q.UserID, q.ActorKind, q.LegacyOwner)
 		order = "COALESCE(json_extract(d.payload,'$.started_at'),0) DESC,d.id DESC"
 		projection = `CASE WHEN COALESCE(json_extract(meta.payload,'$.title'),'')<>'' THEN json_set(d.payload,'$.conversation_title',json_extract(meta.payload,'$.title'),'$.title_status','manual') ELSE d.payload END`
+		if q.Summary && q.Resource == "runs" {
+			projection = "json_remove(" + projection + ",'$.output','$.process_output','$.steps','$.prompt','$.attachments','$.code_snapshot','$.review_result','$.review_evidence','$.usage')"
+		}
 		if q.ConversationID != "" {
 			where += " AND " + cid + "=?"
 			args = append(args, q.ConversationID)
@@ -275,10 +278,10 @@ func (d *DB) QueryDocuments(c context.Context, q domain.ListDocumentQuery) (doma
 			where += ` AND json_extract(d.payload,'$.kind')='question'`
 			// Window functions select one representative per conversation without
 			// decoding any historical outputs. Ordering is independent of rowid.
-			base := `SELECT ` + cid + ` cid,d.payload,meta.payload metadata,ROW_NUMBER() OVER(PARTITION BY ` + cid + ` ORDER BY COALESCE(json_extract(d.payload,'$.started_at'),0),d.id) first_row,MAX(COALESCE(json_extract(d.payload,'$.started_at'),0)) OVER(PARTITION BY ` + cid + `) updated_at,MAX(CASE WHEN json_extract(d.payload,'$.status') IN ('running','queued') THEN 1 ELSE 0 END) OVER(PARTITION BY ` + cid + `) active ` + from + ` WHERE ` + where
+			base := `SELECT ` + cid + ` cid,d.payload,meta.payload metadata,ROW_NUMBER() OVER(PARTITION BY ` + cid + ` ORDER BY COALESCE(json_extract(d.payload,'$.started_at'),0),d.id) first_row,MAX(COALESCE(json_extract(d.payload,'$.started_at'),0)) OVER(PARTITION BY ` + cid + `) updated_at,MAX(CASE WHEN json_extract(d.payload,'$.status') IN ('running','queued') THEN 1 ELSE 0 END) OVER(PARTITION BY ` + cid + `) active,json_group_array(json_extract(d.payload,'$.source_event_id')) FILTER(WHERE json_extract(d.payload,'$.trigger_type')='collaboration_result' AND json_extract(d.payload,'$.status')='succeeded') OVER(PARTITION BY ` + cid + `) reply_event_ids ` + from + ` WHERE ` + where
 			from = "FROM (" + base + ") d"
 			where = "d.first_row=1"
-			projection = `json_object('id',d.cid,'title',COALESCE(NULLIF(json_extract(d.metadata,'$.title'),''),NULLIF(json_extract(d.payload,'$.conversation_title'),''),NULLIF(substr(trim(json_extract(d.payload,'$.prompt')),1,28),''),json_extract(d.payload,'$.attachments[0].name'),'附件讨论'),'updatedAt',d.updated_at,'active',json(CASE d.active WHEN 1 THEN 'true' ELSE 'false' END),'naming',json(CASE WHEN json_extract(d.payload,'$.title_status')='pending' AND d.active=1 THEN 'true' ELSE 'false' END),'legacy',json(CASE WHEN COALESCE(json_extract(d.payload,'$.owner_id'),'')='' THEN 'true' ELSE 'false' END),'turns',json('[]'))`
+			projection = `json_object('id',d.cid,'title',COALESCE(NULLIF(json_extract(d.metadata,'$.title'),''),NULLIF(json_extract(d.payload,'$.conversation_title'),''),NULLIF(substr(trim(json_extract(d.payload,'$.prompt')),1,28),''),json_extract(d.payload,'$.attachments[0].name'),'附件讨论'),'updatedAt',d.updated_at,'active',json(CASE d.active WHEN 1 THEN 'true' ELSE 'false' END),'naming',json(CASE WHEN json_extract(d.payload,'$.title_status')='pending' AND d.active=1 THEN 'true' ELSE 'false' END),'legacy',json(CASE WHEN COALESCE(json_extract(d.payload,'$.owner_id'),'')='' THEN 'true' ELSE 'false' END),'reply_event_ids',json(d.reply_event_ids),'turns',json('[]'))`
 			order = "d.updated_at DESC,d.cid DESC"
 		}
 	default:
