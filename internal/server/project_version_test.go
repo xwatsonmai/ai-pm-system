@@ -212,8 +212,8 @@ func TestProductManagementPersonalMCP(t *testing.T) {
 	var current app.ProjectVersionDetail
 	json.Unmarshal([]byte(call("project_milestone_get", nil, false)), &current)
 	second := grant("second")
-	second["input"] = `{"name":"不能并行"}`
-	call("project_version_create", second, true)
+	second["input"] = `{"name":"并行版本"}`
+	call("project_version_create", second, false)
 	versionEdit := grant("version-edit")
 	versionEdit["project_version_id"] = current.ProjectVersion.ID
 	versionEdit["input"] = fmt.Sprintf(`{"name":"质检里程碑","version":%d,"goal":"产品体验"}`, current.ProjectVersion.Version)

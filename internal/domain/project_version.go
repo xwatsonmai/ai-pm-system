@@ -3,22 +3,23 @@ package domain
 // ProjectVersion is a milestone with independently preserved release snapshots,
 // distinct from a task's revision/CAS version.
 type ProjectVersion struct {
-	ID          string                `json:"id"`
-	ProjectID   string                `json:"project_id"`
-	Name        string                `json:"name"`
-	Goal        string                `json:"goal"`
-	Owner       string                `json:"owner"`
-	TargetDate  string                `json:"target_date"`
-	StartedAt   int64                 `json:"started_at,omitempty"`
-	EndedAt     int64                 `json:"ended_at,omitempty"`
-	Status      string                `json:"status"` // planned, active, completed, closed
-	Version     int                   `json:"version"`
-	ScopeFrozen bool                  `json:"scope_frozen"`
-	Scope       []VersionScopeItem    `json:"scope"`
-	Releases    []VersionRelease      `json:"releases"`
-	History     []VersionHistoryEntry `json:"history"`
-	CreatedAt   int64                 `json:"created_at"`
-	UpdatedAt   int64                 `json:"updated_at"`
+	ListingCounts *ProjectVersionCounts `json:"-"`
+	ID            string                `json:"id"`
+	ProjectID     string                `json:"project_id"`
+	Name          string                `json:"name"`
+	Goal          string                `json:"goal"`
+	Owner         string                `json:"owner"`
+	TargetDate    string                `json:"target_date"`
+	StartedAt     int64                 `json:"started_at,omitempty"`
+	EndedAt       int64                 `json:"ended_at,omitempty"`
+	Status        string                `json:"status"` // planned, active, completed, closed
+	Version       int                   `json:"version"`
+	ScopeFrozen   bool                  `json:"scope_frozen"`
+	Scope         []VersionScopeItem    `json:"scope"`
+	Releases      []VersionRelease      `json:"releases"`
+	History       []VersionHistoryEntry `json:"history"`
+	CreatedAt     int64                 `json:"created_at"`
+	UpdatedAt     int64                 `json:"updated_at"`
 }
 
 type VersionScopeItem struct {
@@ -31,6 +32,7 @@ type VersionScopeItem struct {
 
 // Release snapshots are immutable; later acceptance is reflected in Scope only.
 type VersionRelease struct {
+	TaskCount   int    `json:"task_count,omitempty"`
 	ID          string `json:"id"`
 	Environment string `json:"environment"`
 	Body        string `json:"body"`
@@ -60,16 +62,29 @@ type VersionTaskWrite struct {
 	Expected int
 }
 
-// CurrentMilestone selects the current default without restricting the version
-// model to a single release. Product policy currently opens one milestone.
+type ProjectVersionCounts struct {
+	Total           int            `json:"total"`
+	Included        int            `json:"included"`
+	Removed         int            `json:"removed"`
+	Ended           int            `json:"ended"`
+	DevelopmentDone int            `json:"development_done"`
+	Released        int            `json:"released"`
+	Accepted        int            `json:"accepted"`
+	Blocked         int            `json:"blocked"`
+	ByStatus        map[string]int `json:"by_status"`
+}
+
+// CurrentMilestone selects the default destination for new work. Multiple
+// independent versions may be active; this pointer does not define their state.
 type CurrentMilestone struct {
 	ProjectID string `json:"project_id"`
 	VersionID string `json:"version_id"`
 	Version   int    `json:"version"`
 }
 type MilestoneBatch struct {
-	State    *CurrentMilestone
-	Expected int
-	Versions []VersionWrite
-	Events   []Event
+	CheckState *CurrentMilestone
+	State      *CurrentMilestone
+	Expected   int
+	Versions   []VersionWrite
+	Events     []Event
 }

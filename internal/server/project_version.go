@@ -2,11 +2,13 @@ package server
 
 import (
 	"ai-pm-system/internal/app"
+	"ai-pm-system/internal/domain"
 	"net/http"
 )
 
 func (s *Server) projectVersionRoutes(handle func(string, http.HandlerFunc)) {
 	s.requirementIterationRoutes(handle)
+	s.versionListRoutes(handle)
 	handle("GET /api/projects/{id}/timeline", s.projectTimeline)
 	handle("GET /api/projects/{id}/milestone", func(w http.ResponseWriter, r *http.Request) {
 		v, e := s.App.CurrentMilestone(r.Context(), s.actor(r), r.PathValue("id"))
@@ -17,6 +19,20 @@ func (s *Server) projectVersionRoutes(handle func(string, http.HandlerFunc)) {
 		respond(w, v)
 	})
 	handle("GET /api/projects/{id}/versions", func(w http.ResponseWriter, r *http.Request) {
+		if len(r.URL.Query()) > 0 {
+			q, e := versionPageQuery(r)
+			if e != nil {
+				fail(w, e)
+				return
+			}
+			v, e := s.App.ProjectVersionsPage(r.Context(), s.actor(r), r.PathValue("id"), domain.VersionListQuery{PageQuery: q, Status: r.URL.Query().Get("status")})
+			if e != nil {
+				fail(w, e)
+				return
+			}
+			respond(w, v)
+			return
+		}
 		v, e := s.App.ProjectVersions(r.Context(), s.actor(r), r.PathValue("id"))
 		if e != nil {
 			fail(w, e)
@@ -51,6 +67,15 @@ func (s *Server) projectVersionRoutes(handle func(string, http.HandlerFunc)) {
 		respond(w, v)
 	})
 	handle("GET /api/project-versions/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("summary") == "1" {
+			v, e := s.App.ProjectVersionListing(r.Context(), s.actor(r), r.PathValue("id"))
+			if e != nil {
+				fail(w, e)
+				return
+			}
+			respond(w, v)
+			return
+		}
 		v, e := s.App.ProjectVersionContext(r.Context(), s.actor(r), r.PathValue("id"))
 		if e != nil {
 			fail(w, e)
