@@ -154,17 +154,22 @@ type Event struct {
 	ReviewNote *RequirementReviewNote `json:"-"`
 }
 type Artifact struct {
-	ID          string          `json:"id"`
-	ProjectID   string          `json:"project_id"`
-	TaskID      string          `json:"task_id"`
-	Kind        string          `json:"kind"`
-	Title       string          `json:"title"`
-	Body        string          `json:"body"`
-	Source      string          `json:"source"`
-	SHA         string          `json:"sha"`
-	Environment string          `json:"environment"`
-	Data        json.RawMessage `json:"data,omitempty"`
-	At          int64           `json:"at"`
+	OriginRunID       string          `json:"origin_run_id,omitempty"`
+	OriginOwnerID     string          `json:"origin_owner_id,omitempty"`
+	OriginOwnerKind   string          `json:"origin_owner_kind,omitempty"`
+	OriginRunKind     string          `json:"origin_run_kind,omitempty"`
+	OriginUnavailable bool            `json:"origin_unavailable,omitempty"`
+	ID                string          `json:"id"`
+	ProjectID         string          `json:"project_id"`
+	TaskID            string          `json:"task_id"`
+	Kind              string          `json:"kind"`
+	Title             string          `json:"title"`
+	Body              string          `json:"body"`
+	Source            string          `json:"source"`
+	SHA               string          `json:"sha"`
+	Environment       string          `json:"environment"`
+	Data              json.RawMessage `json:"data,omitempty"`
+	At                int64           `json:"at"`
 }
 
 // Conversation stores user edits independently of streaming run updates.

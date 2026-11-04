@@ -192,12 +192,6 @@ func (d *DB) GetProject(c context.Context, id string) (domain.Project, error) {
 func (d *DB) PutProject(c context.Context, p domain.Project) error {
 	return d.put(c, "project", p.ID, p.ID, domain.NormalizeProjectAccess(p))
 }
-func (d *DB) ListArtifacts(c context.Context, p string) ([]domain.Artifact, error) {
-	return list[domain.Artifact](c, d, "artifact", p)
-}
-func (d *DB) GetArtifact(c context.Context, id string) (domain.Artifact, error) {
-	return get[domain.Artifact](c, d, "artifact", id)
-}
 func (d *DB) PutArtifact(c context.Context, a domain.Artifact) error {
 	if a.Kind == "git" && a.Source == "git" {
 		return d.put(c, "artifact", a.ID, a.ProjectID, a)
@@ -210,7 +204,7 @@ func (d *DB) PutArtifact(c context.Context, a domain.Artifact) error {
 	if err != nil {
 		return err
 	}
-	old, err := d.GetArtifact(c, a.ID)
+	old, err := get[domain.Artifact](c, d, "artifact", a.ID)
 	if err != nil {
 		return err
 	}

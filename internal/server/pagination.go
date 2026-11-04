@@ -124,6 +124,8 @@ func (s *Server) pagedList(w http.ResponseWriter, r *http.Request, resource stri
 		query.ArtifactMode = mode
 		query.ExcludeGit = !git
 		query.ExcludeGitEvents = !git
+		query.ExcludeQuestions = !app.CanAccessPage(a, p, "chat")
+		query.ExcludeOwnedTaskRuns = !app.CanAccessPage(a, p, "tasks")
 		if resource == "delivery-evidence" && !app.CanAccessPage(a, p, "reviews") {
 			fail(w, domain.ErrForbidden)
 			return true
@@ -263,7 +265,7 @@ func (s *Server) compactTaskContext(w http.ResponseWriter, r *http.Request) bool
 		return true
 	}
 	mode, git := app.ArtifactAccess(a, project)
-	artifacts, e := store.QueryDocuments(r.Context(), domain.ListDocumentQuery{Resource: "artifacts", ProjectID: t.ProjectID, TaskID: t.ID, ArtifactMode: mode, ExcludeGit: !git})
+	artifacts, e := store.QueryDocuments(r.Context(), domain.ListDocumentQuery{Resource: "artifacts", ProjectID: t.ProjectID, TaskID: t.ID, UserID: a.ID, ActorKind: a.Kind, PersonalUser: a.Kind == "human" || a.UserID != "", ExcludeQuestions: !app.CanAccessPage(a, project, "chat"), ExcludeOwnedTaskRuns: !app.CanAccessPage(a, project, "tasks"), ArtifactMode: mode, ExcludeGit: !git})
 	if e != nil {
 		fail(w, e)
 		return true

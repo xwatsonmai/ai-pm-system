@@ -54,6 +54,77 @@ func TestQuestionWorkerCannotBorrowPlatformPrivileges(t *testing.T) {
 	}
 }
 
+func TestSavedPersonalAnalysesStayWithTheirRunOwner(t *testing.T) {
+	m, db, base, _ := collaborationToolsFixture(t)
+	c := context.Background()
+	p, _ := db.GetProject(c, base.ProjectID)
+	p.ProjectRoles = append(p.ProjectRoles, domain.ProjectRole{ID: "review-only", Name: "Review", Pages: []string{"reviews"}, Version: 1})
+	p.Memberships[1].Roles = []string{"review-only"}
+	p.AccessVersion++
+	if e := db.PutProject(c, p); e != nil {
+		t.Fatal(e)
+	}
+	system := domain.Actor{ID: "platform", Kind: "platform", ProjectID: p.ID}
+	for _, kind := range []string{"question", "progress", "requirements", "knowledge", "triage"} {
+		r := base
+		r.ID, r.Kind = "saved-"+kind, kind
+		if e := db.PutRun(c, r); e != nil {
+			t.Fatal(e)
+		}
+		out, e := m.callTool(c, system, r, "save", "save_analysis", json.RawMessage(`{"kind":"analysis","title":"Private source","body":"SECRET_PRIVATE_SOURCE"}`))
+		if e != nil {
+			t.Fatal(kind, e)
+		}
+		if out.(domain.Artifact).OriginRunID != r.ID {
+			t.Fatal("worker did not persist the analysis origin")
+		}
+	}
+	other, e := m.App.Context(c, domain.Actor{ID: "bob", Kind: "human"}, p.ID, "")
+	if e != nil {
+		t.Fatal(e)
+	}
+	raw, _ := json.Marshal(other)
+	if strings.Contains(string(raw), "SECRET_PRIVATE_SOURCE") {
+		t.Fatal("private run source escaped through shared evidence", string(raw))
+	}
+	owner, e := m.App.Context(c, domain.Actor{ID: base.OwnerID, Kind: "human"}, p.ID, "")
+	if e != nil || len(owner["artifacts"].([]domain.Artifact)) != 5 {
+		t.Fatal("owner lost saved analyses", e, owner)
+	}
+}
+
+func TestManualTriageKeepsPlatformBugWriterAfterCheckingOwnerTasks(t *testing.T) {
+	for _, kind := range []string{"human", "developer"} {
+		t.Run(kind, func(t *testing.T) {
+			m, db, r, _ := collaborationToolsFixture(t)
+			c := context.Background()
+			r.Kind, r.OwnerKind = "triage", kind
+			if kind == "developer" {
+				if e := db.PutMCPAccount(c, domain.MCPAccount{UserID: r.OwnerID, Enabled: true}); e != nil {
+					t.Fatal(e)
+				}
+			}
+			out, e := m.callTool(c, domain.Actor{ID: "platform", Kind: "platform", ProjectID: r.ProjectID}, r, "bug", "create_bug", json.RawMessage(`{"title":"New independent bug","description":"Observed actual and expected behavior","acceptance":"The observed defect is fixed"}`))
+			if e != nil {
+				t.Fatal(e)
+			}
+			task := out.(domain.Mutation).Task
+			if task.Status != "ready" || task.Creator == nil || task.Creator.Kind != "platform" {
+				t.Fatal("triage borrowed the person's write identity", task)
+			}
+			p, _ := db.GetProject(c, r.ProjectID)
+			p.Memberships[0].Roles = []string{}
+			p.AccessVersion++
+			if e = db.PutProject(c, p); e != nil {
+				t.Fatal(e)
+			}
+			if _, e = m.callTool(c, domain.Actor{ID: "platform", Kind: "platform", ProjectID: r.ProjectID}, r, "revoked", "create_bug", json.RawMessage(`{"title":"Denied","description":"Denied","acceptance":"Denied"}`)); !errors.Is(e, domain.ErrForbidden) {
+				t.Fatal("revoked owner still created a platform bug", e)
+			}
+		})
+	}
+}
+
 func TestManualAnalysisKindsCannotBorrowPlatformPrivileges(t *testing.T) {
 	m, db, r, _ := collaborationToolsFixture(t)
 	c := context.Background()

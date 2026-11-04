@@ -215,6 +215,10 @@ func (d *DB) QueryDocuments(c context.Context, q domain.ListDocumentQuery) (doma
 			from = `FROM (SELECT id,project_id,payload FROM documents WHERE kind='artifact' AND json_extract(payload,'$.kind') IN ('acceptance','deployment','test') UNION ALL SELECT id,project_id,json_object('id','deployment:'||id,'task_id',id,'project_id',project_id,'kind','deployment','title',json_extract(payload,'$.title')||' · 上线记录 · R'||COALESCE(json_extract(payload,'$.deployment.revision'),0),'body',COALESCE(json_extract(payload,'$.deployment.body'),''),'environment',json_extract(payload,'$.deployment.environment'),'sha',json_extract(payload,'$.deployment.sha'),'source',COALESCE(json_extract(payload,'$.deployment.actor'),'开发汇报'),'at',json_extract(payload,'$.deployment.at')) FROM tasks WHERE json_extract(payload,'$.deployment') IS NOT NULL) d`
 			where = "d.project_id=?"
 		}
+		from += artifactSourceJoin
+		projection = artifactProjection
+		where += " AND NOT " + artifactOriginUnavailable + " AND (" + artifactOwner + `='' OR (` + artifactOwner + `=? AND (` + artifactOwnerKind + `=? OR (? AND ` + artifactOwnerKind + ` IN ('human','developer'))) AND ((json_extract(source_run.payload,'$.kind')='question' AND ?) OR (json_extract(source_run.payload,'$.kind')<>'question' AND ?))))`
+		args = append(args, q.UserID, q.ActorKind, q.PersonalUser || q.ActorKind == "human", !q.ExcludeQuestions, !q.ExcludeOwnedTaskRuns)
 		switch q.ArtifactMode {
 		case "none":
 			where += " AND 0"
