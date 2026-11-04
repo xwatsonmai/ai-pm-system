@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"ai-pm-system/internal/domain"
+	"ai-pm-system/internal/notify"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -172,5 +173,73 @@ func TestTodosBeyondHundredAndPermissionFiltering(t *testing.T) {
 	v, e = d.QueryTodos(c, "alice", true, domain.PageQuery{}, []string{"p"})
 	if e != nil || v.Total != 0 || len(v.Items) != 0 {
 		t.Fatal(v, e)
+	}
+}
+
+func TestPagedGrantWhitelistAndNestedTaskProjection(t *testing.T) {
+	d := paginationDB(t)
+	c := context.Background()
+	if e := d.PutMCPAccount(c, domain.MCPAccount{UserID: "alice", Enabled: true}); e != nil {
+		t.Fatal(e)
+	}
+	account, _ := d.GetMCPAccount(c, "alice")
+	grant := domain.OAuthGrant{ID: "grant", UserID: "alice", ClientID: "client", ProjectID: "p", AccessHash: "PRIVATE_ACCESS_HASH", RefreshHash: "PRIVATE_REFRESH_HASH", PreviousRefreshHash: "PRIVATE_PREVIOUS_HASH", PreviousRefreshUntil: 1, Resource: "PRIVATE_RESOURCE", UserName: "PRIVATE_INTERNAL_NAME", AccountGeneration: account.Generation, AccessExpiresAt: 100, CreatedAt: 1}
+	if e := d.PutOAuthGrant(c, grant, ""); e != nil {
+		t.Fatal(e)
+	}
+	page, e := d.QueryDocuments(c, domain.ListDocumentQuery{Resource: "grants", UserID: "alice"})
+	if e != nil || page.Total != 1 {
+		t.Fatal(page, e)
+	}
+	raw, _ := json.Marshal(page)
+	if strings.Contains(string(raw), "PRIVATE_") || strings.Contains(string(raw), "Hash") || strings.Contains(string(raw), "AccountGeneration") {
+		t.Fatal("paged grants leaked private storage fields", string(raw))
+	}
+	source := domain.Task{ID: "source", Description: strings.Repeat("HUGE_SOURCE_SENTINEL", 1000), Acceptance: []string{"HUGE_BASELINE_SENTINEL"}, Attachments: []domain.Attachment{{Name: "SNAPSHOT_ATTACHMENT_SENTINEL"}}}
+	task := domain.Task{ID: "iteration", ProjectID: "p", Title: "Iteration", Kind: "requirement", Status: "ready", Revision: 1, Version: 1, Iteration: &domain.RequirementIteration{ParentTaskID: "source", RootTaskID: "root", Source: source, Baseline: &source}, Alignment: &domain.DevelopmentAlignment{Status: "replied"}}
+	payload, _ := json.Marshal(task)
+	if _, e = d.db.Exec(`INSERT INTO tasks(id,project_id,version,claim_hash,payload) VALUES(?,?,1,'',?)`, task.ID, task.ProjectID, string(payload)); e != nil {
+		t.Fatal(e)
+	}
+	tasks, e := d.QueryTasks(c, "p", domain.TaskListQuery{})
+	if e != nil || tasks.Total != 1 {
+		t.Fatal(tasks, e)
+	}
+	raw, _ = json.Marshal(tasks)
+	for _, marker := range []string{"HUGE_SOURCE_SENTINEL", "HUGE_BASELINE_SENTINEL", "SNAPSHOT_ATTACHMENT_SENTINEL"} {
+		if strings.Contains(string(raw), marker) {
+			t.Fatal("list returned frozen nested documents", marker)
+		}
+	}
+	if tasks.Items[0].Iteration.ParentTaskID != "source" || tasks.Items[0].Iteration.RootTaskID != "root" || tasks.Items[0].Alignment.Status != "replied" {
+		t.Fatal("light projection lost workflow/lineage", tasks)
+	}
+	full, e := d.GetTask(c, "iteration")
+	if e != nil || full.Iteration.Source.Description != source.Description {
+		t.Fatal("projection changed stored detail", full, e)
+	}
+}
+
+func TestPagedTodosMatchLinkedBugPagePolicyBeforeCount(t *testing.T) {
+	d := paginationDB(t)
+	c := context.Background()
+	p := domain.Project{ID: "p", AccessVersion: 1, ProjectRoles: []domain.ProjectRole{{ID: "reviews", Name: "Review", Pages: []string{"reviews"}, Version: 1}}, Memberships: []domain.ProjectMember{{UserID: "alice", Roles: []string{"reviews"}, Responsibilities: []string{"product"}}}}
+	if e := d.PutProject(c, p); e != nil {
+		t.Fatal(e)
+	}
+	for _, entry := range []struct{ id, parent string }{{"standalone", ""}, {"linked", "parent"}} {
+		task := domain.Task{ID: entry.id, ProjectID: p.ID, Kind: "bug", ParentRequirementID: entry.parent, Status: "clarify", Version: 1, Revision: 1}
+		payload, _ := json.Marshal(task)
+		if _, e := d.db.Exec(`INSERT INTO tasks(id,project_id,version,claim_hash,payload) VALUES(?,?,1,'',?)`, task.ID, task.ProjectID, string(payload)); e != nil {
+			t.Fatal(e)
+		}
+		todo := notify.Todo{ID: "todo-" + entry.id, Base: "todo-" + entry.id, TaskID: entry.id, ProjectID: p.ID, Kind: "bug_rejection", Subject: entry.id, Recipients: []string{"alice"}, Open: true, CreatedAt: 1}
+		if e := d.SaveTodo(c, todo, nil); e != nil {
+			t.Fatal(e)
+		}
+	}
+	out, e := d.QueryTodos(c, "alice", true, domain.PageQuery{PageSize: 1}, []string{p.ID})
+	if e != nil || out.Total != 1 || len(out.Items) != 1 || strings.Contains(string(out.Items[0]), "standalone") {
+		t.Fatal("stale standalone Bug recipient bypassed page before count", out, e)
 	}
 }

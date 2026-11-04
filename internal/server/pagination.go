@@ -99,6 +99,21 @@ func (s *Server) pagedList(w http.ResponseWriter, r *http.Request, resource stri
 		resource = "delivery-evidence"
 	}
 	query := domain.ListDocumentQuery{PageQuery: q, Resource: resource, ProjectID: project, UserID: a.ID, ActorKind: a.Kind, TaskID: r.URL.Query().Get("task_id"), ConversationID: r.URL.Query().Get("conversation_id"), Active: r.URL.Query().Get("active") == "true"}
+	if resource == "artifacts" || resource == "delivery-evidence" || resource == "events" {
+		p, e := s.App.Store.GetProject(r.Context(), project)
+		if e != nil {
+			fail(w, e)
+			return true
+		}
+		mode, git := app.ArtifactAccess(a, p)
+		query.ArtifactMode = mode
+		query.ExcludeGit = !git
+		query.ExcludeGitEvents = !git
+		if resource == "delivery-evidence" && !app.CanAccessPage(a, p, "reviews") {
+			fail(w, domain.ErrForbidden)
+			return true
+		}
+	}
 	if resource == "runs" || resource == "conversations" {
 		p, e := s.App.Store.GetProject(r.Context(), project)
 		if e != nil {
@@ -226,12 +241,18 @@ func (s *Server) compactTaskContext(w http.ResponseWriter, r *http.Request) bool
 		fail(w, e)
 		return true
 	}
-	artifacts, e := store.QueryDocuments(r.Context(), domain.ListDocumentQuery{Resource: "artifacts", ProjectID: t.ProjectID, TaskID: t.ID})
+	project, e := s.App.Store.GetProject(r.Context(), t.ProjectID)
 	if e != nil {
 		fail(w, e)
 		return true
 	}
-	events, e := store.QueryDocuments(r.Context(), domain.ListDocumentQuery{Resource: "events", ProjectID: t.ProjectID, TaskID: t.ID})
+	mode, git := app.ArtifactAccess(a, project)
+	artifacts, e := store.QueryDocuments(r.Context(), domain.ListDocumentQuery{Resource: "artifacts", ProjectID: t.ProjectID, TaskID: t.ID, ArtifactMode: mode, ExcludeGit: !git})
+	if e != nil {
+		fail(w, e)
+		return true
+	}
+	events, e := store.QueryDocuments(r.Context(), domain.ListDocumentQuery{Resource: "events", ProjectID: t.ProjectID, TaskID: t.ID, ExcludeGitEvents: !git})
 	if e != nil {
 		fail(w, e)
 		return true

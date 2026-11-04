@@ -14,7 +14,7 @@ var _ storage.PagedQueries = (*DB)(nil)
 
 // The projection is intentionally assembled in SQL. Large descriptions,
 // attachment metadata and historical evidence never leave SQLite for a list.
-const taskListProjection = `json_remove(t.payload,'$.description','$.acceptance','$.attachments','$.bug_context','$.requirement_change','$.submission.summary','$.submission.tests','$.submission.limitations','$.submission.references','$.deployment.body','$.review.note','$.review.checks','$.alignment.messages','$.test_verification.note')`
+const taskListProjection = `json_remove(t.payload,'$.description','$.acceptance','$.attachments','$.bug_context','$.requirement_change','$.submission.summary','$.submission.tests','$.submission.limitations','$.submission.references','$.deployment.body','$.review.note','$.review.checks','$.alignment.messages','$.test_verification.note','$.iteration.source','$.iteration.baseline','$.resolution.reason')`
 const taskStatus = `json_extract(t.payload,'$.status')`
 const reviewCurrent = `(COALESCE(json_extract(t.payload,'$.change_request_id'),'')='' AND json_extract(r.payload,'$.task_revision')=json_extract(t.payload,'$.revision'))`
 const pendingReview = `(COALESCE(json_extract(t.payload,'$.change_request_id'),'')='' AND (` + taskStatus + `='aligning' OR (` + taskStatus + `='clarify' AND ` + reviewCurrent + ` AND json_extract(r.payload,'$.status') IN ('ready_to_confirm','needs_input','rejection_pending'))))`
@@ -215,6 +215,18 @@ func (d *DB) QueryDocuments(c context.Context, q domain.ListDocumentQuery) (doma
 			from = `FROM (SELECT id,project_id,payload FROM documents WHERE kind='artifact' AND json_extract(payload,'$.kind') IN ('acceptance','deployment','test') UNION ALL SELECT id,project_id,json_object('id','deployment:'||id,'task_id',id,'project_id',project_id,'kind','deployment','title',json_extract(payload,'$.title')||' · 上线记录 · R'||COALESCE(json_extract(payload,'$.deployment.revision'),0),'body',COALESCE(json_extract(payload,'$.deployment.body'),''),'environment',json_extract(payload,'$.deployment.environment'),'sha',json_extract(payload,'$.deployment.sha'),'source',COALESCE(json_extract(payload,'$.deployment.actor'),'开发汇报'),'at',json_extract(payload,'$.deployment.at')) FROM tasks WHERE json_extract(payload,'$.deployment') IS NOT NULL) d`
 			where = "d.project_id=?"
 		}
+		switch q.ArtifactMode {
+		case "none":
+			where += " AND 0"
+		case "overview":
+			where += ` AND json_extract(d.payload,'$.kind') IN ('analysis','knowledge','question') AND COALESCE(json_extract(d.payload,'$.task_id'),'')=''`
+		case "", "all":
+		default:
+			return empty, errors.New("无效的证据访问范围")
+		}
+		if q.ExcludeGit {
+			where += ` AND COALESCE(json_extract(d.payload,'$.kind'),'')<>'git'`
+		}
 	case "tokens":
 		from = "FROM tokens d"
 		where = "d.project_id=?"
@@ -249,12 +261,15 @@ func (d *DB) QueryDocuments(c context.Context, q domain.ListDocumentQuery) (doma
 		from = "FROM oauth_grants d"
 		where = "d.user_id=?"
 		args = append(args, q.UserID)
-		projection = `json_remove(d.payload,'$.access_hash','$.refresh_hash')`
+		projection = `json_object('id',json_extract(d.payload,'$.id'),'user_id',json_extract(d.payload,'$.user_id'),'client_id',json_extract(d.payload,'$.client_id'),'project_id',json_extract(d.payload,'$.project_id'),'expires_at',json_extract(d.payload,'$.expires_at'),'created_at',json_extract(d.payload,'$.created_at'))`
 		order = "d.rowid DESC"
 	case "events":
 		from = "FROM events d"
 		where = "d.project_id=?"
 		args = append(args, q.ProjectID)
+		if q.ExcludeGitEvents {
+			where += " AND d.kind <> 'git_sync'"
+		}
 		projection = `json_object('seq',d.seq,'project_id',d.project_id,'task_id',d.task_id,'kind',d.kind,'actor',d.actor,'body',d.body,'at',d.at)`
 		order = "d.seq DESC"
 	case "runs", "conversations":
@@ -367,7 +382,7 @@ func (d *DB) QueryTodos(c context.Context, user string, open bool, q domain.Page
 		 WHERE EXISTS(SELECT 1 FROM json_each(m.value,'$.roles') member_role WHERE member_role.value=json_extract(role.value,'$.id'))
 		 AND CASE WHEN json_extract(t.payload,'$.kind') IN ('test','retest','verify','acceptance') THEN grant_page.value='reviews'
 		 WHEN json_extract(t.payload,'$.kind')='release' THEN grant_page.value IN ('reviews','versions')
-		 WHEN json_extract(t.payload,'$.kind')='bug_rejection' THEN grant_page.value IN ('tasks','reviews')
+		 WHEN json_extract(t.payload,'$.kind')='bug_rejection' THEN (grant_page.value='tasks' OR (grant_page.value='reviews' AND EXISTS(SELECT 1 FROM tasks source_task WHERE source_task.id=t.task_id AND source_task.project_id=p.id AND COALESCE(json_extract(source_task.payload,'$.parent_requirement_id'),'')<>'')))
 		 ELSE grant_page.value='tasks' END)))`
 		args = append(args, user)
 	}
