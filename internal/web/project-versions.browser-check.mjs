@@ -366,9 +366,7 @@ try {
   report.timeline =
     "真实Git三条提交、明确SHA关联、上下轨道、7/30天范围、提交详情、键盘打开里程碑及390px布局通过";
   await nav("需求池");
-  if(await page.locator('[data-task-version-picker]').count()) {
-    const picker=page.locator('[data-task-version-picker]');await picker.locator('select').selectOption(versionID);
-  } else await page.locator("#version-filter").selectOption(versionID);
+  await page.locator('[data-task-version-picker] [data-version-options]').selectOption(versionID);
   await page.locator(`tr[data-id="${ready.id}"]`).click();
   await page.getByRole("button", { name: "开始验收", exact: true }).waitFor();
   assert(

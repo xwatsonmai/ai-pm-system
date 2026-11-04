@@ -41,6 +41,7 @@ export function mountRequirementEditor(form, { task = {}, projectID, userID, onD
   let disposed = false, completed = false, submitting = false, pending = 0, timer, request = draft?.request, descriptionChanged = false;
   const initial = draft || task;
   form.dataset.projectVersionId=initial.project_version_id||'';
+  form.dataset.hasRequirementDraft=String(Boolean(draft));
   form.elements.title.value = initial.title || '';
   form.elements.kind.value = initial.kind || 'requirement';
   form.elements.priority.value = initial.priority || 'next';
