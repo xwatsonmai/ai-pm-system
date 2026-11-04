@@ -242,8 +242,8 @@ func (d *DB) QueryDocuments(c context.Context, q domain.ListDocumentQuery) (doma
 			args = append(args, q.ConversationID)
 		}
 	case "collaborations":
-		from = "FROM collaborations d"
-		where = "d.project_id=? AND json_extract(d.payload,'$.owner_id')=? AND json_extract(d.payload,'$.owner_kind')=?"
+		from = `FROM collaborations d JOIN documents origin ON origin.kind='run' AND origin.id=json_extract(d.payload,'$.origin_run_id') AND origin.project_id=d.project_id LEFT JOIN documents meta ON meta.kind='conversation' AND meta.project_id=d.project_id AND meta.id=COALESCE(NULLIF(json_extract(origin.payload,'$.conversation_id'),''),origin.id)`
+		where = "d.project_id=? AND json_extract(d.payload,'$.owner_id')=? AND json_extract(d.payload,'$.owner_kind')=? AND COALESCE(json_extract(meta.payload,'$.deleted_at'),0)=0"
 		args = append(args, q.ProjectID, q.UserID, q.ActorKind)
 		if q.ConversationID != "" {
 			where += " AND json_extract(d.payload,'$.conversation_id')=?"
