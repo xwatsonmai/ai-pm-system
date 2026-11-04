@@ -58,4 +58,7 @@ type ListDocumentQuery struct {
 	Active           bool
 	ExcludeQuestions bool
 	OnlyQuestions    bool
+	ArtifactMode     string
+	ExcludeGit       bool
+	ExcludeGitEvents bool
 }

@@ -106,11 +106,28 @@ func FilterContext(a domain.Actor, p domain.Project, out map[string]any) map[str
 		out["project_versions"] = []ProjectVersionSummary{}
 		out["current_milestone"] = nil
 	}
-	if !CanAccessPage(a, p, "reviews") {
-		out["artifacts"] = []domain.Artifact{}
+	if artifacts, ok := out["artifacts"].([]domain.Artifact); ok {
+		visible := []domain.Artifact{}
+		for _, v := range artifacts {
+			if VisibleArtifact(a, p, v) {
+				visible = append(visible, v)
+			}
+		}
+		out["artifacts"] = visible
 	}
 	if !CanAccessAnyPage(a, p, "tasks", "reviews", "versions", "timeline") {
 		out["events"] = []domain.Event{}
+	}
+	if !CanAccessAnyPage(a, p, "code", "git", "timeline") {
+		if events, ok := out["events"].([]domain.Event); ok {
+			visible := []domain.Event{}
+			for _, ev := range events {
+				if ev.Kind != "git_sync" {
+					visible = append(visible, ev)
+				}
+			}
+			out["events"] = visible
+		}
 	}
 	out["project"] = ProjectForActor(a, p)
 	return out
@@ -242,4 +259,27 @@ func (s *Service) RequireTaskAction(c context.Context, a domain.Actor, t domain.
 		return s.RequirePages(c, a, t.ProjectID, "tasks", "reviews")
 	}
 	return s.RequirePages(c, a, t.ProjectID, TaskActionPages(action)...)
+}
+
+// ArtifactAccess describes the existing page ownership of evidence lists.
+// Overview shows project analyses; historical task/delivery evidence belongs to
+// reviews. Raw Git observations additionally require a code-related page.
+func ArtifactAccess(a domain.Actor, p domain.Project) (string, bool) {
+	mode := "none"
+	if CanAccessPage(a, p, "reviews") {
+		mode = "all"
+	} else if CanAccessPage(a, p, "overview") {
+		mode = "overview"
+	}
+	return mode, CanAccessAnyPage(a, p, "code", "git", "timeline")
+}
+func VisibleArtifact(a domain.Actor, p domain.Project, v domain.Artifact) bool {
+	mode, git := ArtifactAccess(a, p)
+	if v.Kind == "git" && !git {
+		return false
+	}
+	if mode == "all" {
+		return true
+	}
+	return mode == "overview" && v.TaskID == "" && (v.Kind == "analysis" || v.Kind == "knowledge" || v.Kind == "question")
 }
