@@ -48,18 +48,20 @@ type TaskListStats struct {
 // resource supplied by a client as a table name or SQL expression.
 type ListDocumentQuery struct {
 	PageQuery
-	Resource         string
-	ProjectID        string
-	UserID           string
-	ActorKind        string
-	LegacyOwner      bool
-	TaskID           string
-	ConversationID   string
-	Active           bool
-	ExcludeQuestions bool
-	OnlyQuestions    bool
-	ArtifactMode     string
-	ExcludeGit       bool
-	ExcludeGitEvents bool
-	Summary          bool
+	Resource             string
+	ProjectID            string
+	UserID               string
+	ActorKind            string
+	PersonalUser         bool
+	LegacyOwner          bool
+	TaskID               string
+	ConversationID       string
+	Active               bool
+	ExcludeQuestions     bool
+	OnlyQuestions        bool
+	ExcludeOwnedTaskRuns bool
+	ArtifactMode         string
+	ExcludeGit           bool
+	ExcludeGitEvents     bool
+	Summary              bool
 }

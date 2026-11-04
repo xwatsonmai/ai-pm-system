@@ -256,6 +256,9 @@ func (s *Server) authorizeProjectRoute(r *http.Request, id string, manage bool, 
 		case "timeline":
 			pages = []string{"timeline"}
 		case "runs", "conversations", "collaborations":
+			if path[3] == "runs" && r.Method != "GET" {
+				return nil // the handler/manager authorize the submitted run kind
+			}
 			pages = []string{"chat"}
 			if path[3] == "runs" && r.Method == "GET" {
 				pages = []string{"chat", "tasks", "reviews", "versions"}
@@ -282,6 +285,8 @@ func (s *Server) authorizeProjectRoute(r *http.Request, id string, manage bool, 
 func (s *Server) authorizeMCPPage(c context.Context, a domain.Actor, name string) error {
 	pages := []string{"tasks"}
 	switch {
+	case name == "analysis_get":
+		return nil // CanReadRun checks the actual run kind, page and employee owner
 	case name == "project_get_context":
 		return nil // filtered by app.Context
 	case name == "work_list":

@@ -263,6 +263,8 @@ type Profile struct {
 // Attachment metadata is safe to return in run history; raw bytes and extracted
 // text stay in the persistence adapter and are loaded only for the model/download.
 type Attachment struct {
+	UploaderID        string                   `json:"uploader_id,omitempty"`
+	UploaderKind      string                   `json:"uploader_kind,omitempty"`
 	UploadFingerprint string                   `json:"upload_fingerprint,omitempty"`
 	Authorization     *TaskActionAuthorization `json:"authorization,omitempty"`
 	ID                string                   `json:"id"`
@@ -275,6 +277,13 @@ type Attachment struct {
 	At                int64                    `json:"at"`
 	Content           []byte                   `json:"-"`
 	Text              string                   `json:"-"`
+}
+
+// AttachmentReference is a persisted object containing attachment metadata.
+// Deleted private runs still count as bindings, but do not grant read access.
+type AttachmentReference struct {
+	Kind string
+	ID   string
 }
 type Token struct {
 	ID        string `json:"id"`

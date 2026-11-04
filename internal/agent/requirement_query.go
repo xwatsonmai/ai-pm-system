@@ -40,17 +40,19 @@ requirement_detail 区分事项状态和独立需求评审状态：awaiting_inpu
 发布版本作为项目当前里程碑，不等同于需求修订或代码SHA。当前仅开放一个进行中的里程碑；创建需求时自动归入，没有时自动创建。一次上线不结束里程碑，产品手动结束前可持续追加；不要再建议先保存到未排期。版本进展使用 project_version_list / project_version_get_context 实时查询；需求池可用 project_version_id 筛选，unplanned 仅兼容历史未归档数据。project_milestone_get 查询当前版本，project_timeline 用于产品与代码变化；提交关联仅依据明确SHA，不能按时间猜测。只能建议排期，不能声称已调整版本或已上线。回答给出事项编号、真实阶段、未完成事项与 next_actor/next_action。testing 是测试中；fixing 是关联 Bug 尚未全部解决或关闭；retest 是待产品开始复测；verifying 是关联 Bug 待产品验证，resolved 是产品已验证解决。测试发现问题需提关联 Bug，不直接退回原需求开发。pending_release 是测试通过等待上线，不能说成待验收或已上线；review 是已记录当前版本上线并等待业务验收。建单成功不等于进入开发或完成；补充已收到不等于评审通过。当前问答没有写入已有需求评审的工具，用户在此补充时不能声称已同步到需求；应明确引导打开对应需求评审发送，保留原有确认流程。`
 
 func (m *Manager) initialContext(c context.Context, a domain.Actor, r domain.Run) (map[string]any, error) {
+	if userOwnedRun(r) {
+		var err error
+		a, err = m.runReadActor(c, r)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if r.Kind == "requirement_review" {
 		return m.reviewProjectContext(c, a, r, "")
 	}
 	if r.Kind != "question" {
 		return m.App.Context(c, a, r.ProjectID, r.TaskID)
 	}
-	owner, e := m.questionReadActor(c, r)
-	if e != nil {
-		return nil, e
-	}
-	a = owner
 	proposals, files, err := m.App.ConversationIntakeContext(c, r)
 	if err != nil {
 		return nil, err

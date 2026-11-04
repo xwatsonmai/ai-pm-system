@@ -14,6 +14,16 @@ const CollaborationLease = 10 * time.Minute
 // Reconstruct the conversation owner, including personal MCP membership. Older
 // local token identities remain valid only while that exact token still exists.
 func (s *Service) CollaborationOwner(ctx context.Context, id, kind, project string) (domain.Actor, error) {
+	a, err := s.ProjectOwnerActor(ctx, id, kind, project)
+	if err != nil {
+		return a, err
+	}
+	return a, s.RequirePages(ctx, a, project, "chat")
+}
+
+// ProjectOwnerActor reconstructs a persisted human/client identity without
+// lending it any background worker capabilities.
+func (s *Service) ProjectOwnerActor(ctx context.Context, id, kind, project string) (domain.Actor, error) {
 	a := domain.Actor{ID: id, Kind: kind, ProjectID: project, Name: "会话发起人（平台 Agent 代办）"}
 	if id == "" || (kind != "human" && kind != "developer") {
 		return a, domain.ErrForbidden
@@ -40,7 +50,7 @@ func (s *Service) CollaborationOwner(ctx context.Context, id, kind, project stri
 			a.UserID = id
 		}
 	}
-	return a, s.RequirePages(ctx, a, project, "chat")
+	return a, s.CheckProject(ctx, a, project, false)
 }
 
 // SubscribeWork is only a change hint. Clients reconcile durable state after

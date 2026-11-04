@@ -68,6 +68,9 @@ func TestProjectMembershipAndCredentialBoundaries(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	if _, e = svc.EditTask(c, owner, task.Task.ID, app.TaskInput{Title: task.Task.Title, Description: task.Task.Description, Acceptance: task.Task.Acceptance, AttachmentIDs: []string{attachment.ID}, Version: task.Task.Version, RequestID: "bind-note"}); e != nil {
+		t.Fatal(e)
+	}
 	for _, route := range []struct{ method, path, body string }{
 		{"GET", "/api/projects/" + p.ID + "/context", ""}, {"GET", "/api/projects/" + p.ID + "/tasks", ""}, {"GET", "/api/projects/" + p.ID + "/code?action=tree", ""}, {"POST", "/api/projects/" + p.ID + "/sync", "{}"}, {"GET", "/api/projects/" + p.ID + "/runs", ""}, {"POST", "/api/projects/" + p.ID + "/runs", `{"kind":"question","prompt":"leak"}`}, {"GET", "/api/runs/run-private", ""}, {"POST", "/api/runs/run-private/stop", "{}"}, {"GET", "/api/tasks/" + task.Task.ID, ""}, {"PUT", "/api/tasks/" + task.Task.ID, "{}"}, {"POST", "/api/tasks/" + task.Task.ID + "/actions", "{}"}, {"GET", "/api/projects/" + p.ID + "/attachments/" + attachment.ID, ""}, {"POST", "/api/projects/" + p.ID + "/attachments", ""}, {"POST", "/api/projects/" + p.ID + "/artifacts", "{}"},
 	} {

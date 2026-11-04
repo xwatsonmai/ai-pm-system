@@ -43,6 +43,9 @@ func TestDesktopAttachmentOAuthIsReadOnlyProjectScopedAndRevocable(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
+			if _, err = svc.CreateTask(ctx, app.Human(), project.ID, app.TaskInput{Title: "Desktop attachment", AttachmentIDs: []string{file.ID}, RequestID: "bind-file"}); err != nil {
+				t.Fatal(err)
+			}
 			foreign, err := svc.SaveAttachment(ctx, app.Human(), other.ID, "foreign.md", []byte("private"))
 			if err != nil {
 				t.Fatal(err)

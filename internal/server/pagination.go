@@ -113,7 +113,7 @@ func (s *Server) pagedList(w http.ResponseWriter, r *http.Request, resource stri
 	if resource == "artifacts" && r.URL.Query().Get("delivery") == "true" {
 		resource = "delivery-evidence"
 	}
-	query := domain.ListDocumentQuery{PageQuery: q, Resource: resource, ProjectID: project, UserID: a.ID, ActorKind: a.Kind, TaskID: r.URL.Query().Get("task_id"), ConversationID: r.URL.Query().Get("conversation_id"), Summary: r.URL.Query().Get("summary") == "true", Active: r.URL.Query().Get("active") == "true"}
+	query := domain.ListDocumentQuery{PageQuery: q, Resource: resource, ProjectID: project, UserID: a.ID, ActorKind: a.Kind, PersonalUser: a.Kind == "human" || a.UserID != "", TaskID: r.URL.Query().Get("task_id"), ConversationID: r.URL.Query().Get("conversation_id"), Summary: r.URL.Query().Get("summary") == "true", Active: r.URL.Query().Get("active") == "true"}
 	if resource == "artifacts" || resource == "delivery-evidence" || resource == "events" {
 		p, e := s.App.Store.GetProject(r.Context(), project)
 		if e != nil {
@@ -138,6 +138,7 @@ func (s *Server) pagedList(w http.ResponseWriter, r *http.Request, resource stri
 		query.LegacyOwner = a.Kind == "human" && (p.OwnerID == a.ID || (p.OwnerID == "" && a.ID == "local-owner"))
 		query.ExcludeQuestions = !app.CanAccessPage(a, p, "chat")
 		query.OnlyQuestions = !app.CanAccessAnyPage(a, p, "tasks", "reviews", "versions")
+		query.ExcludeOwnedTaskRuns = !app.CanAccessPage(a, p, "tasks")
 	}
 	out, e := store.QueryDocuments(r.Context(), query)
 	if e != nil {

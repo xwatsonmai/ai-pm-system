@@ -162,7 +162,7 @@ func (m *Manager) startAtRef(c context.Context, a domain.Actor, p, t, kind, prom
 	} else if e := m.App.RequirePages(c, a, p, "tasks"); e != nil {
 		return domain.Run{}, e
 	}
-	if project.AgentReadMode == "sandbox" && m.SandboxSocket == "" && (kind != "question" || app.CanAccessPage(a, project, "code")) {
+	if project.AgentReadMode == "sandbox" && m.SandboxSocket == "" && app.CanAccessPage(a, project, "code") {
 		return domain.Run{}, errors.New("该项目已启用隔离阅读，但沙盒 runner 尚未配置；不会回退到非隔离执行")
 	}
 	if codeRef != "" && project.AgentReadMode != "sandbox" && !(review != nil && ((review.Source.BugContext != nil && review.Source.BugContext.SHA == codeRef) || (review.Source.ReviewingChange() && review.Source.RequirementChange.SHA == codeRef) || (review.Mode == "discussion" && review.Source.Submission != nil && review.Source.Submission.SHA == codeRef))) {
@@ -262,14 +262,17 @@ func (m *Manager) startAtRef(c context.Context, a domain.Actor, p, t, kind, prom
 		}
 	}
 	r.CodeRef = strings.TrimSpace(codeRef)
-	if project.AgentReadMode == "sandbox" && (kind != "question" || app.CanAccessPage(a, project, "code")) {
+	if project.AgentReadMode == "sandbox" && app.CanAccessPage(a, project, "code") {
 		r.CodeSnapshot = &domain.CodeSnapshot{Status: "preparing"}
 	}
 	if review != nil {
 		r.ReviewGeneration = review.Generation
 	}
+	if a.Kind == "human" || a.Kind == "developer" {
+		r.OwnerID, r.OwnerKind = a.ID, a.Kind
+	}
 	if kind == "question" {
-		r.OwnerID, r.OwnerKind, r.TitleStatus = a.ID, a.Kind, "pending"
+		r.TitleStatus = "pending"
 	}
 	seen := map[string]bool{}
 	total, textLength := 0, 0
@@ -278,7 +281,7 @@ func (m *Manager) startAtRef(c context.Context, a domain.Actor, p, t, kind, prom
 			return r, errors.New("消息中存在重复附件")
 		}
 		seen[id] = true
-		a, err := m.App.Store.GetAttachment(c, id)
+		a, err := m.App.AttachmentAs(c, a, p, id)
 		if err != nil {
 			return r, err
 		}
@@ -497,8 +500,8 @@ func (m *Manager) execute(ctx context.Context, r domain.Run, profile domain.Prof
 	if r.Kind == "requirement_review" {
 		r.ReviewEvidence = &domain.RequirementReviewEvidence{References: []domain.RequirementReviewReference{}}
 	}
-	if r.Kind == "question" {
-		owner, err := m.questionReadActor(ctx, r)
+	if userOwnedRun(r) {
+		owner, err := m.runReadActor(ctx, r)
 		if err != nil {
 			m.fail(ctx, r, err)
 			return
@@ -514,11 +517,11 @@ func (m *Manager) execute(ctx context.Context, r domain.Run, profile domain.Prof
 			r.CodeRef = ""
 		}
 	}
-	if r.Kind == "question" {
+	if userOwnedRun(r) {
 		guarded, stop := context.WithCancel(ctx)
 		defer stop()
 		ctx = guarded
-		go m.guardQuestionPermissions(ctx, stop, r, r.CodeSnapshot != nil)
+		go m.guardRunPermissions(ctx, stop, r, r.CodeSnapshot != nil)
 	}
 	contextData, e := m.initialContext(ctx, actor, r)
 	if e != nil {
@@ -583,7 +586,7 @@ func (m *Manager) execute(ctx context.Context, r domain.Run, profile domain.Prof
 	images := []map[string]string{}
 	reviewFiles := []map[string]any{}
 	for _, meta := range r.Attachments {
-		a, err := m.App.Store.GetAttachment(ctx, meta.ID)
+		a, err := m.App.AttachmentAs(ctx, actor, r.ProjectID, meta.ID)
 		if err != nil {
 			m.fail(ctx, r, err)
 			return
@@ -894,13 +897,13 @@ func (w *tailWriter) String() string { w.mu.Lock(); defer w.mu.Unlock(); return 
 var _ io.Writer = (*tailWriter)(nil)
 
 func (m *Manager) callTool(c context.Context, a domain.Actor, r domain.Run, callID, name string, raw json.RawMessage) (any, error) {
-	if r.Kind == "question" {
-		owner, e := m.questionReadActor(c, r)
+	if userOwnedRun(r) {
+		owner, e := m.runReadActor(c, r)
 		if e != nil {
 			return nil, e
 		}
 		a = owner
-		if e = m.authorizeQuestionTool(c, a, r, name); e != nil {
+		if e = m.authorizeRunTool(c, a, r, name); e != nil {
 			return nil, e
 		}
 	}
@@ -1037,7 +1040,7 @@ func (m *Manager) callTool(c context.Context, a domain.Actor, r domain.Run, call
 			args["sha"] = r.CodeSnapshot.SHA
 		}
 		writer := a
-		if r.Kind == "question" {
+		if userOwnedRun(r) {
 			writer = domain.Actor{ID: "platform", Name: "平台 Agent", Kind: "platform", ProjectID: r.ProjectID}
 		}
 		return m.App.Artifact(c, writer, domain.Artifact{ID: "analysis_" + r.ID + "_" + app.Hash(callID)[:12], ProjectID: r.ProjectID, TaskID: r.TaskID, Kind: args["kind"], Title: args["title"], Body: args["body"], SHA: args["sha"]})
