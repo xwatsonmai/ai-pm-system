@@ -1,4 +1,5 @@
 import importlib.util
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -39,7 +40,7 @@ class UpdateTest(unittest.TestCase):
         update.online_backup(self.root / "shared/data/ai-pm.db", snapshot)
         self.db.execute("insert into records values('later write')")
         self.db.commit()
-        with sqlite3.connect(str(snapshot)) as db:
+        with closing(sqlite3.connect(str(snapshot))) as db:
             self.assertEqual(db.execute("select value from records").fetchall(), [("committed in WAL",)])
             self.assertEqual(db.execute("pragma quick_check").fetchone()[0], "ok")
         self.assertEqual(self.db.execute("select count(*) from records").fetchone()[0], 2)

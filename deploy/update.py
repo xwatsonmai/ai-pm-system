@@ -280,6 +280,8 @@ def main():
         parser.error("Invalid release name")
     if args.mode == "prepare" and not args.image:
         parser.error("prepare requires --image")
+    if args.mode != "apply" and args.no_image_rollback:
+        parser.error("--no-image-rollback must be passed to apply")
     os.umask(0o077)
     signal.signal(signal.SIGTERM, terminate)
     root = Path(args.root).resolve()
