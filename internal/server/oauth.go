@@ -124,6 +124,24 @@ func (s *Server) oauthRoutes(mux *http.ServeMux) {
 			fail(w, e)
 			return
 		}
+		if q, explicit, e := pageQuery(r); explicit {
+			if e != nil {
+				fail(w, e)
+				return
+			}
+			store, e := s.queryStore()
+			if e != nil {
+				fail(w, e)
+				return
+			}
+			out, e := store.QueryDocuments(r.Context(), domain.ListDocumentQuery{Resource: "grants", UserID: a.ID, PageQuery: q})
+			if e != nil {
+				fail(w, e)
+				return
+			}
+			respond(w, map[string]any{"enabled": account.Enabled, "url": s.origin(r) + "/mcp", "grants": out.Items, "items": out.Items, "total": out.Total, "page": out.Page, "page_size": out.PageSize})
+			return
+		}
 		grants, e := s.App.Store.ListOAuthGrants(r.Context(), a.ID)
 		if e != nil {
 			fail(w, e)

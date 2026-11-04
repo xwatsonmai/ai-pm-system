@@ -2966,3 +2966,6 @@ details.rc-card > summary::-webkit-details-marker { display: none; }
 .channel-setup-row { display: grid; grid-template-columns: 9em 1fr; gap: 8px; padding: 4px 0; font-size: 12px; align-items: baseline; }
 .channel-setup-row code { overflow-wrap: anywhere; user-select: all; }
 @media (max-width: 640px) { .channel-setup-row { grid-template-columns: 1fr; gap: 2px; } }
+
+.list-pagination{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:16px 0;flex-wrap:wrap}.list-pagination .row{gap:8px}.list-pagination select{width:auto;min-width:64px;padding:6px}.list-pagination button{white-space:nowrap}.list-load-error{padding:12px;color:var(--danger,#b84136)}
+@media(max-width:600px){.list-pagination{align-items:flex-start}.list-pagination>.row{width:100%;flex-wrap:wrap}}

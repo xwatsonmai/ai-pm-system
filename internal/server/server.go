@@ -82,6 +82,7 @@ func (s *Server) Handler() http.Handler {
 	s.repositoryRoutes(mux)
 	s.collaborationRoutes(mux)
 	s.projectVersionRoutes(handle)
+	s.paginationRoutes(handle)
 	handle("POST /api/projects/{id}/attachments", s.uploadAttachment)
 	handle("GET /api/projects/{id}/attachments/{attachment}", s.downloadAttachment)
 	handle("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -92,6 +93,9 @@ func (s *Server) Handler() http.Handler {
 		respond(w, map[string]any{"status": "ok", "version": "0.1.0", "database": "sqlite", "runtime": "Pi SDK 1.1.0", "mode": mode})
 	})
 	handle("GET /api/projects", func(w http.ResponseWriter, r *http.Request) {
+		if s.pagedList(w, r, "projects") {
+			return
+		}
 		v, e := s.visibleProjects(r)
 		if e != nil {
 			fail(w, e)
@@ -136,6 +140,9 @@ func (s *Server) Handler() http.Handler {
 		respond(w, v)
 	})
 	handle("GET /api/projects/{id}/tasks", func(w http.ResponseWriter, r *http.Request) {
+		if s.pagedList(w, r, "tasks") {
+			return
+		}
 		v, e := s.App.Store.ListTasks(r.Context(), r.PathValue("id"))
 		if e != nil {
 			fail(w, e)
@@ -157,6 +164,9 @@ func (s *Server) Handler() http.Handler {
 		respond(w, v)
 	})
 	handle("GET /api/tasks/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if s.compactTaskContext(w, r) {
+			return
+		}
 		t, e := s.App.Store.GetTask(r.Context(), r.PathValue("id"))
 		if e != nil {
 			fail(w, e)
@@ -215,6 +225,9 @@ func (s *Server) Handler() http.Handler {
 		respond(w, v)
 	})
 	handle("GET /api/profiles", s.onlyAdmin(func(w http.ResponseWriter, r *http.Request) {
+		if s.pagedList(w, r, "profiles") {
+			return
+		}
 		v, e := s.App.Store.ListProfiles(r.Context())
 		if e != nil {
 			fail(w, e)
@@ -239,6 +252,9 @@ func (s *Server) Handler() http.Handler {
 		respond(w, v)
 	}))
 	handle("GET /api/projects/{id}/tokens", func(w http.ResponseWriter, r *http.Request) {
+		if s.pagedList(w, r, "tokens") {
+			return
+		}
 		v, e := s.App.Store.ListTokens(r.Context(), r.PathValue("id"))
 		if e != nil {
 			fail(w, e)
@@ -274,6 +290,9 @@ func (s *Server) Handler() http.Handler {
 		respond(w, map[string]bool{"ok": true})
 	})
 	handle("GET /api/projects/{id}/runs", func(w http.ResponseWriter, r *http.Request) {
+		if s.pagedList(w, r, "runs") {
+			return
+		}
 		v, e := s.App.Store.ListRuns(r.Context(), r.PathValue("id"))
 		if e != nil {
 			fail(w, e)

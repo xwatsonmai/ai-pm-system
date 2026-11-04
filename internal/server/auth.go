@@ -287,6 +287,9 @@ func (s *Server) listed(c context.Context, userID string) error {
 
 func (s *Server) accountRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/platform/accounts", s.onlyAdmin(s.withAccounts(func(w http.ResponseWriter, r *http.Request, accounts *auth.Accounts) {
+		if s.pagedList(w, r, "accounts") {
+			return
+		}
 		list, e := accounts.List(r.Context())
 		if e != nil {
 			fail(w, e)

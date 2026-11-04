@@ -56,6 +56,10 @@ func (d *DB) migrate() error {
  CREATE TABLE IF NOT EXISTS project_versions (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,name_key TEXT NOT NULL,version INTEGER NOT NULL,payload TEXT NOT NULL,UNIQUE(project_id,name_key));
  CREATE INDEX IF NOT EXISTS project_versions_project ON project_versions(project_id);
  CREATE INDEX IF NOT EXISTS tasks_project ON tasks(project_id);
+ CREATE INDEX IF NOT EXISTS tasks_list_updated ON tasks(project_id,json_extract(payload,'$.updated_at') DESC,id DESC);
+ CREATE INDEX IF NOT EXISTS tasks_list_status ON tasks(project_id,json_extract(payload,'$.status'));
+ CREATE INDEX IF NOT EXISTS tasks_list_parent ON tasks(project_id,json_extract(payload,'$.parent_requirement_id'));
+ CREATE INDEX IF NOT EXISTS documents_run_history ON documents(kind,project_id,json_extract(payload,'$.started_at') DESC,id DESC);
  CREATE TABLE IF NOT EXISTS requirement_iterations (task_id TEXT PRIMARY KEY,project_id TEXT NOT NULL,root_task_id TEXT NOT NULL,parent_task_id TEXT NOT NULL,at INTEGER NOT NULL);
  CREATE INDEX IF NOT EXISTS requirement_iterations_root ON requirement_iterations(project_id,root_task_id,at,task_id);
  CREATE TABLE IF NOT EXISTS requirement_reviews (task_id TEXT PRIMARY KEY,version INTEGER NOT NULL,payload TEXT NOT NULL);

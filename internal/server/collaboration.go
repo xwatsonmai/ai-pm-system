@@ -8,6 +8,9 @@ import (
 
 func (s *Server) collaborationRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/projects/{id}/collaborations", s.projectAccess(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.pagedList(w, r, "collaborations") {
+			return
+		}
 		v, err := s.App.ListCollaborations(r.Context(), s.actor(r), r.PathValue("id"))
 		if err != nil {
 			fail(w, err)

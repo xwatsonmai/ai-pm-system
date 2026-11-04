@@ -56,6 +56,9 @@ func (s *Server) platformRoutes(mux *http.ServeMux) {
 		respond(w, p)
 	}))
 	mux.HandleFunc("GET /api/platform/projects", s.onlyAdmin(func(w http.ResponseWriter, r *http.Request) {
+		if s.pagedList(w, r, "platform-projects") {
+			return
+		}
 		p, e := s.App.Store.ListProjects(r.Context())
 		if e != nil {
 			fail(w, e)
@@ -64,6 +67,9 @@ func (s *Server) platformRoutes(mux *http.ServeMux) {
 		respond(w, p)
 	}))
 	mux.HandleFunc("GET /api/platform/admins", s.onlyAdmin(func(w http.ResponseWriter, r *http.Request) {
+		if s.pagedList(w, r, "admins") {
+			return
+		}
 		ids, e := s.App.Store.ListPlatformAdmins(r.Context())
 		if e != nil {
 			fail(w, e)
@@ -128,6 +134,9 @@ func (s *Server) platformRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/projects/{id}/directory", s.projectAccess(http.HandlerFunc(s.directory)))
 	mux.Handle("POST /api/projects/{id}/directory/sync", s.projectAccess(http.HandlerFunc(s.directory)))
 	mux.Handle("GET /api/projects/{id}/members", s.projectAccess(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.pagedList(w, r, "members") {
+			return
+		}
 		p, e := s.App.Store.GetProject(r.Context(), r.PathValue("id"))
 		if e != nil {
 			fail(w, e)

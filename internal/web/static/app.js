@@ -2,6 +2,7 @@ import { createID as id } from "./id.mjs";
 import { BASE, appURL } from "./base.mjs";
 import { chatConversations, conversationID } from "./conversations.mjs";
 import { renderMarkdown } from "./markdown.mjs";
+import { pagerHTML, pageQuery, patchKeyedHTML } from "./pagination.mjs";
 import { patchHTML, mergeRunRefresh } from "./dom-update.mjs";
 import { requirementFormHTML, mountRequirementEditor } from "./requirement-editor.mjs";
 import { requirementReviewHTML, mountRequirementReview } from "./requirement-review.mjs";
@@ -110,7 +111,7 @@ const icon = (name) =>
   `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.list}</svg>`;
 const reviewInfo = task => reviewAttention(task, state.context?.requirement_reviews?.find(v => v.task_id === task.id));
 const needsAttention = task => !taskFinished(task) && (task.blocker || ["testing", "retest", "verifying", "pending_release", "review"].includes(task.status) || reviewInfo(task)?.attention);
-const pendingConfirmations = () => (state.context?.tasks || []).filter(t => ["待确认","待对齐","驳回待确认"].includes(reviewInfo(t)?.label)).length;
+const pendingConfirmations = () => state.context?.stats?.review_pending ?? (state.context?.tasks || []).filter(t => ["待确认","待对齐","驳回待确认"].includes(reviewInfo(t)?.label)).length;
 const reviewNavBadge = () => pendingConfirmations() ? `<span class="nav-count" title="${pendingConfirmations()} 个需求待确认或对齐">${pendingConfirmations()}</span>` : "";
 const status = (task) => {
   const info = reviewInfo(task);
@@ -171,19 +172,19 @@ let conversationMutationRevision = 0;
 const deletedConversations = new Set();
 const conversationKey = (project, conversation) => `${project}:${conversation}`;
 const chatScope = (projectID = state.project?.id) => `${state.auth?.user?.id || "local-owner"}:${projectID}`;
+function workspaceConversations() {
+ const summaries=listResult('conversations').items;
+ const local=chatConversations(state.runs),loaded=new Map(local.map(c=>[c.id,c]));
+ return [...summaries.map(c=>({...c,turns:loaded.get(c.id)?.turns||[]})),...local.filter(c=>!summaries.some(v=>v.id===c.id))];
+}
 function selectedConversation(projectID = state.project?.id) {
   const scope = chatScope(projectID);
   if (!chatSelections.has(scope)) {
     const saved = localStorage.getItem(`pm-chat:${scope}`);
-    const conversations = chatConversations(state.runs);
+    const conversations = workspaceConversations();
     chatSelections.set(scope, saved === "" ? "" : conversations.find((c) => c.id === saved)?.id || conversations[0]?.id || "");
   }
   const selected = chatSelections.get(scope);
-  if (selected && !state.runs.some((r) => r.kind === "question" && conversationID(r) === selected)) {
-    chatSelections.set(scope, "");
-    localStorage.setItem(`pm-chat:${scope}`, "");
-    return "";
-  }
   return selected;
 }
 const chatDraft = (projectID = state.project?.id, conversation = selectedConversation(projectID)) => {
@@ -200,6 +201,7 @@ function selectConversation(id) {
   if (input) input.value = chatDraft().text;
   updateComposer();
   updateChat();
+  void loadBusinessPage().catch(e=>toast(e.message));
   $(".chat-page")?.classList.remove("history-open");
   $("textarea[name=question]")?.focus();
 }
@@ -218,7 +220,7 @@ async function api(path, body, method) {
     headers: body ? { "Content-Type": "application/json" } : {},
     body: body ? JSON.stringify(body) : undefined,
   });
-  const data = await response.json();
+  const data = await response.json().catch(()=>({}));
   if (response.status === 401) {
     sessionExpired();
   }
@@ -323,39 +325,94 @@ function modal(title, body, { drawer = false, document = false, review = false }
   });
   d.showModal();
 }
+const businessLists = new Map();
+let workspaceRevision = 0;
+let taskSearchTimer;
+const emptyPage = () => ({items:[],total:0,page:1,page_size:20});
+const globalLists=new Set(["projects","profiles","platform-projects","admins","accounts","mcp-grants"]);
+const listScope = key => `${globalLists.has(key)?"global":state.project?.id || "platform"}:${key}`;
+const listResult = key => businessLists.get(listScope(key)) || emptyPage();
+function setListPage(key,page=1,size) {
+ const current=listResult(key);businessLists.set(listScope(key),{...current,page,page_size:size||current.page_size});
+}
+function listParams(key,extra={}) {
+ const current=listResult(key),params=pageQuery(current.page,current.page_size);
+ for(const [k,v] of Object.entries(extra))if(v!==''&&v!=null)params.set(k,String(v));
+ return params;
+}
+function mayReadPage(access,page) { return !access || access.pages?.includes(page); }
+async function readWorkspace(projectID,page=state.page) {
+ const revision=++workspaceRevision,scope=projectID,runsAtStart=new Map(state.runs.map(r=>[r.id,r]));
+ const [context,access]=await Promise.all([api(`/projects/${projectID}/summary`),api(`/projects/${projectID}/access`).catch(e=>{if(e.status===404)return null;throw e;})]);
+ const lists=new Map();
+ const get=async(key,path,extra={})=>{const current=businessLists.get(`${scope}:${key}`)||emptyPage();const params=pageQuery(current.page,current.page_size);for(const [k,v] of Object.entries(extra))if(v!==''&&v!=null)params.set(k,String(v));const result=await api(`${path}?${params}`);lists.set(key,result);return result;};
+ const task=async(key,status)=>get(key,`/projects/${projectID}/tasks`,{status,...(key==='tasks'?{q:state.search,kind:state.kind,project_version_id:state.versionFilter}:{})});
+ let runs=[],intakes=[],collaborations=[];
+ if(page==='tasks'&&mayReadPage(access,'tasks')){const result=await task('tasks',state.filter);context.tasks=result.items;context.requirement_reviews=result.requirement_reviews||[];}
+ if(page==='overview'&&mayReadPage(access,'overview')){
+  const taskAccess=['tasks','reviews','versions'].some(key=>mayReadPage(access,key)),eventAccess=['timeline','tasks','reviews','versions'].some(key=>mayReadPage(access,key));
+  const [tasks,events,artifacts]=await Promise.all([taskAccess?task('overview-tasks','active'):emptyPage(),eventAccess?get('overview-events',`/projects/${projectID}/events`):emptyPage(),mayReadPage(access,'reviews')?get('overview-artifacts',`/projects/${projectID}/artifacts`):emptyPage()]);
+  context.tasks=tasks.items;context.requirement_reviews=tasks.requirement_reviews||[];context.events=events.items.slice().reverse();context.artifacts=artifacts.items;
+ }
+ if(page==='reviews'&&mayReadPage(access,'reviews')){
+  const results=await Promise.all([task('testing','testing_queue'),task('releases','pending_release'),task('acceptance','review'),get('evidence',`/projects/${projectID}/artifacts`,{delivery:'true'})]);
+  context.tasks=results.slice(0,3).flatMap(result=>result.items);context.requirement_reviews=results.slice(0,3).flatMap(result=>result.requirement_reviews||[]);context.artifacts=results[3].items;
+ }
+ if(page==='chat'&&mayReadPage(access,'chat')){
+  const conversations=await get('conversations',`/projects/${projectID}/conversations`);
+  const saved=chatSelections.get(chatScope(projectID))??localStorage.getItem(`pm-chat:${chatScope(projectID)}`);
+  const selected=saved===''?'':saved||conversations.items[0]?.id||'';
+  if(selected){
+   const [messages,ints,cols]=await Promise.all([get(`messages:${selected}`,`/projects/${projectID}/runs`,{conversation_id:selected}),get(`intakes:${selected}`,`/projects/${projectID}/requirement-intakes`,{conversation_id:selected}),get(`collaborations:${selected}`,`/projects/${projectID}/collaborations`,{conversation_id:selected})]);
+   runs=messages.items;intakes=ints.items;collaborations=cols.items;
+  }
+  chatSelections.set(chatScope(projectID),selected);
+ }
+ return {revision,projectID,page,context,access,lists,runs,intakes,collaborations,runsAtStart};
+}
+function applyWorkspace(snapshot) {
+ if(snapshot.revision!==workspaceRevision)return false;
+ state.context=snapshot.context;state.project=snapshot.context.project;state.project_access=snapshot.access;
+ for(const [key,value] of snapshot.lists)businessLists.set(`${snapshot.projectID}:${key}`,value);
+ state.runs=mergeRunRefresh(snapshot.runs,state.runs,snapshot.runsAtStart).filter(r=>!deletedConversations.has(conversationKey(snapshot.projectID,conversationID(r))));
+ state.intakes=snapshot.intakes;state.collaborations=snapshot.collaborations;return true;
+}
+async function loadBusinessPage() {
+ if(!state.project)return;
+ const projectID=state.project.id,page=state.page,snapshot=await readWorkspace(projectID,page);
+ if(state.project?.id!==projectID||state.page!==page)return;
+ if(applyWorkspace(snapshot))updateBusinessPage();
+}
+function updateBusinessPage() {
+ if(state.page==='chat'){updateChat();return;}
+ if(state.page==='timeline'){timelineUI.refreshIfNeeded();return;}
+ const renderer={tasks:tasksPage,reviews:reviewsPage,overview,platform:platformPage}[state.page];
+ if(renderer)patchKeyedHTML($('#page'),renderer());
+ patchKeyedHTML($('.requirement-nav-badge'),reviewNavBadge());
+ const reviewButton=$('[data-action=navigate][data-page=reviews]');
+ if(reviewButton){const count=state.context?.stats?.by_status?.review||0;let badge=$('.nav-count',reviewButton);if(count){if(!badge){badge=document.createElement('span');badge.className='nav-count';reviewButton.append(badge);}if(badge.textContent!==String(count))badge.textContent=count;}else badge?.remove();}
+ updateRepositoryStatus();
+}
 async function refresh() {
-  state.projects = await api("/projects");
-  state.auth = await api("/auth/session");
-  state.platform = await api("/agent/status");
-  state.profiles = isPlatformAdmin() ? await api("/profiles") : [];
-  if (state.page === "platform" && isPlatformAdmin()) {
-    [state.platformProjects, state.admins, state.accounts, state.channels] = await Promise.all([api("/platform/projects"), api("/platform/admins"), state.auth?.login === "password" ? api("/platform/accounts") : [], api("/platform/channels").then((r) => r.items).catch(() => [])]);
-  }
-  const saved = localStorage.getItem("pm-project");
-  state.project =
-    state.projects.find((p) => p.id === (state.project?.id || saved)) ||
-    state.projects[0] ||
-    null;
-  if (state.project) {
-    localStorage.setItem("pm-project", state.project.id);
-    [state.context, state.runs, state.collaborations, state.intakes] = await Promise.all([
-      api(`/projects/${state.project.id}/context`),
-      api(`/projects/${state.project.id}/runs`),
-      api(`/projects/${state.project.id}/collaborations`),
-      api(`/projects/${state.project.id}/requirement-intakes`),
-    ]);
-    state.project = state.context.project;
-  } else {
-    state.context = null;
-    state.runs = [];
-    state.collaborations = [];
-    state.intakes = [];
-  }
+ const [projects,auth,platform]=await Promise.all([api(`/projects?${listParams('projects')}`),api('/auth/session'),api('/agent/status')]);
+ state.auth=auth;state.platform=platform;state.projects=projects.items;businessLists.set(listScope('projects'),projects);
+ if(isPlatformAdmin()){
+  const profiles=await api(`/profiles?${listParams('profiles')}`);state.profiles=profiles.items;businessLists.set(listScope('profiles'),profiles);
+ }
+ if(state.page==='platform'&&isPlatformAdmin()){
+  const [projects,admins,accounts,channels]=await Promise.all([api(`/platform/projects?${listParams('platform-projects')}`),api(`/platform/admins?${listParams('admins')}`),state.auth?.login==='password'?api(`/platform/accounts?${listParams('accounts')}`):emptyPage(),api('/platform/channels').then(r=>r.items)]);
+  state.platformProjects=projects.items;state.admins=admins.items;state.accounts=accounts.items;state.channels=channels;
+  for(const [key,value] of [['platform-projects',projects],['admins',admins],['accounts',accounts]])businessLists.set(listScope(key),value);
+ }
+ const saved=localStorage.getItem('pm-project');
+ state.project=state.projects.find(p=>p.id===(state.project?.id||saved))||state.project||(saved?{id:saved}:null)||state.projects[0]||null;
+ if(state.project){localStorage.setItem('pm-project',state.project.id);applyWorkspace(await readWorkspace(state.project.id));}
+ else {state.context=null;state.runs=[];state.collaborations=[];state.intakes=[];state.project_access=null;}
 }
 function projectSwitcher() {
   const project = state.project;
   const name = project?.name || "选择项目";
-  return `<div class="project-picker"><button type="button" id="project-switch" class="project-switch" data-action="toggle-projects" aria-label="切换项目，当前：${escape(name)}" aria-haspopup="menu" aria-expanded="false" aria-controls="project-menu"><span class="project-symbol" aria-hidden="true">${project ? escape([...name][0]) : icon("folder")}</span><span class="project-switch-label"><small>当前项目</small><strong>${escape(name)}</strong></span>${icon("chevron")}</button><div class="project-menu" id="project-menu" role="menu" aria-label="项目列表" hidden><div class="project-menu-title" role="presentation">切换项目</div><div class="project-options" role="none">${state.projects.length ? state.projects.map((p) => `<button type="button" class="project-option" role="menuitemradio" aria-checked="${p.id === project?.id}" tabindex="-1" data-action="switch-project" data-id="${escape(p.id)}" title="${escape(p.name)}"><span class="project-symbol" aria-hidden="true">${escape([...p.name][0])}</span><span class="project-option-name">${escape(p.name)}</span>${p.id === project?.id ? icon("tick") : ""}</button>`).join("") : '<p class="project-menu-empty" role="presentation">还没有项目</p>'}</div><div class="project-menu-divider" role="separator"></div><button type="button" class="project-create" role="menuitem" tabindex="-1" data-action="new-project">${icon("plus")}<span>创建新项目</span></button></div></div>`;
+  return `<div class="project-picker"><button type="button" id="project-switch" class="project-switch" data-action="toggle-projects" aria-label="切换项目，当前：${escape(name)}" aria-haspopup="menu" aria-expanded="false" aria-controls="project-menu"><span class="project-symbol" aria-hidden="true">${project ? escape([...name][0]) : icon("folder")}</span><span class="project-switch-label"><small>当前项目</small><strong>${escape(name)}</strong></span>${icon("chevron")}</button><div class="project-menu" id="project-menu" role="menu" aria-label="项目列表" hidden><div class="project-menu-title" role="presentation">切换项目</div><div class="project-options" role="none">${state.projects.length ? state.projects.map((p) => `<button type="button" class="project-option" role="menuitemradio" aria-checked="${p.id === project?.id}" tabindex="-1" data-action="switch-project" data-id="${escape(p.id)}" title="${escape(p.name)}"><span class="project-symbol" aria-hidden="true">${escape([...p.name][0])}</span><span class="project-option-name">${escape(p.name)}</span>${p.id === project?.id ? icon("tick") : ""}</button>`).join("") : '<p class="project-menu-empty" role="presentation">还没有项目</p>'}</div>${pagerHTML(listResult("projects"),"projects")}<div class="project-menu-divider" role="separator"></div><button type="button" class="project-create" role="menuitem" tabindex="-1" data-action="new-project">${icon("plus")}<span>创建新项目</span></button></div></div>`;
 }
 function projectMenuOpen() {
   return $("#project-switch")?.getAttribute("aria-expanded") === "true";
@@ -378,37 +435,14 @@ function openProjectMenu(last = false) {
   (last ? items.at(-1) : $("[aria-checked=true]", menu) || items[0])?.focus();
 }
 async function switchProject(projectID) {
-  if (state.switchingProject) return;
-  closeProjectMenu(true);
-  if (
-    !state.projects.some((p) => p.id === projectID) ||
-    state.project?.id === projectID
-  )
-    return;
-  state.switchingProject = true;
-  $("#project-switch").disabled = true;
-  try {
-    const [context, runs, collaborations, intakes] = await Promise.all([
-      api(`/projects/${projectID}/context`),
-      api(`/projects/${projectID}/runs`),
-      api(`/projects/${projectID}/collaborations`),
-      api(`/projects/${projectID}/requirement-intakes`),
-    ]);
-    stopRunUpdates();
-    state.project = context.project;
-    state.versionFilter = "";
-    state.context = context;
-    state.runs = runs;
-    state.collaborations = collaborations;
-    state.intakes = intakes;
-    localStorage.setItem("pm-project", projectID);
-    render();
-    pollActiveRuns();
-    $("#project-switch")?.focus();
-  } finally {
-    state.switchingProject = false;
-    if ($("#project-switch")) $("#project-switch").disabled = false;
-  }
+ if(state.switchingProject||state.project?.id===projectID)return;
+ closeProjectMenu(true);state.switchingProject=true;workspaceRevision++;
+ if($('#project-switch'))$('#project-switch').disabled=true;
+ try{
+  state.versionFilter='';state.search='';state.filter='';
+  const snapshot=await readWorkspace(projectID);stopRunUpdates();state.runs=[];
+  applyWorkspace(snapshot);localStorage.setItem('pm-project',projectID);render();pollActiveRuns();$('#project-switch')?.focus();
+ }finally{state.switchingProject=false;if($('#project-switch'))$('#project-switch').disabled=false;}
 }
 function render() {
   if (signInPending()) {
@@ -417,7 +451,7 @@ function render() {
   }
   const project = state.project;
   const count =
-    state.context?.tasks.filter((t) => t.status === "review").length || 0;
+    state.context?.stats?.by_status?.review || 0;
   $("#app").innerHTML =
     `<div class="layout"><aside class="sidebar"><div class="brand"><div class="brand-mark">智</div><div><div class="brand-name">智驱</div><div class="brand-sub">AI-NATIVE PM</div></div></div>${projectSwitcher()}<div class="side-caption">工作空间</div><nav class="nav">${Object.entries(paths).filter(([key]) => !["mcp", "platform"].includes(key))
       .map(
@@ -452,7 +486,7 @@ setInterval(async () => {
     Object.assign(state.project, receipt);
     if (state.context?.project?.id === projectID) Object.assign(state.context.project, receipt);
     updateRepositoryStatus();
-    if (!p.syncing && !$("dialog") && ["overview", "code"].includes(state.page)) renderPage();
+    if(!p.syncing){if(state.page==="overview")updateBusinessPage();else if(state.page==="code"&&!$("#file-list button"))void loadFiles();}
   } catch { /* Keep the last known state until the next successful status read. */ }
   finally { repositoryRefreshing = false; }
 }, 2500);
@@ -504,7 +538,7 @@ function renderPage() {
   updateRepositoryStatus();
 }
 function taskRow(t) {
-  return `<div class="list-row" role="button" tabindex="0" data-action="open-task" data-id="${t.id}"><i class="status-icon ${t.status}"></i><div class="grow"><div class="title">${escape(t.title)}</div><div class="subtitle">${t.kind === "bug" ? (t.parent_requirement_id ? "需求测试 Bug" : "平台 Bug") : "迭代需求"} · ${short(t.id)}${t.owner ? " · " + escape(t.owner) : ""}</div></div><div class="right">${t.blocker ? '<span class="badge blocked">阻塞</span>' : status(t)}</div></div>`;
+  return `<div class="list-row" data-key="${t.id}" role="button" tabindex="0" data-action="open-task" data-id="${t.id}"><i class="status-icon ${t.status}"></i><div class="grow"><div class="title">${escape(t.title)}</div><div class="subtitle">${t.kind === "bug" ? (t.parent_requirement_id ? "需求测试 Bug" : "平台 Bug") : "迭代需求"} · ${short(t.id)}${t.owner ? " · " + escape(t.owner) : ""}</div></div><div class="right">${t.blocker ? '<span class="badge blocked">阻塞</span>' : status(t)}</div></div>`;
 }
 function overview() {
   const tasks = state.context.tasks;
@@ -515,21 +549,22 @@ function overview() {
         ({ now: 0, next: 1, later: 2 })[a.priority] -
         { now: 0, next: 1, later: 2 }[b.priority],
     )
-    .slice(0, 7);
+    ;
   const evidence = state.context.artifacts.find(
     (a) => a.kind === "analysis" && !a.task_id,
   );
   const pending = tasks.filter(
     (t) => needsAttention(t),
   );
-  const events = [...state.context.events].reverse().slice(0, 6);
+  const events = [...state.context.events].reverse();
+ const counts=state.context.stats?.by_status||{},activeCount=Object.entries(counts).filter(([key])=>!["done","resolved","closed","rejected","canceled"].includes(key)).reduce((n,[,v])=>n+v,0);
   return `<div class="page">${heading("项目概览", escape(state.project.description || "跟进工作，确认结果。"), action("sync", icon("refresh") + " 同步仓库", "ghost"))}<div class="stats">${[
-    ["推进中", active.length, "tasks"],
-    ["需要我处理", pending.length, "attention"],
-    ["测试中", tasks.filter((t) => ["testing","fixing","retest","verifying"].includes(t.status)).length, "reviews"],
-    ["待上线", tasks.filter((t) => t.status === "pending_release").length, "pending_release"],
-    ["等待验收", tasks.filter((t) => t.status === "review").length, "reviews"],
-    ["已验收", tasks.filter((t) => t.status === "done").length, "done"],
+    ["推进中", activeCount, "tasks"],
+    ["需要我处理", state.context.stats?.attention||0, "attention"],
+    ["测试中", ["testing","fixing","retest","verifying"].reduce((n,k)=>n+(counts[k]||0),0), "reviews"],
+    ["待上线", counts.pending_release||0, "pending_release"],
+    ["等待验收", counts.review||0, "reviews"],
+    ["已验收", counts.done||0, "done"],
   ]
     .map(
       ([label, value, page], i) =>
@@ -537,31 +572,16 @@ function overview() {
     )
     .join(
       "",
-    )}</div><div class="overview-grid"><div><h2 class="section-label">当前工作 ${action("navigate", "查看全部 " + icon("arrow"), "ghost", 'data-page="tasks"')}</h2>${now.length ? now.map(taskRow).join("") : empty("当前没有推进中的需求", "提出一个需求，或记录一个需要处理的问题。", action("new-task", icon("plus") + " 创建需求"))}<div class="divider"></div><h2 class="section-label">项目进度解读 ${action("analyze", "更新分析", "ghost", 'data-kind="progress"')}</h2>${evidence ? `<div class="prewrap">${escape(evidence.body)}</div><p class="hint">平台 Agent · ${date(evidence.at)} · 结论依据可在记录中查看</p>` : `<div class="context-note">${state.platform.configured ? "点击更新分析，让平台 Agent 对照需求和 Git 变化解释进度。" : "由平台管理员配置 Agent 模型后，平台 Agent 将结合需求、Git 与开发汇报分析进度。"}</div>`}</div><aside class="context-column"><section><h2 class="section-label">仓库观察</h2><p class="context-note"><strong>${escape(state.project.branch)}</strong><br>${state.project.sha ? `<span class="mono">${state.project.sha.slice(0, 12)}</span>` : "尚未读取代码"}<br>最近同步 ${date(state.project.synced_at)}</p>${action("navigate", "查看代码与变更 " + icon("arrow"), "inline-link", 'data-page="code"')}<p class="page-note">代码状态与上线记录分别记录。<br>按需求确认上线版本和环境。</p></section><section><h2 class="section-label">最近动态</h2>${events.length ? events.map((e) => `<div class="event"><p>${escape(e.body || e.kind)}</p><time>${escape(e.actor)} · ${date(e.at)}</time></div>`).join("") : '<p class="context-note">项目活动会记录在这里。</p>'}</section></aside></div></div>`;
+    )}</div><div class="overview-grid"><div><h2 class="section-label">当前工作 ${action("navigate", "查看全部 " + icon("arrow"), "ghost", 'data-page="tasks"')}</h2>${now.length ? now.map(taskRow).join("") : empty("当前没有推进中的需求", "提出一个需求，或记录一个需要处理的问题。", action("new-task", icon("plus") + " 创建需求"))}${pagerHTML(listResult("overview-tasks"),"overview-tasks")}<div class="divider"></div><h2 class="section-label">项目进度解读 ${action("analyze", "更新分析", "ghost", 'data-kind="progress"')}</h2>${evidence ? `<div class="prewrap">${escape(evidence.body)}</div><p class="hint">平台 Agent · ${date(evidence.at)} · 结论依据可在记录中查看</p>` : `<div class="context-note">${state.platform.configured ? "点击更新分析，让平台 Agent 对照需求和 Git 变化解释进度。" : "由平台管理员配置 Agent 模型后，平台 Agent 将结合需求、Git 与开发汇报分析进度。"}</div>`}</div><aside class="context-column"><section><h2 class="section-label">仓库观察</h2><p class="context-note"><strong>${escape(state.project.branch)}</strong><br>${state.project.sha ? `<span class="mono">${state.project.sha.slice(0, 12)}</span>` : "尚未读取代码"}<br>最近同步 ${date(state.project.synced_at)}</p>${action("navigate", "查看代码与变更 " + icon("arrow"), "inline-link", 'data-page="code"')}<p class="page-note">代码状态与上线记录分别记录。<br>按需求确认上线版本和环境。</p></section><section><h2 class="section-label">最近动态</h2>${events.length ? events.map((e) => `<div class="event" data-key="event:${e.seq}"><p>${escape(e.body || e.kind)}</p><time>${escape(e.actor)} · ${date(e.at)}</time></div>`).join("") : '<p class="context-note">项目活动会记录在这里。</p>'}${pagerHTML(listResult('overview-events'),'overview-events')}</section></aside></div></div>`;
 }
-function filteredTasks() {
-  return state.context.tasks.filter(
-    (t) =>
-      (!state.filter ||
-        (state.filter === "attention"
-          ? needsAttention(t)
-          : state.filter === "review_pending" ? ["待确认","待对齐","驳回待确认"].includes(reviewInfo(t)?.label) : t.status === state.filter)) &&
-      (!state.kind || t.kind === state.kind) &&
-      (!state.versionFilter||(t.project_version_id||'unplanned')===state.versionFilter) &&
-      (!state.search ||
-        [t.title, t.description, t.owner, t.id]
-          .join(" ")
-          .toLowerCase()
-          .includes(state.search.toLowerCase())),
-  );
-}
+function filteredTasks() { return state.context?.tasks || []; }
 function tasksTable() {
   const tasks=filteredTasks();
   if(!tasks.length)return empty("没有符合条件的需求","调整筛选，或创建一个新需求。");
-  const table=items=>`<div class="table-scroll"><table class="task-table"><thead><tr><th class="task-checkbox">选择</th><th>状态</th><th>需求</th><th>优先级</th><th>负责人</th><th>更新</th></tr></thead><tbody>${items.map(t=>`<tr tabindex="0" data-action="open-task" data-id="${t.id}"><td><input type="checkbox" data-plan-task value="${t.id}" aria-label="选择需求 ${escape(t.title)}" ${taskFinished(t)||t.status==='review'?'disabled':''}></td><td>${status(t)}</td><td class="task-title"><span class="badge ${t.kind==='bug'?'bug':''}">${t.kind==='bug'?(t.parent_requirement_id?'需求测试 Bug':'平台 Bug'):'迭代需求'}</span> ${escape(t.title)}${t.blocker?' <span class="badge blocked">阻塞</span>':''}<div class="task-id">${short(t.id)}${t.iteration?` · 迭代自 ${short(t.iteration.parent_task_id)}`:""} · R${t.revision} · ${escape(versionName(state.context.project_versions||[],t.project_version_id))}</div></td><td><span class="priority-mark ${t.priority}">${t.priority === "now" ? "▰▰▰" : t.priority === "next" ? "▰▰▱" : "▰▱▱"}</span> ${priorities[t.priority]}</td><td>${escape(t.owner||'未认领')}</td><td class="muted small">${date(t.updated_at)}</td></tr>`).join('')}</tbody></table></div>`;
-  if(!state.versionGrouping||state.versionFilter)return table(tasks)+`<div class="queue-footer">${tasks.length} 个需求</div>`;
-  const groups=[...(state.context.project_versions||[]).map(v=>({id:v.id,name:v.name})),{id:'',name:'未排期'}];
-  return groups.map(g=>{const items=tasks.filter(t=>(t.project_version_id||'')===g.id);return items.length?`<section class="pv-pool-group"><div class="pv-pool-heading"><h2>${escape(g.name)} <span class="muted small">${items.length} 项</span></h2>${g.id?action('pv-open','查看版本','ghost',`data-id="${g.id}"`):''}</div>${table(items)}</section>`:''}).join('')+`<div class="queue-footer">${tasks.length} 个需求 · 以实际验收结果确认业务完成</div>`;
+  const table=items=>`<div class="table-scroll"><table class="task-table"><thead><tr><th class="task-checkbox">选择</th><th>状态</th><th>需求</th><th>优先级</th><th>负责人</th><th>更新</th></tr></thead><tbody>${items.map(t=>`<tr data-key="${t.id}" tabindex="0" data-action="open-task" data-id="${t.id}"><td><input type="checkbox" data-plan-task value="${t.id}" aria-label="选择需求 ${escape(t.title)}" ${taskFinished(t)||t.status==='review'?'disabled':''}></td><td>${status(t)}</td><td class="task-title"><span class="badge ${t.kind==='bug'?'bug':''}">${t.kind==='bug'?(t.parent_requirement_id?'需求测试 Bug':'平台 Bug'):'迭代需求'}</span> ${escape(t.title)}${t.blocker?' <span class="badge blocked">阻塞</span>':''}<div class="task-id">${short(t.id)}${t.iteration?` · 迭代自 ${short(t.iteration.parent_task_id)}`:""} · R${t.revision} · ${escape(versionName(state.context.project_versions||[],t.project_version_id))}</div></td><td><span class="priority-mark ${t.priority}">${t.priority === "now" ? "▰▰▰" : t.priority === "next" ? "▰▰▱" : "▰▱▱"}</span> ${priorities[t.priority]}</td><td>${escape(t.owner||'未认领')}</td><td class="muted small">${date(t.updated_at)}</td></tr>`).join('')}</tbody></table></div>`;
+  if(!state.versionGrouping||state.versionFilter)return table(tasks)+`<div class="queue-footer">${listResult("tasks").total} 个需求</div>`;
+  const groups=[...new Set(tasks.map(t=>t.project_version_id||''))].map(id=>({id,name:versionName(state.context.project_versions||[],id)}));
+  return groups.map(g=>{const items=tasks.filter(t=>(t.project_version_id||'')===g.id);return items.length?`<section class="pv-pool-group" data-key="version:${escape(g.id)}"><div class="pv-pool-heading"><h2>${escape(g.name)} <span class="muted small">${items.length} 项</span></h2>${g.id?action('pv-open','查看版本','ghost',`data-id="${g.id}"`):''}</div>${table(items)}</section>`:''}).join('')+`<div class="queue-footer">${listResult("tasks").total} 个需求 · 以实际验收结果确认业务完成</div>`;
 }
 function tasksPage() {
   return `<div class="page">${heading("需求池", "集中管理迭代需求与 Bug 修复。评审在后台进行，有结论后标记待确认。", action("new-task", icon("plus") + " 创建需求", "primary"))}<div class="toolbar"><input id="task-search" placeholder="搜索标题、描述或负责人…" aria-label="搜索需求" value="${escape(state.search)}"><select id="task-filter" aria-label="筛选状态"><option value="">所有状态</option><option value="attention" ${state.filter === "attention" ? "selected" : ""}>需要我处理</option><option value="review_pending" ${state.filter === "review_pending" ? "selected" : ""}>待确认${pendingConfirmations() ? `（${pendingConfirmations()}）` : ""}</option>${Object.entries(
@@ -573,7 +593,7 @@ function tasksPage() {
     )
     .join(
       "",
-    )}</select><select id="kind-filter" aria-label="筛选类型"><option value="">所有类型</option><option value="requirement" ${state.kind === "requirement" ? "selected" : ""}>迭代需求</option><option value="bug" ${state.kind === "bug" ? "selected" : ""}>Bug 修复</option></select><select id="version-filter" aria-label="筛选目标版本">${versionOptions(state.context.project_versions||[],state.versionFilter,{all:true})}</select></div><div class="pv-pool-tools">${action("pv-assign-selected","归入当前里程碑")}${action("toggle-version-group",state.versionGrouping?"切换平铺列表":"按版本分组","ghost")}</div><div id="task-table">${tasksTable()}</div></div>`;
+    )}</select><select id="kind-filter" aria-label="筛选类型"><option value="">所有类型</option><option value="requirement" ${state.kind === "requirement" ? "selected" : ""}>迭代需求</option><option value="bug" ${state.kind === "bug" ? "selected" : ""}>Bug 修复</option></select><select id="version-filter" aria-label="筛选目标版本">${versionOptions(state.context.project_versions||[],state.versionFilter,{all:true})}</select></div><div class="pv-pool-tools">${action("pv-assign-selected","归入当前里程碑")}${action("toggle-version-group",state.versionGrouping?"切换平铺列表":"按版本分组","ghost")}</div><div id="task-table">${tasksTable()}</div>${pagerHTML(listResult("tasks"),"tasks")}</div>`;
 }
 function reviewsPage() {
   const tasks = state.context.tasks.filter((t) => t.status === "review");
@@ -581,12 +601,12 @@ function reviewsPage() {
   const artifacts = [...state.context.artifacts, ...state.context.tasks.filter(t => t.deployment).map(t => ({...t.deployment, kind:"deployment", title:`${t.title} · 上线记录 · R${t.deployment.revision}`, source:t.deployment.source === "developer" ? "开发汇报" : t.deployment.actor}))].filter((a) =>
     ["acceptance", "deployment", "test"].includes(a.kind),
   ).sort((a,b) => b.at - a.at);
-  return `<div class="page">${heading("验收与交付", "对照具体版本验证业务结果。", action("navigate", "按项目版本组织上线", "", 'data-page="versions"') + action("package", "建立验收包") + action("evidence", "添加交付证据", "primary"))}${testingQueueHTML()}<h2 class="section-label">等待上线 <span class="muted small">${releases.length} 个需求</span></h2><div class="review-list">${releases.length ? releases.map(t => `<div class="review-item"><div class="grow"><div class="title">${escape(t.title)}</div><div class="small muted">开发已完成 · ${escape(t.submission?.sha || "")} · R${t.revision}</div></div>${action("mark-deployed", "确认已上线", "", `data-id="${t.id}"`)}</div>`).join("") : empty("暂时没有等待上线的需求", "测试通过后进入这里，确认实际上线后再验收。")}</div><div class="divider"></div><h2 class="section-label">等待业务验收 <span class="muted small">${tasks.length} 个需求</span></h2><div class="review-list">${tasks.length ? tasks.map((t) => `<div class="review-item"><input type="checkbox" class="package-select" value="${t.id}" aria-label="选择 ${escape(t.title)}"><div class="grow"><div class="title">${escape(t.title)}</div><div class="small muted">${escape(t.submission?.sha || "")} · ${escape(t.deployment?.environment || "上线环境未说明")} · R${t.revision}</div></div>${action("review", "开始验收", "", 'data-id="' + t.id + '"')}</div>`).join("") : empty("暂时没有等待验收的需求", "当前版本确认已上线后，会出现在这里。")}</div><div class="divider"></div><h2 class="section-label">验收包与交付证据</h2>${
+  return `<div class="page">${heading("验收与交付", "对照具体版本验证业务结果。", action("navigate", "按项目版本组织上线", "", 'data-page="versions"') + action("package", "建立验收包") + action("evidence", "添加交付证据", "primary"))}${testingQueueHTML()}<h2 class="section-label">等待上线 <span class="muted small">${listResult("releases").total} 个需求</span></h2><div class="review-list">${releases.length ? releases.map(t => `<div class="review-item" data-key="task:${t.id}"><div class="grow"><div class="title">${escape(t.title)}</div><div class="small muted">开发已完成 · ${escape(t.submission?.sha || "")} · R${t.revision}</div></div>${action("mark-deployed", "确认已上线", "", `data-id="${t.id}"`)}</div>`).join("") : empty("暂时没有等待上线的需求", "测试通过后进入这里，确认实际上线后再验收。")}</div>${pagerHTML(listResult("releases"),"releases")}<div class="divider"></div><h2 class="section-label">等待业务验收 <span class="muted small">${listResult("acceptance").total} 个需求</span></h2><div class="review-list">${tasks.length ? tasks.map((t) => `<div class="review-item" data-key="acceptance:${t.id}"><input type="checkbox" class="package-select" value="${t.id}" aria-label="选择 ${escape(t.title)}"><div class="grow"><div class="title">${escape(t.title)}</div><div class="small muted">${escape(t.submission?.sha || "")} · ${escape(t.deployment?.environment || "上线环境未说明")} · R${t.revision}</div></div>${action("review", "开始验收", "", 'data-id="' + t.id + '"')}</div>`).join("") : empty("暂时没有等待验收的需求", "当前版本确认已上线后，会出现在这里。")}</div>${pagerHTML(listResult("acceptance"),"acceptance")}<div class="divider"></div><h2 class="section-label">验收包与交付证据</h2>${
     artifacts.length
       ? artifacts
           .map(
             (a) =>
-              `<div class="record"><div class="record-header"><span>${escape(a.title || a.kind)} · ${escape(a.source)}</span><time>${date(a.at)}</time></div><div class="small mono muted">${escape(a.environment)} ${escape(a.sha)}</div><div class="prewrap">${escape(a.body)}</div>${
+              `<div class="record" data-key="artifact:${escape(a.id||a.release_id||String(a.at))}"><div class="record-header"><span>${escape(a.title || a.kind)} · ${escape(a.source)}</span><time>${date(a.at)}</time></div><div class="small mono muted">${escape(a.environment)} ${escape(a.sha)}</div><div class="prewrap">${escape(a.body)}</div>${
                 a.kind === "acceptance" && Array.isArray(a.data)
                   ? a.data
                       .map((snapshot) => {
@@ -605,7 +625,7 @@ function reviewsPage() {
           )
           .join("")
       : '<p class="context-note">尚未提供部署证据，环境状态为未知。</p>'
-  }</div>`;
+  }${pagerHTML(listResult('evidence'),'evidence')}</div>`;
 }
 function runProcessHTML(r, open) {
   const active = ["running", "queued"].includes(r.status);
@@ -663,32 +683,18 @@ document.addEventListener("scroll", (e) => { if (e.target.matches?.(".chat-feed"
 
 let chatRefreshing = false;
 async function refreshChatActivity() {
-  if (chatRefreshing || document.hidden || !state.project || state.switchingProject) return;
-  chatRefreshing = true;
-  const projectID = state.project.id, mutation = conversationMutationRevision;
-  const before = new Map(state.runs.map((r) => [r.id, r]));
-  try {
-    const [runs, collaborations, context, intakes] = await Promise.all([api(`/projects/${projectID}/runs`), api(`/projects/${projectID}/collaborations`), api(`/projects/${projectID}/context`), api(`/projects/${projectID}/requirement-intakes`)]);
-    if (state.project?.id !== projectID || mutation !== conversationMutationRevision) return;
-    state.runs = mergeRunRefresh(runs, state.runs, before).filter((r) => !deletedConversations.has(conversationKey(projectID, conversationID(r))));
-    state.intakes = mergeIntakes(intakes, state.intakes);
-    state.collaborations = collaborations;
-    state.context = context;
-    patchHTML($(".requirement-nav-badge"), reviewNavBadge());
-    if (state.page === "chat") updateChat();
-    pollActiveRuns();
-  } catch { /* Durable results are reconciled on the next refresh. */ }
-  finally { chatRefreshing = false; }
+ if(chatRefreshing||document.hidden||!state.project||state.switchingProject)return;
+ chatRefreshing=true;try{await loadBusinessPage();pollActiveRuns();}catch{}finally{chatRefreshing=false;}
 }
 function chatIntro() {
   return `<div class="chat-intro"><div class="chat-icon">${icon("spark")}</div><h2>开始一个新对话</h2><p>询问项目进度、现有规则，或描述你想改进的地方。<br>Agent 会整理需求或 Bug 并建议创建；你同意后，Bug 直接待开发认领，迭代需求进入评审。</p><div class="suggestions">${["当前还有哪些工作需要我处理？", "帮我整理一个需求", "最近的代码变化影响了什么？"].map((q) => action("suggestion", q, "", `data-question="${q}"`)).join("")}</div></div>`;
 }
 function conversationListHTML() {
-  const conversations = chatConversations(state.runs);
-  return conversations.length ? conversations.map((c) => `<div class="conversation-row ${c.id === selectedConversation() ? "selected" : ""}"><button type="button" class="conversation-item" data-action="select-conversation" data-id="${escape(c.id)}" aria-current="${c.id === selectedConversation()}" title="${escape(c.title)}"><span class="conversation-title">${escape(c.title)}${hasUnreadReply(c) ? ' <span class="reply-unread">新结果</span>' : ""}</span><span class="conversation-meta">${c.active ? '<i class="conversation-active" aria-label="正在回答"></i>' : ""}${c.naming ? "正在命名…" : c.legacy ? "历史对话 · " + date(c.updatedAt) : date(c.updatedAt)}</span></button><div class="conversation-actions">${action("rename-conversation", icon("edit"), "ghost icon-only", `data-id="${escape(c.id)}" aria-label="重命名：${escape(c.title)}" title="重命名"`)}${action("delete-conversation", icon("trash"), "ghost icon-only", `data-id="${escape(c.id)}" aria-label="删除：${escape(c.title)}" title="删除对话"`)}</div></div>`).join("") : '<p class="conversation-empty">发送第一条消息后，<br>对话会出现在这里。</p>';
+  const conversations = workspaceConversations();
+  return conversations.length ? conversations.map((c) => `<div data-key="conversation:${escape(c.id)}" class="conversation-row ${c.id === selectedConversation() ? "selected" : ""}"><button type="button" class="conversation-item" data-action="select-conversation" data-id="${escape(c.id)}" aria-current="${c.id === selectedConversation()}" title="${escape(c.title)}"><span class="conversation-title">${escape(c.title)}${hasUnreadReply(c) ? ' <span class="reply-unread">新结果</span>' : ""}</span><span class="conversation-meta">${c.active ? '<i class="conversation-active" aria-label="正在回答"></i>' : ""}${c.naming ? "正在命名…" : c.legacy ? "历史对话 · " + date(c.updatedAt) : date(c.updatedAt)}</span></button><div class="conversation-actions">${action("rename-conversation", icon("edit"), "ghost icon-only", `data-id="${escape(c.id)}" aria-label="重命名：${escape(c.title)}" title="重命名"`)}${action("delete-conversation", icon("trash"), "ghost icon-only", `data-id="${escape(c.id)}" aria-label="删除：${escape(c.title)}" title="删除对话"`)}</div></div>`).join("") + pagerHTML(listResult("conversations"),"conversations") : '<p class="conversation-empty">发送第一条消息后，<br>对话会出现在这里。</p>';
 }
 function conversationDialog(id, remove) {
-  const conversation = chatConversations(state.runs).find((c) => c.id === id);
+  const conversation = workspaceConversations().find((c) => c.id === id);
   if (!conversation) return;
   modal(remove ? "删除对话" : "重命名对话", `<form id="conversation-form" data-project-id="${escape(state.project.id)}" data-id="${escape(id)}" data-remove="${remove}">${remove ? `<p class="context-note">确认删除「${escape(conversation.title)}」？</p><p class="hint">对话将从历史列表移除，无法继续。${conversation.active ? "正在生成的回答也会停止。" : ""}</p>` : field("对话名称", `<input name="title" required maxlength="80" value="${escape(conversation.title)}" autocomplete="off">`, "最多 80 个字，保存后不会被 AI 自动名称覆盖。")}<div class="form-error" role="alert"></div><div class="modal-actions">${action("close", "取消")}<button type="submit" class="${remove ? "danger" : "primary"}">${remove ? "删除对话" : "保存名称"}</button></div></form>`);
   $("#conversation-form input")?.select();
@@ -725,9 +731,11 @@ function updateChat() {
   if (!page) return;
   const feed = $(".chat-feed", page);
   if (!feed || page.dataset.projectId !== state.project?.id) return;
-  patchHTML($(".conversation-list", page), conversationListHTML());
+  patchKeyedHTML($(".conversation-list", page), conversationListHTML());
+  const messageKey=`messages:${selectedConversation()}`;patchKeyedHTML($("#chat-message-pagination",page),pagerHTML(listResult(messageKey),messageKey));
+  patchKeyedHTML($("#chat-related-pagination",page),selectedConversation()?pagerHTML(listResult(`intakes:${selectedConversation()}`),`intakes:${selectedConversation()}`)+pagerHTML(listResult(`collaborations:${selectedConversation()}`),`collaborations:${selectedConversation()}`):'');
   const selected = selectedConversation();
-  const conversation = chatConversations(state.runs).find((c) => c.id === selected);
+  const conversation = workspaceConversations().find((c) => c.id === selected);
   const title = $(".current-conversation-title", page);
   if (title.textContent !== (conversation?.title || "新会话")) title.textContent = conversation?.title || "新会话";
   if (page.dataset.conversationId !== selected) {
@@ -784,7 +792,7 @@ function updateChat() {
 function chatPage() {
   const draft = chatDraft();
   const turns = chatTurns();
-  return `<div class="page chat-page" data-project-id="${escape(state.project.id)}" data-conversation-id="${escape(selectedConversation())}"><aside class="chat-sidebar" aria-label="对话历史">${action("new-conversation", icon("plus") + " 新会话", "new-conversation-button")}<div class="conversation-list-heading">我的对话</div><nav class="conversation-list" aria-label="我的对话">${conversationListHTML()}</nav></aside><div class="chat-main">${heading("项目问答", "回答基于项目资料和已观察到的代码。", action("toggle-history", icon("list") + " 历史对话", "ghost history-toggle"))}<div class="conversation-heading"><span class="current-conversation-title">${escape(chatConversations(state.runs).find((c) => c.id === selectedConversation())?.title || "新会话")}</span>${action("new-conversation", icon("plus") + " 新会话", "ghost mobile-new-conversation")}</div><div class="chat-feed">${turns.length ? turns.map(chatTurnHTML).join("") : chatIntro()}</div><div class="composer"><form id="chat-form" novalidate><div class="composer-box" id="chat-dropzone"><textarea name="question" rows="3" placeholder="输入问题，也可以粘贴图片或拖入文件…" aria-label="项目问题" aria-describedby="composer-help">${escape(draft.text)}</textarea><div class="draft-attachments" id="draft-attachments" aria-label="待发送附件"></div><div class="composer-bottom"><button type="button" class="ghost attach-button" data-action="attach-files" aria-label="添加图片或文件" title="图片、PDF、DOCX、文本和代码文件">${icon("paperclip")}<span>添加附件</span></button><span class="composer-keyboard">Enter 发送 · Shift+Enter 换行</span><button class="primary send-button" id="chat-send" type="submit">${icon("send")}<span>发送</span></button></div><input type="file" id="chat-files" class="hidden" multiple accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.docx,text/*,.md,.log,.json,.csv,.yaml,.yml,.xml,.html,.css,.js,.ts,.tsx,.jsx,.vue,.go,.py,.sql,.sh,.java,.c,.cpp,.h,.toml,.ini,.conf"><p id="chat-error" class="form-error" role="alert"></p></div></form><p class="composer-note" id="composer-help">支持粘贴或拖入附件 · 单个 10 MB · 最多 6 个，合计 20 MB · ${state.platform.configured ? "图片需使用支持视觉的模型" : "发送前请由平台管理员配置 Agent 模型"}</p></div></div></div>`;
+  return `<div class="page chat-page" data-project-id="${escape(state.project.id)}" data-conversation-id="${escape(selectedConversation())}"><aside class="chat-sidebar" aria-label="对话历史">${action("new-conversation", icon("plus") + " 新会话", "new-conversation-button")}<div class="conversation-list-heading">我的对话</div><nav class="conversation-list" aria-label="我的对话">${conversationListHTML()}</nav></aside><div class="chat-main">${heading("项目问答", "回答基于项目资料和已观察到的代码。", action("toggle-history", icon("list") + " 历史对话", "ghost history-toggle"))}<div class="conversation-heading"><span class="current-conversation-title">${escape(workspaceConversations().find((c) => c.id === selectedConversation())?.title || "新会话")}</span>${action("new-conversation", icon("plus") + " 新会话", "ghost mobile-new-conversation")}</div><div id="chat-message-pagination">${selectedConversation()?pagerHTML(listResult(`messages:${selectedConversation()}`),`messages:${selectedConversation()}`):""}</div><div class="chat-feed">${turns.length ? turns.map(chatTurnHTML).join("") : chatIntro()}</div><div id="chat-related-pagination"></div><div class="composer"><form id="chat-form" novalidate><div class="composer-box" id="chat-dropzone"><textarea name="question" rows="3" placeholder="输入问题，也可以粘贴图片或拖入文件…" aria-label="项目问题" aria-describedby="composer-help">${escape(draft.text)}</textarea><div class="draft-attachments" id="draft-attachments" aria-label="待发送附件"></div><div class="composer-bottom"><button type="button" class="ghost attach-button" data-action="attach-files" aria-label="添加图片或文件" title="图片、PDF、DOCX、文本和代码文件">${icon("paperclip")}<span>添加附件</span></button><span class="composer-keyboard">Enter 发送 · Shift+Enter 换行</span><button class="primary send-button" id="chat-send" type="submit">${icon("send")}<span>发送</span></button></div><input type="file" id="chat-files" class="hidden" multiple accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.docx,text/*,.md,.log,.json,.csv,.yaml,.yml,.xml,.html,.css,.js,.ts,.tsx,.jsx,.vue,.go,.py,.sql,.sh,.java,.c,.cpp,.h,.toml,.ini,.conf"><p id="chat-error" class="form-error" role="alert"></p></div></form><p class="composer-note" id="composer-help">支持粘贴或拖入附件 · 单个 10 MB · 最多 6 个，合计 20 MB · ${state.platform.configured ? "图片需使用支持视觉的模型" : "发送前请由平台管理员配置 Agent 模型"}</p></div></div></div>`;
 }
 function fileSize(bytes) {
   return bytes < 1024 * 1024
@@ -1078,14 +1086,16 @@ function mcpPage() {
 }
 async function loadMCP() {
   try {
-    const data = await api("/mcp"); if (!$("#mcp-toggle")) return;
+    const data = await api(`/mcp?${listParams("mcp-grants")}`); if (!$("#mcp-toggle")) return;
+    businessLists.set(listScope("mcp-grants"),data);
     $("#mcp-status").textContent = data.enabled ? "已开通" : "未开通";
     const button = $("#mcp-toggle");button.textContent = data.enabled ? "关闭个人 MCP" : "开通个人 MCP";button.dataset.enabled = String(data.enabled);button.disabled = false;
     $("#mcp-grants").innerHTML = data.grants.length ? data.grants.map((g) => `<div class="profile-row"><div class="grow"><strong>${escape(state.projects.find((p) => p.id === g.project_id)?.name || "已失去访问权限的项目")}</strong><p class="hint client-id">${escape(g.client_id)}</p><p class="hint">授权于 ${date(g.created_at)}</p></div>${action("revoke-grant", "撤销", "ghost danger", `data-id="${escape(g.id)}"`)}</div>`).join("") : '<p class="context-note">暂无客户端授权。</p>';
+    $('#mcp-grants').insertAdjacentHTML('beforeend',pagerHTML(data,'mcp-grants'));
   } catch (e) { if ($("#mcp-grants")) $("#mcp-grants").textContent = e.message; }
 }
 function platformPage() {
-  return `<div class="page">${heading("平台设置", "统一配置平台 Agent，管理平台管理员和成员项目授权。")}<div class="settings-grid"><section class="settings-section"><h2>平台 Agent</h2><p>所有项目使用同一平台 Agent 模型配置。</p><form id="platform-form">${field("默认模型", `<select name="profile_id"><option value="">暂不启用 Agent</option>${state.profiles.map((p) => `<option value="${escape(p.id)}" ${state.platform.profile_id === p.id ? "selected" : ""}>${escape(p.name)} · ${escape(p.model)}</option>`).join("")}</select>`)}<div class="form-error"></div><button type="submit" class="primary">保存平台配置</button></form><div class="divider"></div><div class="row between"><h3>模型配置</h3>${action("new-profile", icon("plus") + " 添加", "ghost")}</div>${state.profiles.map((p) => `<div class="profile-row"><span class="dot ${p.has_key ? "live" : ""}"></span><div class="grow">${escape(p.name)}<p class="hint">${escape(p.provider)} / ${escape(p.model)}</p></div>${action("edit-profile", "编辑", "ghost", `data-id="${escape(p.id)}"`)}</div>`).join("") || '<p class="hint">先添加模型配置，再选为默认模型。</p>'}<p class="hint">API Key 仅保存在服务器，不会回显。</p></section><div><section class="settings-section"><div class="row between"><h2>成员项目授权</h2>${state.auth?.directory?.syncable ? action("sync-directory", icon("refresh") + ` 同步 ${escape(state.auth.directory.label)}`, "ghost") : ""}</div><p>选择项目，搜索成员并分配产品、开发、测试或管理员角色，可多选。</p>${state.platformProjects.map((p) => `<div class="profile-row"><div class="grow"><strong>${escape(p.name)}</strong><p class="hint">${escape(p.description)}</p></div>${action("manage-project-members", "管理成员", "", `data-project="${escape(p.id)}"`)}</div>`).join("") || '<p class="hint">还没有项目。</p>'}</section>${accountsSection()}${channelsSection()}<section class="settings-section"><div class="row between"><h2>平台管理员</h2>${action("add-platform-admin", icon("plus") + " 添加", "ghost")}</div><p>平台管理员可进入此页面、配置 Agent 并管理所有项目成员。</p>${state.admins.map((u) => `<div class="profile-row"><div class="grow">${escape(u.name)}<p class="hint">${escape(u.login_id)}</p></div>${u.id !== "local-owner" ? action("remove-platform-admin", "移除", "ghost danger", `data-user="${escape(u.id)}" data-name="${escape(u.name)}"`) : ""}</div>`).join("")}</section></div></div></div>`;
+  return `<div class="page">${heading("平台设置", "统一配置平台 Agent，管理平台管理员和成员项目授权。")}<div class="settings-grid"><section class="settings-section"><h2>平台 Agent</h2><p>所有项目使用同一平台 Agent 模型配置。</p><form id="platform-form">${field("默认模型", `<select name="profile_id"><option value="">暂不启用 Agent</option>${state.profiles.map((p) => `<option value="${escape(p.id)}" ${state.platform.profile_id === p.id ? "selected" : ""}>${escape(p.name)} · ${escape(p.model)}</option>`).join("")}</select>`)}<div class="form-error"></div><button type="submit" class="primary">保存平台配置</button></form><div class="divider"></div><div class="row between"><h3>模型配置</h3>${action("new-profile", icon("plus") + " 添加", "ghost")}</div>${state.profiles.map((p) => `<div class="profile-row"><span class="dot ${p.has_key ? "live" : ""}"></span><div class="grow">${escape(p.name)}<p class="hint">${escape(p.provider)} / ${escape(p.model)}</p></div>${action("edit-profile", "编辑", "ghost", `data-id="${escape(p.id)}"`)}</div>`).join("") || '<p class="hint">先添加模型配置，再选为默认模型。</p>'}${pagerHTML(listResult("profiles"),"profiles")}<p class="hint">API Key 仅保存在服务器，不会回显。</p></section><div><section class="settings-section"><div class="row between"><h2>成员项目授权</h2>${state.auth?.directory?.syncable ? action("sync-directory", icon("refresh") + ` 同步 ${escape(state.auth.directory.label)}`, "ghost") : ""}</div><p>选择项目，搜索成员并分配产品、开发、测试或管理员角色，可多选。</p>${state.platformProjects.map((p) => `<div class="profile-row"><div class="grow"><strong>${escape(p.name)}</strong><p class="hint">${escape(p.description)}</p></div>${action("manage-project-members", "管理成员", "", `data-project="${escape(p.id)}"`)}</div>`).join("") || '<p class="hint">还没有项目。</p>'}${pagerHTML(listResult('platform-projects'),'platform-projects')}</section>${accountsSection()}${channelsSection()}<section class="settings-section"><div class="row between"><h2>平台管理员</h2>${action("add-platform-admin", icon("plus") + " 添加", "ghost")}</div><p>平台管理员可进入此页面、配置 Agent 并管理所有项目成员。</p>${state.admins.map((u) => `<div class="profile-row"><div class="grow">${escape(u.name)}<p class="hint">${escape(u.login_id)}</p></div>${u.id !== "local-owner" ? action("remove-platform-admin", "移除", "ghost danger", `data-user="${escape(u.id)}" data-name="${escape(u.name)}"`) : ""}</div>`).join("")}${pagerHTML(listResult("admins"),"admins")}</section></div></div></div>`;
 }
 function channelsSection() {
   if (!state.channels?.length) return "";
@@ -1101,7 +1111,7 @@ function channelForm(name) {
 function accountsSection() {
   if (state.auth?.login !== "password") return "";
   const me = state.auth.user?.id;
-  return `<section class="settings-section"><div class="row between"><h2>平台账号</h2>${action("new-account", icon("plus") + " 新建", "ghost")}</div><p>创建账号并把用户名和初始密码告知成员，成员首次登录时改为自己的密码。停用后立即退出登录，并撤销其 MCP 授权。</p>${state.accounts.map((a) => `<div class="profile-row"><div class="grow">${escape(a.name)}${a.disabled ? ' <span class="badge">已停用</span>' : a.must_change_password ? ' <span class="badge">待改密</span>' : ""}<p class="hint">${escape(a.username)}${a.user_id === me ? " · 当前账号" : ""}</p></div>${a.user_id === me ? "" : action("reset-account-password", "重置密码", "ghost", `data-user="${escape(a.user_id)}" data-name="${escape(a.name)}"`) + action("toggle-account", a.disabled ? "启用" : "停用", a.disabled ? "ghost" : "ghost danger", `data-user="${escape(a.user_id)}" data-name="${escape(a.name)}" data-disabled="${a.disabled}"`)}</div>`).join("")}</section>`;
+  return `<section class="settings-section"><div class="row between"><h2>平台账号</h2>${action("new-account", icon("plus") + " 新建", "ghost")}</div><p>创建账号并把用户名和初始密码告知成员，成员首次登录时改为自己的密码。停用后立即退出登录，并撤销其 MCP 授权。</p>${state.accounts.map((a) => `<div class="profile-row"><div class="grow">${escape(a.name)}${a.disabled ? ' <span class="badge">已停用</span>' : a.must_change_password ? ' <span class="badge">待改密</span>' : ""}<p class="hint">${escape(a.username)}${a.user_id === me ? " · 当前账号" : ""}</p></div>${a.user_id === me ? "" : action("reset-account-password", "重置密码", "ghost", `data-user="${escape(a.user_id)}" data-name="${escape(a.name)}"`) + action("toggle-account", a.disabled ? "启用" : "停用", a.disabled ? "ghost" : "ghost danger", `data-user="${escape(a.user_id)}" data-name="${escape(a.name)}" data-disabled="${a.disabled}"`)}</div>`).join("")}${pagerHTML(listResult("accounts"),"accounts")}</section>`;
 }
 let directoryRevision = 0;
 function departmentOptions(roots, prefix = "") {
@@ -1155,9 +1165,10 @@ async function loadFiles() {
 }
 
 async function openTask(taskID) {
-  const ctx = await api(`/tasks/${taskID}`);
+  const ctx = await api(`/tasks/${taskID}?compact=true`);
   const t = ctx.task;
   if (t.project_id !== state.project.id) return;
+  for(const [key,value] of [[`detail-bugs:${t.id}`,ctx.related_bugs],[`detail-artifacts:${t.id}`,ctx.artifact_page],[`detail-events:${t.id}`,ctx.event_page]])if(value)businessLists.set(listScope(key),value);
   const artifacts = ctx.artifacts.filter((a) => a.task_id === t.id);
   const runs = state.runs.filter((r) => r.task_id === t.id);
   let buttons = "";
@@ -1197,7 +1208,7 @@ async function openTask(taskID) {
     );
   modal(
     `<span class="mono muted">${short(t.id)} · ${t.kind === "bug" ? (t.parent_requirement_id ? "需求测试 Bug" : "平台 Bug") : "迭代需求"}</span>`,
-    `<h1 class="detail-title">${escape(t.title)}</h1><div class="detail-meta">${status(t)}<span class="badge">${priorities[t.priority]}</span><span class="badge">修订 R${t.revision}</span><span class="badge">${escape(t.owner || "未认领")}</span>${t.reviewer ? `<span class="badge">验收：${escape(t.reviewer)}</span>` : ""}</div>${t.blocker ? `<div class="notice">阻塞：${escape(t.blocker)}</div>` : ""}${t.status === "ready" && t.alignment?.status === "replied" ? `<div class="notice">产品已回复，等待原开发客户端确认。原客户端无法继续时，可重新开放领取；已有对齐记录会追加进需求正文。</div>` : ""}<div class="detail-actions">${buttons}</div>${t.resolution?`<section class="task-resolution notice"><strong>${states[t.status]} · ${states[t.resolution.from_status]}阶段结束</strong><p class="prewrap">${escape(t.resolution.reason)}</p><span class="small muted">${escape(t.resolution.actor)} · ${date(t.resolution.at)}</span></section>`:""}${testingDetails(t,ctx.tasks)}${iterationContextHTML(t.iteration)}<section class="detail-section"><h3>需求与背景</h3><div class="requirement-description markdown-content">${renderMarkdown(t.description || "尚未补充描述")}</div></section>${t.attachments?.length ? `<section class="detail-section"><h3>附件 · ${t.attachments.length}</h3>${sentAttachments(t)}</section>` : ""}<section class="detail-section"><h3>验收条件</h3>${t.acceptance.length ? `<ul class="acceptance-list">${t.acceptance.map((v) => `<li><i class="square ${t.status === "done" ? "checked" : ""}" aria-hidden="true">${t.status === "done" ? "✓" : ""}</i>${escape(v)}</li>`).join("")}</ul>` : '<p class="context-note">补充预期行为后，再进入待认领队列。</p>'}</section>${t.submission ? `<section class="detail-section"><h3>最近一次提交 · R${t.submission.revision}</h3><div class="prewrap">${escape(t.submission.summary)}</div><p class="mono muted">${escape(t.submission.sha)} · ${escape(t.submission.environment || "环境未说明")}</p><p class="prewrap">${escape(t.submission.tests)}</p>${t.submission.limitations ? `<div class="notice info">未完成或未验证：${escape(t.submission.limitations)}</div>` : ""}<p class="hint">本次提交版本的验证记录；后续测试、实际上线与业务验收分别记录。</p></section>` : ""}${t.deployment ? `<section class="detail-section"><h3>最近一次上线 · R${t.deployment.revision}</h3><p class="mono muted">${escape(t.deployment.sha)} · ${escape(t.deployment.environment)}</p><p class="prewrap">${escape(t.deployment.body)}</p><p class="hint">${escape(t.deployment.actor)} · ${t.deployment.source === "developer" ? "开发汇报" : "人工确认"} · ${date(t.deployment.at)}${t.deployment.revision !== t.revision ? " · 历史版本，当前需求需重新开发和上线" : ""}</p></section>` : ""}${t.review ? `<section class="detail-section"><h3>验收记录</h3><div class="prewrap">${t.review.accepted ? "通过" : "退回"} · ${escape(t.review.environment)} · ${date(t.review.at)}\n${escape(t.review.note)}</div></section>` : ""}${iterationHistoryHTML(ctx.iteration_history,t,state.context.project_versions)}<section class="detail-section"><h3>分析与证据</h3>${artifacts.map((a) => `<div class="record"><div class="record-header"><span>${escape(a.title)} · ${escape(a.source)}</span><span>${date(a.at)}</span></div><div class="prewrap">${escape(a.body)}</div></div>`).join("") || '<p class="context-note">平台分析和相关证据会保留在这里。</p>'}${runs
+    `<h1 class="detail-title">${escape(t.title)}</h1><div class="detail-meta">${status(t)}<span class="badge">${priorities[t.priority]}</span><span class="badge">修订 R${t.revision}</span><span class="badge">${escape(t.owner || "未认领")}</span>${t.reviewer ? `<span class="badge">验收：${escape(t.reviewer)}</span>` : ""}</div>${t.blocker ? `<div class="notice">阻塞：${escape(t.blocker)}</div>` : ""}${t.status === "ready" && t.alignment?.status === "replied" ? `<div class="notice">产品已回复，等待原开发客户端确认。原客户端无法继续时，可重新开放领取；已有对齐记录会追加进需求正文。</div>` : ""}<div class="detail-actions">${buttons}</div>${t.resolution?`<section class="task-resolution notice"><strong>${states[t.status]} · ${states[t.resolution.from_status]}阶段结束</strong><p class="prewrap">${escape(t.resolution.reason)}</p><span class="small muted">${escape(t.resolution.actor)} · ${date(t.resolution.at)}</span></section>`:""}${testingDetails(t,ctx.tasks)}${iterationContextHTML(t.iteration)}<section class="detail-section"><h3>需求与背景</h3><div class="requirement-description markdown-content">${renderMarkdown(t.description || "尚未补充描述")}</div></section>${t.attachments?.length ? `<section class="detail-section"><h3>附件 · ${t.attachments.length}</h3>${sentAttachments(t)}</section>` : ""}<section class="detail-section"><h3>验收条件</h3>${t.acceptance.length ? `<ul class="acceptance-list">${t.acceptance.map((v) => `<li><i class="square ${t.status === "done" ? "checked" : ""}" aria-hidden="true">${t.status === "done" ? "✓" : ""}</i>${escape(v)}</li>`).join("")}</ul>` : '<p class="context-note">补充预期行为后，再进入待认领队列。</p>'}</section>${t.submission ? `<section class="detail-section"><h3>最近一次提交 · R${t.submission.revision}</h3><div class="prewrap">${escape(t.submission.summary)}</div><p class="mono muted">${escape(t.submission.sha)} · ${escape(t.submission.environment || "环境未说明")}</p><p class="prewrap">${escape(t.submission.tests)}</p>${t.submission.limitations ? `<div class="notice info">未完成或未验证：${escape(t.submission.limitations)}</div>` : ""}<p class="hint">本次提交版本的验证记录；后续测试、实际上线与业务验收分别记录。</p></section>` : ""}${t.deployment ? `<section class="detail-section"><h3>最近一次上线 · R${t.deployment.revision}</h3><p class="mono muted">${escape(t.deployment.sha)} · ${escape(t.deployment.environment)}</p><p class="prewrap">${escape(t.deployment.body)}</p><p class="hint">${escape(t.deployment.actor)} · ${t.deployment.source === "developer" ? "开发汇报" : "人工确认"} · ${date(t.deployment.at)}${t.deployment.revision !== t.revision ? " · 历史版本，当前需求需重新开发和上线" : ""}</p></section>` : ""}${t.review ? `<section class="detail-section"><h3>验收记录</h3><div class="prewrap">${t.review.accepted ? "通过" : "退回"} · ${escape(t.review.environment)} · ${date(t.review.at)}\n${escape(t.review.note)}</div></section>` : ""}${iterationHistoryHTML(ctx.iteration_history,t,state.context.project_versions)}<section class="detail-section"><h3>分析与证据</h3><div id="task-detail-artifacts">${artifacts.map((a) => `<div class="record"><div class="record-header"><span>${escape(a.title)} · ${escape(a.source)}</span><span>${date(a.at)}</span></div><div class="prewrap">${escape(a.body)}</div></div>`).join("") || '<p class="context-note">平台分析和相关证据会保留在这里。</p>'}${pagerHTML(ctx.artifact_page,`detail-artifacts:${t.id}`)}</div>${runs
       .slice(0, 4)
       .map(
         (r) =>
@@ -1205,15 +1216,14 @@ async function openTask(taskID) {
       )
       .join(
         "",
-      )}</section><section class="detail-section"><h3>工作记录与决定</h3><form id="report-form" data-id="${t.id}"><textarea name="body" aria-label="新增工作记录" placeholder="记录进展、补充决定或说明阻塞…" required></textarea><div class="row between"><select name="report_kind" aria-label="记录类型"><option value="progress">工作进展</option><option value="decision">确认的决定</option><option value="blocked">遇到阻塞</option><option value="unblocked">解除阻塞</option></select><button type="submit">添加记录</button></div><div class="form-error"></div></form>${[
+      )}</section><section class="detail-section"><h3>工作记录与决定</h3><form id="report-form" data-id="${t.id}"><textarea name="body" aria-label="新增工作记录" placeholder="记录进展、补充决定或说明阻塞…" required></textarea><div class="row between"><select name="report_kind" aria-label="记录类型"><option value="progress">工作进展</option><option value="decision">确认的决定</option><option value="blocked">遇到阻塞</option><option value="unblocked">解除阻塞</option></select><button type="submit">添加记录</button></div><div class="form-error"></div></form><div id="task-detail-events">${[
       ...ctx.events,
     ]
-      .reverse()
       .map(
         (e) =>
           `<div class="record"><div class="record-header"><span>${escape(e.actor)} · ${escape(e.kind)}</span><span>${date(e.at)}</span></div><div class="prewrap">${escape(e.body)}</div></div>`,
       )
-      .join("")}</section>`,
+      .join("")}${pagerHTML(ctx.event_page,`detail-events:${t.id}`)}</div></section>`,
     { drawer: true },
   );
 }
@@ -1221,7 +1231,7 @@ async function openTask(taskID) {
 async function openLinkedTask(taskID) {
   const messageID = new URLSearchParams(location.search).get("review_message");
   history.replaceState(null, "", appURL("/"));
-  const { task } = await api(`/tasks/${encodeURIComponent(taskID)}`);
+  const { task } = await api(`/tasks/${encodeURIComponent(taskID)}?compact=true`);
   if (state.project?.id !== task.project_id) await switchProject(task.project_id);
   if (state.project?.id === task.project_id) {
     if (messageID) await openRequirementReview(task.id, task, () => true, messageID);
@@ -1229,15 +1239,15 @@ async function openLinkedTask(taskID) {
   }
 }
 async function openRequirementReview(taskID, savedTask, stillCurrent = () => true, messageID = '') {
- const task = savedTask || (await api(`/tasks/${taskID}`)).task;
+ const task = savedTask || (await api(`/tasks/${taskID}?compact=true`)).task;
  if (!stillCurrent()) return;
  modal(task.requirement_change?.status === "reviewing" ? "本轮需求变更" : task.parent_requirement_id ? "测试 Bug 评审" : (task.status === "aligning" || (task.status === "ready" && task.alignment?.status === "replied")) ? "开发对齐" : task.status === "clarify" ? "需求评审" : "需求讨论",requirementReviewHTML(task),{review:true});
  requirementReview = mountRequirementReview($(".requirement-review"),{task,api,messageID,userID:state.auth?.user?.id || "local-owner",onDetails:id=>openTask(id || taskID).catch(e=>toast(e.message)),onResolve:action=>taskResolutionForm(taskID,action).catch(e=>toast(e.message)),onChange:()=>requirementChangeForm(taskID).catch(e=>toast(e.message)),onFileBug:()=>taskForm(null,null,taskID).catch(e=>toast(e.message)),onConfirmed:()=>{toast("评审状态已更新");void refresh().then(render).catch(e=>toast(e.message));}});
 }
 async function requirementChangeForm(taskID) {
- const {task}=await api(`/tasks/${taskID}`);
+ const {task}=await api(`/tasks/${taskID}?compact=true`);
  const bug=task.parent_requirement_id ? task : null;
- const parent=bug ? (await api(`/tasks/${bug.parent_requirement_id}`)).task : task;
+ const parent=bug ? (await api(`/tasks/${bug.parent_requirement_id}?compact=true`)).task : task;
  if(parent.kind!=="requirement" || !["testing","fixing","retest","pending_release","review"].includes(parent.status)) throw Error("原需求当前不能发起变更，请查看最新状态");
  if(bug && (bug.change_request_id || !["clarify","ready"].includes(bug.status))) throw Error("仅尚未开始修复的反馈可转为变更");
  const key=`ai-pm:change-draft:${state.auth?.user?.id||'local-owner'}:${parent.project_id}:${parent.id}:${bug?.id||'direct'}`;
@@ -1250,7 +1260,7 @@ async function requirementChangeForm(taskID) {
  form.elements.body.addEventListener('input',()=>{try{localStorage.setItem(key,JSON.stringify({body:form.elements.body.value}))}catch{}});
 }
 async function taskResolutionForm(taskID, operation) {
-  const task=(await api(`/tasks/${taskID}`)).task;
+  const task=(await api(`/tasks/${taskID}?compact=true`)).task;
   const title=({close:"关闭需求",decline:"拒绝需求",reopen:"重新打开需求"})[operation];
   if (!title) return;
   if (operation==='reopen' ? !taskTerminated(task) : !taskActive(task)) {toast("需求状态已更新，请查看最新状态");return;}
@@ -1265,11 +1275,11 @@ async function taskResolutionForm(taskID, operation) {
 }
 async function taskForm(taskID, iterationSourceID, bugParentID) {
   const projectID = state.project.id;
-  const source = iterationSourceID ? (await api(`/tasks/${iterationSourceID}`)).task : null;
+  const source = iterationSourceID ? (await api(`/tasks/${iterationSourceID}?compact=true`)).task : null;
   if (state.project.id !== projectID) return;
   if (source && source.status !== 'done') throw Error('只有已验收的需求才能追加迭代');
-  const parent = bugParentID ? (await api(`/tasks/${bugParentID}`)).task : null;
-  const t = taskID ? (await api(`/tasks/${taskID}`)).task : parent ? {kind:"bug"} : {};
+  const parent = bugParentID ? (await api(`/tasks/${bugParentID}?compact=true`)).task : null;
+  const t = taskID ? (await api(`/tasks/${taskID}?compact=true`)).task : parent ? {kind:"bug"} : {};
   if (state.project.id !== projectID) return;
   modal(parent ? (parent.status === "review" ? "提起验收 Bug" : "提起测试 Bug") : source ? "追加迭代" : taskID ? "编辑需求" : "创建需求", requirementFormHTML(t), {document: true});
   requirementEditor = mountRequirementEditor($("#task-form"), {
@@ -1304,19 +1314,19 @@ async function taskForm(taskID, iterationSourceID, bugParentID) {
   $('.requirement-properties',form).prepend(holder);
 }
 async function submitForm(taskID) {
-  const t = (await api(`/tasks/${taskID}`)).task;
+  const t = (await api(`/tasks/${taskID}?compact=true`)).task;
   modal(
     "提交开发结果",
     `<form id="submit-form" data-id="${t.id}" data-revision="${t.revision}" data-version="${t.version}"><p class="context-note">${escape(t.title)} · 当前需求 R${t.revision}</p>${field("开发分支", `<input name="branch" value="${escape(t.branch || '')}" required placeholder="本需求实际开发分支">`)}${field("实现说明", `<textarea name="summary" required placeholder="本次实现了哪些行为…"></textarea>`)}<div class="field-row">${field("代码版本", `<input name="sha" required placeholder="提交 SHA 或确定版本">`)}${field("验证环境", `<input name="environment" placeholder="例如：本地、测试环境">`)}</div>${field("验证情况", `<textarea name="tests" required placeholder="运行了什么检查，结果如何；未测试请明确说明"></textarea>`)}${field("尚未完成或未验证", `<textarea name="limitations" placeholder="可选"></textarea>`)}${field("证据链接", `<textarea name="references" placeholder="每行一个提交、PR 或报告链接"></textarea>`)}<div class="form-error"></div><div class="modal-actions">${action("close", "取消")}<button class="primary" type="submit">${t.parent_requirement_id ? "提交修复，交给产品验证" : "提交至测试中"}</button></div></form>`,
   );
 }
 async function deploymentForm(taskID) {
-  const t = (await api(`/tasks/${taskID}`)).task;
+  const t = (await api(`/tasks/${taskID}?compact=true`)).task;
   if (t.status !== "pending_release" || !t.submission) throw new Error("需求尚未进入待上线");
   modal("确认已上线", `<form id="deployment-form" data-id="${t.id}" data-version="${t.version}" data-revision="${t.revision}" data-sha="${escape(t.submission.sha)}"><p class="context-note">${escape(t.title)} · R${t.revision}<br>请在实际发布成功后登记，保存后进入待验收。</p>${field("本次上线版本", `<input value="${escape(t.submission.sha)}" readonly>`)}${field("实际上线环境", `<input name="environment" required placeholder="例如：国内生产">`)}${field("上线说明与证据", `<textarea name="body" required placeholder="说明发布时间、结果，可附发布记录或日志链接。"></textarea>`)}<div class="form-error"></div><div class="modal-actions">${action("close", "取消")}<button type="submit" class="primary">确认已上线并进入待验收</button></div></form>`);
 }
 async function reviewForm(taskID) {
-  const t = (await api(`/tasks/${taskID}`)).task;
+  const t = (await api(`/tasks/${taskID}?compact=true`)).task;
   if (t.status !== "review") throw new Error("需求尚未进入待验收");
   modal(
     "业务验收",
@@ -1433,8 +1443,7 @@ async function pollRun(runID) {
         if (!receive(r, mutationAtStart)) continue;
       }
       if (!["running", "queued"].includes(r.status)) {
-        const context = await api(`/projects/${r.project_id}/context`);
-        if (r.project_id === state.project?.id) state.context = context;
+        if (r.project_id === state.project?.id) await loadBusinessPage();
         return;
       }
       await waitForPoll(controller.signal);
@@ -1448,74 +1457,18 @@ async function pollRun(runID) {
   }
 }
 
-// Refresh external MCP activity without replacing a form the user is editing.
-let refreshing = false;
-setInterval(async () => {
-  if (state.page === "chat") { await refreshChatActivity(); return; }
-  if (
-    refreshing ||
-    state.switchingProject ||
-    projectMenuOpen() ||
-    document.hidden ||
-    !state.project ||
-    $("dialog") ||
-    ["settings", "code", "mcp", "platform"].includes(state.page) ||
-    document.activeElement?.matches("input, textarea, select") ||
-    $("textarea[name=question]")?.value.trim() ||
-    (state.page === "chat" &&
-      (chatDraft().files.length || chatDraft().sending)) ||
-    ($$(".package-select:checked").length||$$("[data-plan-task]:checked").length)
-  )
-    return;
-  refreshing = true;
-  const projectID = state.project.id;
-  const mutationAtStart = conversationMutationRevision;
-  const runsAtStart = new Map(state.runs.map((run) => [run.id, run]));
-  try {
-    const [context, runs] = await Promise.all([
-      api(`/projects/${projectID}/context`),
-      api(`/projects/${projectID}/runs`),
-    ]);
-    if (
-      projectID !== state.project?.id ||
-      mutationAtStart !== conversationMutationRevision ||
-      $("dialog") ||
-      state.switchingProject ||
-      projectMenuOpen() ||
-      ["settings", "code", "mcp", "platform"].includes(state.page) ||
-      document.activeElement?.matches("input, textarea, select") ||
-      $("textarea[name=question]")?.value.trim() ||
-      (state.page === "chat" &&
-        (chatDraft().files.length || chatDraft().sending)) ||
-      ($$(".package-select:checked").length||$$("[data-plan-task]:checked").length)
-    )
-      return;
-    const signature = (ctx, rs) =>
-      JSON.stringify([
-        ctx?.project,
-        ctx?.tasks,
-        ctx?.requirement_reviews,
-        ctx?.project_versions,
-        ctx?.artifacts,
-        ctx?.events,
-        rs,
-      ]);
-    const mergedRuns = mergeRunRefresh(runs, state.runs, runsAtStart).filter((r) => !deletedConversations.has(conversationKey(projectID, conversationID(r))));
-    if (signature(context, mergedRuns) !== signature(state.context, state.runs)) {
-      state.context = context;
-      state.project = context.project;
-      state.runs = mergedRuns;
-      if (state.page === "chat") updateChat();
-      else if(state.page==='timeline')timelineUI.refreshIfNeeded();
-      else render();
-    }
-    pollActiveRuns();
-  } catch {
-    /* The next successful refresh will reconcile transient failures. */
-  } finally {
-    refreshing = false;
-  }
-}, 6000);
+// One request at a time; background pages pause and stale route/query responses
+// are discarded. Lists reconcile by business key without rebuilding the shell.
+let refreshing=false;
+async function pollWorkspace() {
+ if(refreshing||document.hidden||state.switchingProject||!state.project)return;
+ if(['settings','git','access','code','mcp','platform'].includes(state.page))return;
+ refreshing=true;
+ try { await loadBusinessPage();pollActiveRuns(); }
+ catch { /* Keep the last successful page and retry on the next cycle. */ }
+ finally {refreshing=false;}
+}
+setInterval(pollWorkspace,6000);
 async function navigate(page) {
   if (page === "platform" && !isPlatformAdmin()) { toast("需要平台管理员权限"); return; }
   state.page = page;
@@ -1534,6 +1487,16 @@ document.addEventListener("click", async (event) => {
   if (!button) return;
   const a = button.dataset.action;
   try {
+    if(a==='list-page'){
+      const key=button.dataset.list;
+      if(key.startsWith('detail-')){await loadDetailPage(key,Number(button.dataset.page));return;}
+      if(!['tasks','testing','releases','acceptance','evidence','overview-tasks','overview-events','projects','profiles','platform-projects','admins','accounts','conversations','mcp-grants'].includes(key)&&!key.startsWith('messages:')&&!key.startsWith('intakes:')&&!key.startsWith('collaborations:'))return;
+      setListPage(key,Number(button.dataset.page));
+      if(['projects','profiles','platform-projects','admins','accounts'].includes(key)){await refresh();if(key==='projects'){patchKeyedHTML($('.project-options'),state.projects.map(p=>`<button type="button" class="project-option" role="menuitemradio" data-action="switch-project" data-id="${escape(p.id)}" aria-checked="${p.id===state.project?.id}"><span class="project-option-name">${escape(p.name)}</span></button>`).join(''));patchKeyedHTML($('[data-pager=projects]'),pagerHTML(listResult('projects'),'projects'));}else updateBusinessPage();}
+      else if(key==='mcp-grants')await loadMCP();
+      else await loadBusinessPage();
+      return;
+    }
     if(a==='toggle-version-group'){state.versionGrouping=!state.versionGrouping;renderPage();return;}
     if(a==='iterate-task'){await taskForm(null,button.dataset.id);return;}
     if(a==='iteration-more'){
@@ -1799,7 +1762,7 @@ document.addEventListener("click", async (event) => {
         r.kind,
         r.task_id,
         r.prompt,
-        r.kind === "question" ? chatConversations(state.runs).find((c) => c.id === conversationID(r))?.latest.id || r.id : "",
+        r.kind === "question" ? workspaceConversations().find((c) => c.id === conversationID(r))?.latest.id || r.id : "",
         (r.attachments || []).map((a) => a.id),
       );
       return;
@@ -1992,6 +1955,8 @@ document.addEventListener("drop", (event) => {
   addChatFiles([...(event.dataTransfer?.files || [])]);
 });
 document.addEventListener("change", async (event) => {
+ if(event.target.matches('[data-page-size]')){const key=event.target.dataset.pageSize;if(key.startsWith('detail-')){void loadDetailPage(key,1,Number(event.target.value)).catch(e=>toast(e.message));return;}setListPage(key,1,Number(event.target.value));if(['profiles','projects','platform-projects','admins','accounts'].includes(key)){void refresh().then(updateBusinessPage).catch(e=>toast(e.message));}else if(key==='mcp-grants'){void loadMCP();}else void loadBusinessPage().catch(e=>toast(e.message));return;}
+
  if(['tl-end','tl-days','tl-grain'].includes(event.target.id)){await timelineUI.change(event.target);return;}
  if (event.target.id === "department-filter") {await searchEmployees(1);return;}
   if (event.target.name === "auth_mode") {
@@ -2006,14 +1971,14 @@ document.addEventListener("change", async (event) => {
     event.target.value = "";
     return;
   }
-  if(event.target.id==='version-filter'){state.versionFilter=event.target.value;$('#task-table').innerHTML=tasksTable();return;}
+  if(event.target.id==='version-filter'){state.versionFilter=event.target.value;setListPage('tasks');void loadBusinessPage().catch(e=>toast(e.message));return;}
   if (event.target.id === "task-filter") {
     state.filter = event.target.value;
-    $("#task-table").innerHTML = tasksTable();
+    setListPage("tasks");void loadBusinessPage().catch(e=>toast(e.message));
   }
   if (event.target.id === "kind-filter") {
     state.kind = event.target.value;
-    $("#task-table").innerHTML = tasksTable();
+    setListPage("tasks");void loadBusinessPage().catch(e=>toast(e.message));
   }
 });
 let employeeSearchTimer;
@@ -2044,7 +2009,7 @@ document.addEventListener("input", (event) => {
   }
   if (event.target.id === "task-search") {
     state.search = event.target.value;
-    $("#task-table").innerHTML = tasksTable();
+    setListPage("tasks");clearTimeout(taskSearchTimer);taskSearchTimer=setTimeout(()=>void loadBusinessPage().catch(e=>toast(e.message)),250);
   }
 });
 document.addEventListener("submit", async (event) => {
@@ -2068,6 +2033,7 @@ document.addEventListener("submit", async (event) => {
       const remove = form.dataset.remove === "true";
       const result = await api(`/projects/${encodeURIComponent(projectID)}/conversations/${encodeURIComponent(conversation)}`, remove ? undefined : {title: data.title}, remove ? "DELETE" : "PATCH");
       conversationMutationRevision++;
+      const summaries=listResult("conversations");summaries.items=summaries.items.filter(c=>!remove||c.id!==conversation).map(c=>c.id===conversation?{...c,title:result.title}:c);
       stopRunUpdates();
       if (remove) forgetConversation(projectID, conversation);
       else if (state.project?.id === projectID) {
@@ -2265,22 +2231,32 @@ try {
       `<div class="welcome"><h1>工作台暂时无法连接</h1><p>${escape(e.message)}</p><p>请确认 Go 服务已启动，然后刷新页面。</p></div>`;
 }
 
+function relatedBugRows(items){return items.map(b=>`<div class="record" data-key="${escape(b.id)}"><div class="row between">${action('open-task',escape(b.title),'',`data-id="${escape(b.id)}"`)}${status(b)}</div></div>`).join('');}
+function detailEventRows(items){return items.map(e=>`<div class="record" data-key="event:${e.seq}"><div class="record-header"><span>${escape(e.actor)} · ${escape(e.kind)}</span><span>${date(e.at)}</span></div><div class="prewrap">${escape(e.body)}</div></div>`).join('');}
+function detailArtifactRows(items){return items.map(a=>`<div class="record" data-key="${escape(a.id)}"><div class="record-header"><span>${escape(a.title)} · ${escape(a.source)}</span><span>${date(a.at)}</span></div><div class="prewrap">${escape(a.body)}</div></div>`).join('');}
+async function loadDetailPage(key,page,size){
+ const [kind,taskID]=key.split(':');setListPage(key,page,size);const params=listParams(key),projectID=state.project.id;
+ let path;if(kind==='detail-bugs'){path=`/projects/${projectID}/tasks`;params.set('parent_requirement_id',taskID);}else{path=`/projects/${projectID}/${kind==='detail-events'?'events':'artifacts'}`;params.set('task_id',taskID);}
+ const result=await api(`${path}?${params}`);if(state.project?.id!==projectID||!$('dialog'))return;businessLists.set(listScope(key),result);
+ const target=$(`#task-${kind}`),rows=kind==='detail-bugs'?relatedBugRows(result.items):kind==='detail-events'?detailEventRows(result.items):detailArtifactRows(result.items);
+ patchKeyedHTML(target,rows+pagerHTML(result,key));
+}
 function testingDetails(t,tasks=[]) {
  let html = '';
  if (t.parent_requirement_id) html += `<section class="detail-section"><h3>需求测试 Bug</h3>${action('open-task',escape(tasks.find(v=>v.id===t.parent_requirement_id)?.title || t.parent_requirement_id),'',`data-id="${escape(t.parent_requirement_id)}"`)}<p class="mono small">${escape(t.bug_context?.branch)} · ${escape(t.bug_context?.sha)}</p><p class="hint">评审基于提起时的需求 R${t.bug_context?.revision} 与提测版本；修复需合回所属需求的开发分支。</p></section>`;
  else if (t.kind === 'bug') html += '<p class="hint">平台 Bug · 不关联某个需求</p>';
- const bugs = tasks.filter(b=>b.parent_requirement_id === t.id);
- if (bugs.length) html += `<section class="detail-section"><h3>关联 Bug · ${bugs.filter(b=>!taskFinished(b)).length} 个未解决 / 共 ${bugs.length} 个</h3><p class="hint">全部 Bug 由产品验证解决或明确关闭后，需求进入待复测；测试通过后才能上线。</p>${bugs.map(b=>`<div class="record"><div class="row between">${action('open-task',escape(b.title),'',`data-id="${escape(b.id)}"`)}${status(b)}</div></div>`).join('')}</section>`;
+ const bugs = tasks.filter(b=>b.parent_requirement_id === t.id),related=listResult(`detail-bugs:${t.id}`);
+ if (related.total||bugs.length) html += `<section class="detail-section"><h3>关联 Bug · ${related.open_total??bugs.filter(b=>!taskFinished(b)).length} 个未解决 / 共 ${related.total||bugs.length} 个</h3><p class="hint">全部 Bug 由产品验证解决或明确关闭后，需求进入待复测；测试通过后才能上线。</p><div id="task-detail-bugs">${relatedBugRows(bugs)}${pagerHTML(related,`detail-bugs:${t.id}`)}</div></section>`;
  if (t.test_verification) html += `<section class="detail-section"><h3>${t.parent_requirement_id?'修复验证':'测试通过记录'}</h3><p class="mono small">${escape(t.test_verification.sha)} · ${escape(t.test_verification.environment)}</p><p class="prewrap">${escape(t.test_verification.note)}</p><p class="hint">${escape(t.test_verification.actor)} · ${date(t.test_verification.at)}</p></section>`;
  return html;
 }
 async function testingForm(taskID,operation) {
- const t=(await api(`/tasks/${taskID}`)).task;
+ const t=(await api(`/tasks/${taskID}?compact=true`)).task;
  const title=({test_pass:'确认测试通过',start_retest:'开始复测',verify_bug:'确认修复有效',return_bug:'修复无效，退回 Bug'})[operation];
  modal(title,`<form id="testing-form" data-id="${escape(t.id)}" data-version="${t.version}" data-revision="${t.revision}" data-operation="${operation}"><p>${escape(t.title)}</p>${operation==='start_retest'?'<p class="hint">填写已合入全部 Bug 修复的需求分支提交 SHA，平台将校验版本包含关系。</p>':''}${operation==='return_bug'?'':field('实际测试版本',`<input name="sha" required value="${escape(t.submission?.sha)}" ${operation==='start_retest'?'':'readonly'}>`)+field('测试环境',`<input name="environment" required value="${escape(t.submission?.environment || '')}">`)}${field(operation==='return_bug'?'退回原因':'测试说明与证据',`<textarea name="note" required rows="4" placeholder="说明验证过程、结果和证据链接"></textarea>`)}<div class="form-error" role="alert"></div><div class="modal-actions">${action('close','取消')}<button class="primary" type="submit">${title}</button></div></form>`);
 }
 
 function testingQueueHTML() {
  const tasks=(state.context?.tasks || []).filter(t=>['testing','fixing','retest','verifying'].includes(t.status));
- return `<h2 class="section-label">测试与修复 <span class="muted small">${tasks.length} 项</span></h2><div class="review-list">${tasks.length ? tasks.map(t=>`<div class="review-item"><div class="grow"><div class="title">${escape(t.title)}</div><p class="hint">${states[t.status]} · ${t.parent_requirement_id?'需求测试 Bug':'需求 / 平台 Bug'}</p></div>${action('open-task','查看与处理','',`data-id="${escape(t.id)}"`)}</div>`).join('') : '<p class="context-note">暂无等待测试或修复的事项。</p>'}</div><div class="divider"></div>`;
+ return `<h2 class="section-label">测试与修复 <span class="muted small">${listResult("testing").total} 项</span></h2><div class="review-list">${tasks.length ? tasks.map(t=>`<div class="review-item" data-key="task:${t.id}"><div class="grow"><div class="title">${escape(t.title)}</div><p class="hint">${states[t.status]} · ${t.parent_requirement_id?'需求测试 Bug':'需求 / 平台 Bug'}</p></div>${action('open-task','查看与处理','',`data-id="${escape(t.id)}"`)}</div>`).join('') : '<p class="context-note">暂无等待测试或修复的事项。</p>'}</div>${pagerHTML(listResult('testing'),'testing')}<div class="divider"></div>`;
 }
