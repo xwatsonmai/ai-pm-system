@@ -1,6 +1,15 @@
 import {projectPages} from './navigation.mjs';
 
 export const responsibilities = {product:'产品',developer:'开发',tester:'测试'};
+export function taskControlAllowed(action, task, access) {
+  let pages=['tasks'];
+  if(['review','test-pass','start-retest','verify-bug','return-bug'].includes(action))pages=['reviews'];
+  else if(action==='mark-deployed')pages=['reviews','versions'];
+  else if(['pv-open','pv-assign'].includes(action))pages=['versions'];
+  else if(action==='file-testing-bug')pages=['tasks','reviews'];
+  else if(task.parent_requirement_id && ['edit-task','requirement-review','task-close','task-decline','task-reopen'].includes(action))pages=['tasks','reviews'];
+  return pages.some(page=>access?.pages?.includes(page));
+}
 export function memberPayload(form, picked, version) {
   return {roles:[...picked], responsibilities:new FormData(form).getAll('responsibilities'), version};
 }

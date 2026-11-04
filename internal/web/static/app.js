@@ -12,7 +12,7 @@ import { iterationContextHTML, iterationHistoryHTML, iterationRowsHTML } from '.
 import {mountProjectTimeline} from './project-timeline.mjs';
 import {projectVersionsPage,mountProjectVersions,versionName,versionOptions} from './project-versions.mjs';
 import {pageTitles, navigationHTML, routeFromURL, routeURL, allowedPage, firstAccessiblePage, expandedForPage} from './navigation.mjs';
-import {mountProjectAccess} from './project-access.mjs';
+import {mountProjectAccess, taskControlAllowed} from './project-access.mjs';
 const busyIntakes = new Set();
 let requirementEditor = null;
 let requirementReview = null;
@@ -1227,6 +1227,11 @@ async function openTask(taskID) {
       "",
       `data-id="${t.id}" data-kind="${t.kind === "bug" ? "triage" : "requirements"}"`,
     );
+  const controls=document.createElement('template');controls.innerHTML=buttons;
+  controls.content.querySelectorAll('[data-action]').forEach(button=>{
+    if(!taskControlAllowed(button.dataset.action,t,state.project_access))button.remove();
+  });
+  buttons=controls.innerHTML;
   modal(
     `<span class="mono muted">${short(t.id)} · ${t.kind === "bug" ? (t.parent_requirement_id ? "需求测试 Bug" : "平台 Bug") : "迭代需求"}</span>`,
     `<h1 class="detail-title">${escape(t.title)}</h1><div class="detail-meta">${status(t)}<span class="badge">${priorities[t.priority]}</span><span class="badge">修订 R${t.revision}</span><span class="badge">${escape(t.owner || "未认领")}</span>${t.reviewer ? `<span class="badge">验收：${escape(t.reviewer)}</span>` : ""}</div>${t.blocker ? `<div class="notice">阻塞：${escape(t.blocker)}</div>` : ""}${t.status === "ready" && t.alignment?.status === "replied" ? `<div class="notice">产品已回复，等待原开发客户端确认。原客户端无法继续时，可重新开放领取；已有对齐记录会追加进需求正文。</div>` : ""}<div class="detail-actions">${buttons}</div>${t.resolution?`<section class="task-resolution notice"><strong>${states[t.status]} · ${states[t.resolution.from_status]}阶段结束</strong><p class="prewrap">${escape(t.resolution.reason)}</p><span class="small muted">${escape(t.resolution.actor)} · ${date(t.resolution.at)}</span></section>`:""}${testingDetails(t,ctx.tasks)}${iterationContextHTML(t.iteration)}<section class="detail-section"><h3>需求与背景</h3><div class="requirement-description markdown-content">${renderMarkdown(t.description || "尚未补充描述")}</div></section>${t.attachments?.length ? `<section class="detail-section"><h3>附件 · ${t.attachments.length}</h3>${sentAttachments(t)}</section>` : ""}<section class="detail-section"><h3>验收条件</h3>${t.acceptance.length ? `<ul class="acceptance-list">${t.acceptance.map((v) => `<li><i class="square ${t.status === "done" ? "checked" : ""}" aria-hidden="true">${t.status === "done" ? "✓" : ""}</i>${escape(v)}</li>`).join("")}</ul>` : '<p class="context-note">补充预期行为后，再进入待认领队列。</p>'}</section>${t.submission ? `<section class="detail-section"><h3>最近一次提交 · R${t.submission.revision}</h3><div class="prewrap">${escape(t.submission.summary)}</div><p class="mono muted">${escape(t.submission.sha)} · ${escape(t.submission.environment || "环境未说明")}</p><p class="prewrap">${escape(t.submission.tests)}</p>${t.submission.limitations ? `<div class="notice info">未完成或未验证：${escape(t.submission.limitations)}</div>` : ""}<p class="hint">本次提交版本的验证记录；后续测试、实际上线与业务验收分别记录。</p></section>` : ""}${t.deployment ? `<section class="detail-section"><h3>最近一次上线 · R${t.deployment.revision}</h3><p class="mono muted">${escape(t.deployment.sha)} · ${escape(t.deployment.environment)}</p><p class="prewrap">${escape(t.deployment.body)}</p><p class="hint">${escape(t.deployment.actor)} · ${t.deployment.source === "developer" ? "开发汇报" : "人工确认"} · ${date(t.deployment.at)}${t.deployment.revision !== t.revision ? " · 历史版本，当前需求需重新开发和上线" : ""}</p></section>` : ""}${t.review ? `<section class="detail-section"><h3>验收记录</h3><div class="prewrap">${t.review.accepted ? "通过" : "退回"} · ${escape(t.review.environment)} · ${date(t.review.at)}\n${escape(t.review.note)}</div></section>` : ""}${iterationHistoryHTML(ctx.iteration_history,t,state.context.project_versions)}<section class="detail-section"><h3>分析与证据</h3><div id="task-detail-artifacts">${artifacts.map((a) => `<div class="record"><div class="record-header"><span>${escape(a.title)} · ${escape(a.source)}</span><span>${date(a.at)}</span></div><div class="prewrap">${escape(a.body)}</div></div>`).join("") || '<p class="context-note">平台分析和相关证据会保留在这里。</p>'}${pagerHTML(ctx.artifact_page,`detail-artifacts:${t.id}`)}</div>${runs
@@ -1247,6 +1252,12 @@ async function openTask(taskID) {
       .join("")}${pagerHTML(ctx.event_page,`detail-events:${t.id}`)}</div></section>`,
     { drawer: true },
   );
+  if(!state.project_access?.pages.includes('tasks'))$('#report-form')?.remove();
+  if(!taskControlAllowed('requirement-review',t,state.project_access)){
+    $$('.detail-meta [data-action=requirement-review]').forEach(button=>{
+      const label=document.createElement('span');label.className=button.className;label.innerHTML=button.innerHTML;button.replaceWith(label);
+    });
+  }
 }
 // Links such as /?task=<id> from the to-do page open that task in its project.
 async function openLinkedTask(taskID) {
