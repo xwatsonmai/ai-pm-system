@@ -199,7 +199,7 @@ func (s *Server) platformRoutes(mux *http.ServeMux) {
 			fail(w, e)
 			return
 		}
-		respond(w, p)
+		respond(w, s.repositoryProjectFor(r, p))
 	}
 	mux.Handle("PUT /api/projects/{id}/members/{user}", s.projectAccess(http.HandlerFunc(member)))
 	mux.Handle("DELETE /api/projects/{id}/members/{user}", s.projectAccess(http.HandlerFunc(member)))
