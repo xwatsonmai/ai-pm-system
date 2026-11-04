@@ -274,6 +274,12 @@ func ArtifactAccess(a domain.Actor, p domain.Project) (string, bool) {
 	return mode, CanAccessAnyPage(a, p, "code", "git", "timeline")
 }
 func VisibleArtifact(a domain.Actor, p domain.Project, v domain.Artifact) bool {
+	if v.OriginUnavailable {
+		return false
+	}
+	if v.OriginOwnerID != "" && !CanReadRun(a, p, domain.Run{ProjectID: p.ID, OwnerID: v.OriginOwnerID, OwnerKind: v.OriginOwnerKind, Kind: v.OriginRunKind}) {
+		return false
+	}
 	mode, git := ArtifactAccess(a, p)
 	if v.Kind == "git" && !git {
 		return false

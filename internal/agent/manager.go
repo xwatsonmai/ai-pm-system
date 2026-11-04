@@ -1009,7 +1009,7 @@ func (m *Manager) callTool(c context.Context, a domain.Actor, r domain.Run, call
 		} else {
 			data, err = m.App.Context(c, a, r.ProjectID, args["task_id"])
 		}
-		if err == nil && r.CodeSnapshot != nil {
+		if err == nil && r.CodeSnapshot != nil && (!userOwnedRun(r) || m.App.RequirePages(c, a, r.ProjectID, "code") == nil) {
 			data["code_snapshot"] = r.CodeSnapshot
 		}
 		return data, err
@@ -1043,13 +1043,17 @@ func (m *Manager) callTool(c context.Context, a domain.Actor, r domain.Run, call
 		if userOwnedRun(r) {
 			writer = domain.Actor{ID: "platform", Name: "平台 Agent", Kind: "platform", ProjectID: r.ProjectID}
 		}
-		return m.App.Artifact(c, writer, domain.Artifact{ID: "analysis_" + r.ID + "_" + app.Hash(callID)[:12], ProjectID: r.ProjectID, TaskID: r.TaskID, Kind: args["kind"], Title: args["title"], Body: args["body"], SHA: args["sha"]})
+		return m.App.Artifact(c, writer, domain.Artifact{ID: "analysis_" + r.ID + "_" + app.Hash(callID)[:12], OriginRunID: r.ID, ProjectID: r.ProjectID, TaskID: r.TaskID, Kind: args["kind"], Title: args["title"], Body: args["body"], SHA: args["sha"]})
 	case "create_bug":
 		if r.Kind != "triage" {
 			return nil, domain.ErrForbidden
 		}
 		v := app.TaskInput{Title: args["title"], Kind: "bug", Description: args["description"], Acceptance: strings.Split(args["acceptance"], "\n"), Priority: "next", RequestID: "bug_" + app.Hash(args["title"]+args["description"])}
-		return m.App.CreateTask(c, a, r.ProjectID, v)
+		writer := a
+		if userOwnedRun(r) {
+			writer = domain.Actor{ID: "platform", Name: "平台 Agent", Kind: "platform", ProjectID: r.ProjectID}
+		}
+		return m.App.CreateTask(c, writer, r.ProjectID, v)
 	default:
 		return nil, fmt.Errorf("未开放的工具：%s", name)
 	}

@@ -932,6 +932,30 @@ func (s *Service) CreateToken(c context.Context, p, name string) (domain.Token, 
 	return t, raw, s.Store.PutToken(c, t)
 }
 func (s *Service) Artifact(c context.Context, a domain.Actor, v domain.Artifact) (domain.Artifact, error) {
+	v.OriginOwnerID, v.OriginOwnerKind, v.OriginRunKind, v.OriginUnavailable = "", "", "", false
+	if v.OriginRunID != "" {
+		if a.Kind != "platform" {
+			return v, domain.ErrForbidden
+		}
+		r, e := s.Store.GetRun(c, v.OriginRunID)
+		if e != nil {
+			return v, e
+		}
+		if r.ProjectID != v.ProjectID {
+			return v, domain.ErrForbidden
+		}
+		v.OriginOwnerID, v.OriginOwnerKind, v.OriginRunKind = r.OwnerID, r.OwnerKind, r.Kind
+		if r.Kind == "question" && r.OwnerID == "" {
+			p, e := s.Store.GetProject(c, r.ProjectID)
+			if e != nil {
+				return v, e
+			}
+			v.OriginOwnerID, v.OriginOwnerKind = p.OwnerID, "human"
+			if v.OriginOwnerID == "" {
+				v.OriginOwnerID = "local-owner"
+			}
+		}
+	}
 	pages := []string{"reviews"}
 	if v.Kind == "analysis" || v.Kind == "question" || v.Kind == "knowledge" {
 		pages = []string{"overview", "chat"}

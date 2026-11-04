@@ -283,8 +283,12 @@ func (s *Service) RequirementDetail(c context.Context, a domain.Actor, project s
 		return out, err
 	}
 	files := []domain.Artifact{}
+	p, err := s.Store.GetProject(c, project)
+	if err != nil {
+		return out, err
+	}
 	for _, v := range artifacts {
-		if v.TaskID == t.ID {
+		if v.TaskID == t.ID && VisibleArtifact(a, p, v) {
 			files = append(files, v)
 		}
 	}
