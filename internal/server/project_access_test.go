@@ -97,6 +97,25 @@ func TestPageGrantsProtectDirectAPIAndLegacySettingsPUT(t *testing.T) {
 	if e = json.Unmarshal([]byte(roles), &page); e != nil || len(page.Items) != 2 || page.Total != 6 {
 		t.Fatal(roles, e)
 	}
+	// A role manager without a Git/code page cannot retrieve source metadata
+	// through the write response of the member-management endpoint.
+	manager := domain.Actor{ID: "role-manager", Kind: "human"}
+	_ = db.PutUser(c, domain.User{ID: manager.ID})
+	p, _ = db.GetProject(c, p.ID)
+	p, e = svc.SaveProjectRole(c, owner, p.ID, "", app.RoleInput{Name: "权限管理", Pages: []string{"access"}, Version: p.AccessVersion})
+	if e != nil {
+		t.Fatal(e)
+	}
+	managerRole := p.ProjectRoles[len(p.ProjectRoles)-1].ID
+	p, e = svc.SetProjectMemberAccess(c, owner, p.ID, manager.ID, []string{managerRole}, []string{}, false, p.AccessVersion)
+	if e != nil {
+		t.Fatal(e)
+	}
+	request, _ := json.Marshal(map[string]any{"roles": []string{managerRole}, "responsibilities": []string{}, "version": p.AccessVersion})
+	saved := call(manager, "PUT", base+"/members/"+manager.ID, string(request), 200)
+	if strings.Contains(saved, "private.git") {
+		t.Fatal("member response leaked forbidden Git settings", saved)
+	}
 	// A non-member platform administrator has recovery management, not business data.
 	recovery := domain.Actor{ID: "recovery", Kind: "human", PlatformAdmin: true}
 	call(recovery, "GET", base+"/roles", "", 200)
