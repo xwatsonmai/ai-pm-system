@@ -197,11 +197,11 @@ func (s *Service) replyDevelopmentAlignment(c context.Context, a domain.Actor, t
 			}
 		}
 	}
-	files, err := s.taskAttachments(c, t.ProjectID, in.AttachmentIDs)
+	files, err := s.taskAttachments(c, a, t.ProjectID, in.AttachmentIDs)
 	if err != nil {
 		return v, err
 	}
-	notes, err := s.requirementQuestionNotes(c, t.ProjectID, v, in)
+	notes, err := s.requirementQuestionNotes(c, a, t.ProjectID, v, in)
 	if err != nil {
 		return v, err
 	}

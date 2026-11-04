@@ -275,13 +275,16 @@ func (d *DB) QueryDocuments(c context.Context, q domain.ListDocumentQuery) (doma
 	case "runs", "conversations":
 		cid := `COALESCE(NULLIF(json_extract(d.payload,'$.conversation_id'),''),d.id)`
 		from = `FROM documents d LEFT JOIN documents meta ON meta.kind='conversation' AND meta.project_id=d.project_id AND meta.id=` + cid
-		where = `d.kind='run' AND d.project_id=? AND COALESCE(json_extract(meta.payload,'$.deleted_at'),0)=0 AND (json_extract(d.payload,'$.kind')<>'question' OR (COALESCE(json_extract(d.payload,'$.owner_id'),'')<>'' AND json_extract(d.payload,'$.owner_id')=? AND json_extract(d.payload,'$.owner_kind')=?) OR (COALESCE(json_extract(d.payload,'$.owner_id'),'')='' AND ?))`
-		args = append(args, q.ProjectID, q.UserID, q.ActorKind, q.LegacyOwner)
+		where = `d.kind='run' AND d.project_id=? AND COALESCE(json_extract(meta.payload,'$.deleted_at'),0)=0 AND ((json_extract(d.payload,'$.kind')<>'question' AND COALESCE(json_extract(d.payload,'$.owner_id'),'')='') OR (COALESCE(json_extract(d.payload,'$.owner_id'),'')<>'' AND json_extract(d.payload,'$.owner_id')=? AND (json_extract(d.payload,'$.owner_kind')=? OR (? AND json_extract(d.payload,'$.owner_kind') IN ('human','developer')))) OR (json_extract(d.payload,'$.kind')='question' AND COALESCE(json_extract(d.payload,'$.owner_id'),'')='' AND ?))`
+		args = append(args, q.ProjectID, q.UserID, q.ActorKind, q.PersonalUser || q.ActorKind == "human", q.LegacyOwner)
 		if q.ExcludeQuestions {
 			where += ` AND json_extract(d.payload,'$.kind')<>'question'`
 		}
 		if q.OnlyQuestions {
 			where += ` AND json_extract(d.payload,'$.kind')='question'`
+		}
+		if q.ExcludeOwnedTaskRuns {
+			where += ` AND (json_extract(d.payload,'$.kind')='question' OR COALESCE(json_extract(d.payload,'$.owner_id'),'')='')`
 		}
 		order = "COALESCE(json_extract(d.payload,'$.started_at'),0) DESC,d.id DESC"
 		projection = `CASE WHEN COALESCE(json_extract(meta.payload,'$.title'),'')<>'' THEN json_set(d.payload,'$.conversation_title',json_extract(meta.payload,'$.title'),'$.title_status','manual') ELSE d.payload END`

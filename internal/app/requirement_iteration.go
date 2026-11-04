@@ -100,7 +100,7 @@ func (s *Service) createRequirementIteration(c context.Context, a domain.Actor, 
 	if e = validateInput(&in.TaskInput); e != nil {
 		return out, e
 	}
-	files, e := s.taskAttachments(c, source.ProjectID, in.AttachmentIDs)
+	files, e := s.taskAttachments(c, a, source.ProjectID, in.AttachmentIDs)
 	if e != nil {
 		return out, e
 	}

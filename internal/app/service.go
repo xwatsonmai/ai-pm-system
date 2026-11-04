@@ -308,7 +308,7 @@ func (s *Service) createTask(c context.Context, a domain.Actor, p string, v Task
 	if m, ok, e := s.prior(c, key, fp); ok || e != nil {
 		return m, e
 	}
-	attachments, e := s.taskAttachments(c, p, v.AttachmentIDs)
+	attachments, e := s.taskAttachments(c, a, p, v.AttachmentIDs)
 	if e != nil {
 		return domain.Mutation{}, e
 	}
@@ -397,7 +397,7 @@ func (s *Service) editTask(c context.Context, a domain.Actor, id string, v TaskI
 	// an explicit empty array removes them.
 	attachments := t.Attachments
 	if v.AttachmentIDs != nil {
-		attachments, e = s.taskAttachments(c, t.ProjectID, v.AttachmentIDs)
+		attachments, e = s.taskAttachments(c, a, t.ProjectID, v.AttachmentIDs)
 		if e != nil {
 			return domain.Mutation{}, e
 		}

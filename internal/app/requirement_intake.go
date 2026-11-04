@@ -170,7 +170,7 @@ func (s *Service) ConversationIntakeContext(c context.Context, r domain.Run) ([]
 func (s *Service) ProposeRequirement(c context.Context, runID string, in RequirementIntakeInput) (domain.RequirementIntake, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r, _, err := s.requirementIntakeOwner(c, runID)
+	r, a, err := s.requirementIntakeOwner(c, runID)
 	if err != nil {
 		return domain.RequirementIntake{}, err
 	}
@@ -200,7 +200,7 @@ func (s *Service) ProposeRequirement(c context.Context, runID string, in Require
 			return domain.RequirementIntake{}, errors.New("只能关联当前会话中用户已经发送的附件")
 		}
 	}
-	files, err := s.taskAttachments(c, r.ProjectID, in.AttachmentIDs)
+	files, err := s.taskAttachments(c, a, r.ProjectID, in.AttachmentIDs)
 	if err != nil {
 		return domain.RequirementIntake{}, err
 	}

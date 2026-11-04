@@ -22,7 +22,7 @@ func (s *Service) queueRequirementDiscussion(c context.Context, a domain.Actor, 
 	if in.Action != "retry" && !nonempty(in.Body) && len(in.AttachmentIDs) == 0 {
 		return v, errors.New("请输入问题或添加截图")
 	}
-	files, err := s.taskAttachments(c, t.ProjectID, in.AttachmentIDs)
+	files, err := s.taskAttachments(c, a, t.ProjectID, in.AttachmentIDs)
 	if err != nil {
 		return v, err
 	}

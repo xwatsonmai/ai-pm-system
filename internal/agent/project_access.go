@@ -24,7 +24,21 @@ func (m *Manager) questionReadActor(c context.Context, r domain.Run) (domain.Act
 	}
 	return m.App.CollaborationOwner(c, id, kind, r.ProjectID)
 }
-func (m *Manager) authorizeQuestionTool(c context.Context, a domain.Actor, r domain.Run, name string) error {
+
+func userOwnedRun(r domain.Run) bool { return r.Kind == "question" || r.OwnerID != "" }
+
+func (m *Manager) runReadActor(c context.Context, r domain.Run) (domain.Actor, error) {
+	if r.Kind == "question" {
+		return m.questionReadActor(c, r)
+	}
+	a, e := m.App.ProjectOwnerActor(c, r.OwnerID, r.OwnerKind, r.ProjectID)
+	if e != nil {
+		return a, e
+	}
+	return a, m.App.RequirePages(c, a, r.ProjectID, "tasks")
+}
+
+func (m *Manager) authorizeRunTool(c context.Context, a domain.Actor, r domain.Run, name string) error {
 	var pages []string
 	switch {
 	case name == "requirement_pool" || name == "requirement_detail" || name == "requirement_iterations":
@@ -48,7 +62,7 @@ func (m *Manager) authorizeQuestionTool(c context.Context, a domain.Actor, r dom
 
 // Native sandbox tools execute in the worker. Stop that worker promptly when
 // its owner loses chat/source access; ordinary RPC tools recheck on every call.
-func (m *Manager) guardQuestionPermissions(c context.Context, cancel context.CancelFunc, r domain.Run, source bool) {
+func (m *Manager) guardRunPermissions(c context.Context, cancel context.CancelFunc, r domain.Run, source bool) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -56,7 +70,7 @@ func (m *Manager) guardQuestionPermissions(c context.Context, cancel context.Can
 		case <-c.Done():
 			return
 		case <-ticker.C:
-			a, e := m.questionReadActor(c, r)
+			a, e := m.runReadActor(c, r)
 			if e != nil {
 				cancel()
 				return

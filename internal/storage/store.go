@@ -96,6 +96,7 @@ type Store interface {
 	PutConversation(context.Context, domain.Conversation) error
 	PutAttachment(context.Context, domain.Attachment) error
 	GetAttachment(context.Context, string) (domain.Attachment, error)
+	AttachmentReferences(context.Context, string, string) ([]domain.AttachmentReference, error)
 	ListProfiles(context.Context) ([]domain.Profile, error)
 	GetProfile(context.Context, string) (domain.Profile, error)
 	PutProfile(context.Context, domain.Profile) error
