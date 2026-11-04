@@ -3005,3 +3005,12 @@ details.rc-card > summary::-webkit-details-marker { display: none; }
 
 .list-pagination{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:16px 0;flex-wrap:wrap}.list-pagination .row{gap:8px}.list-pagination select{width:auto;min-width:64px;padding:6px}.list-pagination button{white-space:nowrap}.list-load-error{padding:12px;color:var(--danger,#b84136)}
 @media(max-width:600px){.list-pagination{align-items:flex-start}.list-pagination>.row{width:100%;flex-wrap:wrap}}
+.review-history-pagination:empty{display:none}.review-history-pagination{display:flex;justify-content:center;align-items:center;gap:12px;padding:8px 16px;border-bottom:1px solid var(--line,#e5e7eb);flex-shrink:0}.review-history-pagination button{padding:5px 10px;font-size:12px}
+
+/* Parallel versions keep the two creation actions usable on narrow screens. */
+.pv-page .page-heading > :first-child { min-width: 0; }
+.pv-page .page-heading > .row { flex-shrink: 0; }
+@media (max-width: 760px) {
+  .pv-page .page-heading { flex-direction: column; }
+  .pv-page .page-heading > .row { width: 100%; justify-content: flex-start; }
+}

@@ -249,11 +249,13 @@ func (r *Repositories) resolve(c context.Context, p, ref string) (string, error)
 }
 
 type Query struct {
-	Action string `json:"action"`
-	Ref    string `json:"ref"`
-	Path   string `json:"path"`
-	Query  string `json:"query"`
-	Base   string `json:"base"`
+	Page     int    `json:"page,omitempty"`
+	PageSize int    `json:"page_size,omitempty"`
+	Action   string `json:"action"`
+	Ref      string `json:"ref"`
+	Path     string `json:"path"`
+	Query    string `json:"query"`
+	Base     string `json:"base"`
 }
 
 func (r *Repositories) Read(c context.Context, p string, q Query) (map[string]any, error) {
@@ -271,6 +273,9 @@ func (r *Repositories) Read(c context.Context, p string, q Query) (map[string]an
 	ref, e := r.resolve(c, p, q.Ref)
 	if e != nil {
 		return nil, e
+	}
+	if (q.Page != 0 || q.PageSize != 0) && (q.Action == "tree" || q.Action == "log" || q.Action == "search") {
+		return r.readListPage(c, p, ref, q)
 	}
 	var out string
 	switch q.Action {

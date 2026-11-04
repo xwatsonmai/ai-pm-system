@@ -32,7 +32,7 @@ func productSpecs() []toolSpec {
 	return []toolSpec{
 		write("requirement_iterate", "基于已验收(done)的需求/Bug追加独立迭代，保留已验收上下文，原单不回退；归入指定或默认版本，先保存后后台评审", map[string]string{"task_id": "已验收的起点需求ID", "input": "JSON对象：source_version为起点需求最新version；title、description描述本次变化；kind、acceptance、attachment_ids、priority、reviewer、project_version_id(目标进行中版本)可选"}, "task_id", "input"),
 		{"requirement_iterations", "读取需求迭代记录及最初需求摘要；不限轮数，has_more时继续分页。每轮的正文和冻结上下文用task_get_context读取。", map[string]string{"task_id": "当前项目任意一轮需求ID", "offset": "分页偏移，默认0", "limit": "每页1–50，默认10"}, []string{"task_id"}},
-		{"project_milestone_get", "读取当前里程碑，没有时返回null；读取不会创建。产品创建需求时自动创建/归入当前里程碑。", nil, nil},
+		{"project_milestone_get", "读取默认版本，没有时返回null；读取不会创建。未指定目标的新需求进入默认版本，多个进行中版本可并行。", nil, nil},
 		{"project_timeline", "产品项目时间线：里程碑和需求事件、真实Git提交、明确的SHA关联；仓库读取失败与没有提交分别报告。", map[string]string{"from": "起始毫秒时间戳，可选，默认最近30天", "until": "结束毫秒时间戳，不包含，可选；翻页保持不变", "offset": "需求事件偏移，默认0", "git_offset": "提交偏移，默认0", "git_anchor": "上页返回的提交快照，翻页保持不变", "limit": "每页1–200，默认100"}, nil},
 		write("requirement_create", "产品创建需求/Bug，先持久化完整原文与附件，再后台评审，归入指定或默认版本；不必认领", map[string]string{"input": "JSON对象：title必填，kind为requirement或bug，description为完整Markdown，可含截图，acceptance为字符串数组；attachment_ids引用已上传附件；priority/reviewer/project_version_id(目标进行中版本)可选"}, "input"),
 		write("requirement_update", "产品修改需求；input只填要修改字段，未提供的字段保留；先读取最新version，保存后需重新核对/评审", map[string]string{"task_id": "需求ID", "input": "JSON对象：version最新正整数必填；可选title、kind、description、acceptance、priority、reviewer、attachment_ids；空数组表示清空附件或验收条件"}, "task_id", "input"),

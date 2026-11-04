@@ -14,7 +14,12 @@ func (s *Server) getRequirementReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.reviewMentionWarnings(r, &v)
-	respond(w, v)
+	response, e := reviewMessagePage(r, v)
+	if e != nil {
+		fail(w, e)
+		return
+	}
+	respond(w, response)
 }
 func (s *Server) saveRequirementReview(w http.ResponseWriter, r *http.Request) {
 	var in app.RequirementReviewInput
@@ -41,7 +46,12 @@ func (s *Server) saveRequirementReview(w http.ResponseWriter, r *http.Request) {
 		v = latest
 	}
 	s.reviewMentionWarnings(r, &v)
-	respond(w, v)
+	response, e := reviewMessagePage(r, v)
+	if e != nil {
+		fail(w, e)
+		return
+	}
+	respond(w, response)
 }
 
 func (s *Server) reviewMentionWarnings(r *http.Request, v *domain.RequirementReview) {

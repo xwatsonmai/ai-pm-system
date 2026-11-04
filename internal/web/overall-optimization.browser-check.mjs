@@ -55,7 +55,18 @@ try{
   await api(member,`/projects/${project.id}/git`,{branch:'unauthorized'},'PATCH',403);
   const context=await api(member,`/projects/${project.id}/context`);assert.equal((context.runs||[]).length,0);assert.equal((context.artifacts||[]).length,0);
   await member.goto(`${site}/?page=access&project=${project.id}`);await member.locator('.nav [data-page=versions][aria-current=page]').waitFor();assert.equal(await member.locator('#project-roles').count(),0);
+  const firstTask=(await api(admin,`/projects/${project.id}/tasks?page=1&page_size=20`)).items[0];
+  await member.goto(`${site}/?page=versions&project=${project.id}&task=${firstTask.id}`);await member.locator('.detail-title').waitFor();
+  assert.equal(await member.locator('dialog [data-action=edit-task]').count(),0);assert.equal(await member.locator('#report-form').count(),0);
+  const currentAccess=await api(admin,`/projects/${project.id}/access`);
+  await api(admin,`/projects/${project.id}/roles/${role.id}`,{name:'版本审阅员',description:'已撤销页面访问',pages:[],version:currentAccess.version},'PUT');
+  await member.locator('.nav [data-page=versions]').waitFor({state:'detached',timeout:15000});assert.equal(await member.locator('.detail-title').count(),0);
+  await api(member,`/projects/${project.id}/tasks?page=1&page_size=20`,undefined,'GET',403);
+  await nav(admin,'access');await admin.locator('.role-row').filter({hasText:'版本审阅员'}).locator('[data-action=access-delete-role]').click();await admin.locator('#access-delete-role-form [name=replacement_role_id]').selectOption('developer');await admin.locator('#access-delete-role-form button[type=submit]').click();await admin.locator('#access-delete-role-form').waitFor({state:'detached'});
+  assert.equal((await roleList()).items.some(r=>r.id===role.id),false);
+  const migrated=(await api(admin,`/projects/${project.id}/members`)).items.find(m=>m.user.id===account.user_id);assert.deepEqual(migrated.roles,['developer']);assert.deepEqual(migrated.responsibilities,['developer']);
   report.permissions='角色创建/改名、成员角色与职责独立保存、限制菜单/直达/API，普通用户使用独立会话验证';
+  report.revocation='已有详情和菜单在撤权后清除，后端立即拒绝；删除已分配角色时迁移成员并保留职责';
 
   await nav(admin,'tasks');await admin.locator('.task-table tbody tr').first().waitFor();assert.equal(await admin.locator('.task-table tbody tr').count(),20);
   const response=await api(admin,`/projects/${project.id}/tasks?page=2&page_size=20`);assert.equal(response.items.length,20);assert.equal(response.total,43);assert(response.items.every(t=>!t.description),'page query must not return full task documents');

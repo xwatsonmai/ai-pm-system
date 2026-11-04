@@ -71,3 +71,40 @@ func TestVersionMigrationPreservesExistingRowsAndAtomicCAS(t *testing.T) {
 		t.Fatal("version snapshot not persisted")
 	}
 }
+
+func TestDatabaseReopenPreservesParallelVersionsAndDefault(t *testing.T) {
+	c := context.Background()
+	path := filepath.Join(t.TempDir(), "parallel.db")
+	db, e := Open(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, id := range []string{"A", "B"} {
+		v := domain.ProjectVersion{ID: id, ProjectID: "p", Name: id, Status: "active", Version: 1, Scope: []domain.VersionScopeItem{}, Releases: []domain.VersionRelease{}, History: []domain.VersionHistoryEntry{}}
+		if e = db.CommitVersionPlan(c, []domain.VersionWrite{{Value: v, Expected: 0}}, nil, nil, nil); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if e = db.CommitVersionPlan(c, nil, nil, nil, nil, domain.MilestoneBatch{State: &domain.CurrentMilestone{ProjectID: "p", VersionID: "A", Version: 1}}); e != nil {
+		t.Fatal(e)
+	}
+	db.Close()
+	db, e = Open(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer db.Close()
+	versions, e := db.ListProjectVersions(c, "p")
+	if e != nil || len(versions) != 2 {
+		t.Fatal(versions, e)
+	}
+	for _, v := range versions {
+		if v.Status != "active" || v.Version != 1 {
+			t.Fatal("reopen reran old single-current migration", v)
+		}
+	}
+	state, e := db.GetCurrentMilestone(c, "p")
+	if e != nil || state.VersionID != "A" || state.Version != 1 {
+		t.Fatal(state, e)
+	}
+}

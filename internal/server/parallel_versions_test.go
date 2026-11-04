@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"testing"
 )
@@ -28,7 +29,7 @@ func TestParallelVersionsPagedHTTPCompatibility(t *testing.T) {
 	}
 	versions := []domain.ProjectVersion{}
 	for i := 0; i < 3; i++ {
-		v, e := service.SaveProjectVersion(c, app.Human(), project.ID, "", app.ProjectVersionInput{Name: fmt.Sprintf("版本%d", i), RequestID: fmt.Sprint(i)})
+		v, e := service.SaveProjectVersion(c, app.Human(), project.ID, "", app.ProjectVersionInput{Name: fmt.Sprintf("版本%d", i), Goal: "不可从轻选项搜索的目标", RequestID: fmt.Sprint(i)})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -85,6 +86,15 @@ func TestParallelVersionsPagedHTTPCompatibility(t *testing.T) {
 	get("/project-versions/"+versions[1].ID+"/releases?page=1&page_size=2", &releases)
 	if releases.Total != 0 || releases.Items == nil {
 		t.Fatal(releases)
+	}
+	var choices domain.Page[app.VersionChoice]
+	get("/projects/"+project.ID+"/version-options?page=1&q="+url.QueryEscape("不可从轻选项搜索的目标"), &choices)
+	if choices.Total != 0 {
+		t.Fatal("light options leaked private goals through search", choices)
+	}
+	get("/projects/"+project.ID+"/version-options?page=1&page_size=1", &choices)
+	if choices.Total != 3 || len(choices.Items) != 1 {
+		t.Fatal(choices)
 	}
 	response, e := http.Get(site.URL + "/api/projects/" + project.ID + "/versions?page=0")
 	if e != nil {

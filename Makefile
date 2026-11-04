@@ -16,7 +16,7 @@ test:
 	go vet ./...
 	npm test --prefix runtime
 	node --test internal/web/*.test.mjs
-	node --check internal/web/static/app.js
+	node --input-type=module --check < internal/web/static/app.js
 	node --check internal/web/static/requirement-editor.mjs
 	node --check internal/web/static/requirement-review.mjs
 	node --check internal/web/static/requirement-review-state.mjs

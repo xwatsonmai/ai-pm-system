@@ -85,8 +85,9 @@ async function mcpClaim(task) {
   assert(r.ok && !v.error && !v.result.isError, JSON.stringify(v));
   return JSON.parse(v.result.content[0].text);
 }
-const close = async () => page.locator("#overlays [data-action=close]").click();
+const close = async () => page.locator("#overlays [data-action=close]").first().click();
 const nav = async (name) => {
+  if(await page.locator('dialog').count())await close();
   if (
     await page
       .getByRole("button", { name: "打开导航", exact: true })
@@ -118,17 +119,15 @@ try {
   await page.goto(base);
   await nav("项目版本");
   await page
-    .getByRole("heading", { name: "暂无进行中的里程碑", exact: true })
+    .getByRole("heading", { name: "暂无匹配的版本", exact: true })
     .waitFor();
   assert.equal(
     await page.getByRole("button", { name: "查看未排期", exact: true }).count(),
     0,
   );
   await page.locator("#page [data-action=new-task]").click();
-  await page
-    .locator(".milestone-association")
-    .getByText("保存时自动创建里程碑", { exact: true })
-    .waitFor();
+  await page.locator('.milestone-association [data-version-options]').waitFor();
+  assert.equal(await page.locator('#task-form [name=project_version_id]').inputValue(),'');
   assert.equal(await page.locator("[name=planned_version_id]").count(), 0);
   await page.locator("#task-form [name=title]").fill("AI 质检结果补充原因");
   await page
@@ -189,6 +188,7 @@ try {
     revision: ready.revision,
     submission: { sha, summary: "开发完成", tests: "专项回归通过" },
   });
+  ready=await action(ready,'test_pass',{version:ready.version,test_verification:{revision:ready.revision,sha:ready.submission.sha,environment:'隔离测试',note:'产品测试通过'}});
   await page.getByRole("button", { name: "刷新进展", exact: true }).click();
   await page
     .getByRole("button", { name: "登记本次已上线", exact: true })
@@ -226,10 +226,8 @@ try {
     .locator("#overlays")
     .getByRole("button", { name: "创建需求", exact: true })
     .click();
-  await page
-    .locator(".milestone-association")
-    .getByText("v2.0 · 质检体验", { exact: true })
-    .waitFor();
+  await page.locator('.milestone-association [data-version-options]').waitFor();
+  assert.equal(await page.locator('#task-form [name=project_version_id]').inputValue(),versionID);
   await page.locator("#task-form [name=title]").fill("上线后追加的需求");
   await page.locator(".requirement-prose").fill("里程碑结束前继续补齐细节");
   await page.locator("#task-form button[type=submit]").click();
@@ -368,7 +366,9 @@ try {
   report.timeline =
     "真实Git三条提交、明确SHA关联、上下轨道、7/30天范围、提交详情、键盘打开里程碑及390px布局通过";
   await nav("需求池");
-  await page.locator("#version-filter").selectOption(versionID);
+  if(await page.locator('[data-task-version-picker]').count()) {
+    const picker=page.locator('[data-task-version-picker]');await picker.locator('select').selectOption(versionID);
+  } else await page.locator("#version-filter").selectOption(versionID);
   await page.locator(`tr[data-id="${ready.id}"]`).click();
   await page.getByRole("button", { name: "开始验收", exact: true }).waitFor();
   assert(
