@@ -10,6 +10,8 @@ import { requirementIntakeCards, mergeIntakes } from "./requirement-intake.mjs";
 import { iterationContextHTML, iterationHistoryHTML, iterationRowsHTML } from './requirement-iterations.mjs';
 import {mountProjectTimeline} from './project-timeline.mjs';
 import {projectVersionsPage,mountProjectVersions,versionName,versionOptions} from './project-versions.mjs';
+import {pageTitles, navigationHTML, routeFromURL, routeURL, allowedPage, firstAccessiblePage, expandedForPage} from './navigation.mjs';
+import {mountProjectAccess} from './project-access.mjs';
 const busyIntakes = new Set();
 let requirementEditor = null;
 let requirementReview = null;
@@ -67,18 +69,7 @@ const runStates = {
   stopped: "已停止",
   interrupted: "运行已中断",
 };
-const paths = {
-  overview: "项目概览",
-  tasks: "需求池",
-  versions: "项目版本",
-  timeline:"项目时间线",
-  chat: "项目问答",
-  reviews: "验收与交付",
-  code: "代码与变更",
-  settings: "项目设置",
-  mcp: "我的 MCP",
-  platform: "平台设置",
-};
+const paths = pageTitles;
 const icons = {
   grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h1M3 12h1M3 18h1"/>',
@@ -138,11 +129,12 @@ let state = {
   projects: [],
   profiles: [],
   project: null,
+  project_access: null,
   context: null,
   runs: [],
   collaborations: [],
   intakes: [],
-  page: "overview",
+  page: routeFromURL(location.href).page,
   search: "",
   filter: "",
   kind: "",
@@ -154,6 +146,7 @@ let state = {
   files: [],
 };
 const drafts = new Map();
+const accessUI = mountProjectAccess({api,modal,closeModal,getProject:()=>state.project,getAccess:()=>state.project_access,onAccessChange:refreshProjectAccess,heading,field,action,escape,toast});
 const projectVersionUI=mountProjectVersions({api,modal,closeModal,getContext:()=>state.context,getProject:()=>state.project,getUser:()=>state.auth?.user?.id||'local-owner',refresh:async()=>{await refresh();render();},onTask:openTask,onCreate:()=>taskForm(),onPool:async filter=>{await navigate('tasks');state.versionFilter=filter;renderPage();},toast});
 const timelineUI = mountProjectTimeline({
   api, getProject: () => state.project, onTask: openTask,
@@ -331,22 +324,24 @@ async function refresh() {
   if (state.page === "platform" && isPlatformAdmin()) {
     [state.platformProjects, state.admins, state.accounts, state.channels] = await Promise.all([api("/platform/projects"), api("/platform/admins"), state.auth?.login === "password" ? api("/platform/accounts") : [], api("/platform/channels").then((r) => r.items).catch(() => [])]);
   }
-  const saved = localStorage.getItem("pm-project");
+  const saved = routeFromURL(location.href).project || localStorage.getItem("pm-project");
   state.project =
     state.projects.find((p) => p.id === (state.project?.id || saved)) ||
     state.projects[0] ||
     null;
   if (state.project) {
     localStorage.setItem("pm-project", state.project.id);
-    [state.context, state.runs, state.collaborations, state.intakes] = await Promise.all([
+    [state.context, state.runs, state.collaborations, state.intakes, state.project_access] = await Promise.all([
       api(`/projects/${state.project.id}/context`),
       api(`/projects/${state.project.id}/runs`),
       api(`/projects/${state.project.id}/collaborations`),
       api(`/projects/${state.project.id}/requirement-intakes`),
+      api(`/projects/${state.project.id}/access`),
     ]);
     state.project = state.context.project;
   } else {
     state.context = null;
+    state.project_access = null;
     state.runs = [];
     state.collaborations = [];
     state.intakes = [];
@@ -377,7 +372,7 @@ function openProjectMenu(last = false) {
   const items = $$("button", menu);
   (last ? items.at(-1) : $("[aria-checked=true]", menu) || items[0])?.focus();
 }
-async function switchProject(projectID) {
+async function switchProject(projectID, {updateURL = true} = {}) {
   if (state.switchingProject) return;
   closeProjectMenu(true);
   if (
@@ -388,20 +383,24 @@ async function switchProject(projectID) {
   state.switchingProject = true;
   $("#project-switch").disabled = true;
   try {
-    const [context, runs, collaborations, intakes] = await Promise.all([
+    const [context, runs, collaborations, intakes, access] = await Promise.all([
       api(`/projects/${projectID}/context`),
       api(`/projects/${projectID}/runs`),
       api(`/projects/${projectID}/collaborations`),
       api(`/projects/${projectID}/requirement-intakes`),
+      api(`/projects/${projectID}/access`),
     ]);
     stopRunUpdates();
     state.project = context.project;
+    state.project_access = access;
     state.versionFilter = "";
     state.context = context;
     state.runs = runs;
     state.collaborations = collaborations;
     state.intakes = intakes;
     localStorage.setItem("pm-project", projectID);
+    expandNavigationGroup();
+    if (updateURL) syncRoute('push');
     render();
     pollActiveRuns();
     $("#project-switch")?.focus();
@@ -410,23 +409,40 @@ async function switchProject(projectID) {
     if ($("#project-switch")) $("#project-switch").disabled = false;
   }
 }
+function navigationStorageKey() { return `pm-navigation:${state.auth?.user?.id || 'local-owner'}:${state.project?.id || ''}`; }
+function collapsedNavigation() {
+  try { const saved=JSON.parse(localStorage.getItem(navigationStorageKey()) || 'null');return Array.isArray(saved)?saved:['management']; }
+  catch { return ['management']; }
+}
+function saveCollapsedNavigation(value) { try {localStorage.setItem(navigationStorageKey(),JSON.stringify(value));}catch{} }
+function expandNavigationGroup() { saveCollapsedNavigation(expandedForPage(collapsedNavigation(),state.page)); }
+function projectNavigation() {
+  return navigationHTML({access:state.project_access,page:state.page,collapsed:collapsedNavigation(),icon,escape,badge:page=>page==='tasks'?`<span class="requirement-nav-badge">${reviewNavBadge()}</span>`:page==='reviews'?`<span class="delivery-nav-badge">${state.context?.tasks.filter(t=>t.status==='review').length?`<span class="nav-count">${state.context.tasks.filter(t=>t.status==='review').length}</span>`:''}</span>`:''});
+}
+function syncRoute(mode='replace') {
+  const next=routeURL(location.href,state.page,state.project?.id);
+  if(next!==location.pathname+location.search+location.hash)history[mode==='push'?'pushState':'replaceState'](null,'',next);
+}
+function ensurePageAccess() {
+  if(state.project_access && !allowedPage(state.page,state.project_access,isPlatformAdmin())) {
+    state.page=firstAccessiblePage(state.project_access);expandNavigationGroup();syncRoute();
+  }
+}
+async function refreshProjectAccess(projectID=state.project?.id) {
+  if(!projectID)return;
+  const access=await api(`/projects/${encodeURIComponent(projectID)}/access`);
+  if(state.project?.id!==projectID)return;
+  state.project_access=access;ensurePageAccess();render();
+}
 function render() {
   if (signInPending()) {
     renderLogin();
     return;
   }
   const project = state.project;
-  const count =
-    state.context?.tasks.filter((t) => t.status === "review").length || 0;
+  ensurePageAccess();
   $("#app").innerHTML =
-    `<div class="layout"><aside class="sidebar"><div class="brand"><div class="brand-mark">智</div><div><div class="brand-name">智驱</div><div class="brand-sub">AI-NATIVE PM</div></div></div>${projectSwitcher()}<div class="side-caption">工作空间</div><nav class="nav">${Object.entries(paths).filter(([key]) => !["mcp", "platform"].includes(key))
-      .map(
-        ([key, title], i) =>
-          `<button data-action="navigate" data-page="${key}" aria-label="${title}" class="${state.page === key ? "active" : ""}">${icon(({overview:'grid',tasks:'list',versions:'grid',timeline:'code',chat:'spark',reviews:'check',code:'code',settings:'settings'})[key])}${title}${key === "tasks" ? `<span class="requirement-nav-badge">${reviewNavBadge()}</span>` : ""}${key === "reviews" && count ? `<span class="nav-count">${count}</span>` : ""}</button>`,
-      )
-      .join(
-        "",
-      )}</nav><div class="side-caption">个人与平台</div><nav class="nav">${action("navigate", icon("code") + " 我的 MCP", state.page === "mcp" ? "active" : "", 'data-page="mcp"')}${isPlatformAdmin() ? action("navigate", icon("settings") + " 平台设置", state.page === "platform" ? "active" : "", 'data-page="platform"') : ""}</nav><div class="sidebar-bottom"><div class="agent-indicator"><span class="dot ${state.platform.configured ? "live" : ""}"></span>${state.platform.configured ? "平台 Agent 已配置" : "平台 Agent 待配置"}</div><div class="local-label"><span>项目工作台</span><span>v0.1</span></div></div></aside><main class="main"><header class="topbar"><div class="breadcrumbs">${action("menu", icon("menu"), "ghost icon-only mobile-menu", 'aria-label="打开导航"')}<span>${escape(project?.name || "工作空间")}</span><span>/</span><strong>${paths[state.page]}</strong></div><div class="row">${project && !["mcp", "platform"].includes(state.page) ? action("new-task", icon("plus") + " 创建需求", "header-new") : action("new-project", icon("plus") + " 创建项目", "header-new")}${accountHTML()}</div></header><div id="repository-status" aria-live="polite"></div><div id="page"></div></main></div>`;
+    `<div class="layout"><aside class="sidebar"><div class="brand"><div class="brand-mark">智</div><div><div class="brand-name">智驱</div><div class="brand-sub">AI-NATIVE PM</div></div></div>${projectSwitcher()}<div class="side-caption">工作空间</div><nav class="nav" id="project-navigation" aria-label="项目导航">${projectNavigation()}</nav><div class="side-caption personal-caption">个人与平台</div><nav class="nav" aria-label="个人与平台">${action("navigate", icon("code") + " 我的 MCP", state.page === "mcp" ? "active" : "", 'data-page="mcp"')}${isPlatformAdmin() ? action("navigate", icon("settings") + " 平台设置", state.page === "platform" ? "active" : "", 'data-page="platform"') : ""}</nav><div class="sidebar-bottom"><div class="agent-indicator"><span class="dot ${state.platform.configured ? "live" : ""}"></span>${state.platform.configured ? "平台 Agent 已配置" : "平台 Agent 待配置"}</div><div class="local-label"><span>项目工作台</span><span>v0.1</span></div></div></aside><main class="main"><header class="topbar"><div class="breadcrumbs">${action("menu", icon("menu"), "ghost icon-only mobile-menu", 'aria-label="打开导航"')}<span>${escape(project?.name || "工作空间")}</span><span>/</span><strong>${paths[state.page]}</strong></div><div class="row">${project && !["mcp", "platform"].includes(state.page) ? (state.project_access?.pages.includes("tasks") ? action("new-task", icon("plus") + " 创建需求", "header-new") : "") : action("new-project", icon("plus") + " 创建项目", "header-new")}${accountHTML()}</div></header><div id="repository-status" aria-live="polite"></div><div id="page"></div></main></div>`;
   renderPage();
 }
 function updateRepositoryStatus() {
@@ -489,6 +505,8 @@ function renderPage() {
     chat: chatPage,
     reviews: reviewsPage,
     settings: settingsPage,
+    git: gitPage,
+    access: ()=>accessUI.page(),
     code: codePage,
   }[state.page];
   $("#page").innerHTML = renderer();
@@ -499,7 +517,8 @@ function renderPage() {
     feed.scrollTop = feed.scrollHeight;
     window.scrollTo(0, 0);
   }
-  if (state.page === "settings") { loadProjectMembers(state.project.id); loadRepositoryAuth(); }
+  if (state.page === "git") loadRepositoryAuth();
+  if (state.page === "access") accessUI.load().catch(e=>toast(e.message));
   if (state.page === "code" && state.project.sha) loadFiles();
   updateRepositoryStatus();
 }
@@ -957,9 +976,13 @@ function repositoryFields(p) {
       "",
     )}</fieldset><div data-auth-fields="none" ${mode !== "none" ? "hidden" : ""}><p class="hint">使用无需认证的公开仓库，不读取服务器上的账号凭据。</p></div><div data-auth-fields="server" ${mode !== "server" ? "hidden" : ""}><p class="hint">沿用运行服务那台机器的 Git / SSH 配置。统一登录模式仅兼容原有仓库，新项目请使用专用凭据。</p></div><div data-auth-fields="token" ${mode !== "token" ? "hidden" : ""}>${field("Git 用户名", `<input name="git_username" autocomplete="off" placeholder="仓库平台要求的用户名">`)}${field("访问令牌", `<input type="password" name="git_token" autocomplete="new-password" placeholder="${p.credential_id ? "已配置，留空保留" : "填写具有仓库读取权限的 Token"}">`, "建议使用仅当前仓库可用的只读令牌，通过 HTTPS 连接。")}</div><div data-auth-fields="ssh" ${mode !== "ssh" ? "hidden" : ""}><div class="row between"><span class="hint">使用仓库专用密钥</span>${action("generate-ssh-key", icon("plus") + " 生成密钥", "ghost")}</div>${field("SSH 私钥", `<textarea name="git_private_key" class="secret-input" autocomplete="off" spellcheck="false" placeholder="${p.credential_id ? "已配置，留空保留；也可粘贴新私钥替换" : "粘贴无口令的专用私钥，或点击生成密钥"}"></textarea>`)}<div class="ssh-public-key" hidden>${field("SSH 公钥", '<textarea name="git_public_key" class="mono" readonly></textarea>', "把这段公钥添加为仓库的只读 Deploy Key，再测试连接。")}${action("copy-ssh-key", icon("copy") + " 复制公钥", "ghost")}</div>${field("SSH 主机公钥（known_hosts）", '<textarea name="git_known_hosts" class="mono" spellcheck="false" placeholder="git.example.com ssh-ed25519 AAAA…"></textarea>', "由仓库管理员提供并确认，用于验证服务器身份；不会跳过主机校验。")}</div><div class="repository-test-row">${action("test-repository", icon("refresh") + " 测试连接")}<span class="repository-result" role="status" aria-live="polite"></span></div>${field("默认分支", `<input name="branch" value="${escape(p.branch || "main")}" required placeholder="测试成功后可选择分支">`, "首次配置保存后自动同步仓库。测试连接后获取真实分支；空仓库可先填写预期分支。")}</section>`;
 }
-function projectFields(p = {}) {
-  return `${field("项目名称", `<input name="name" value="${escape(p.name)}" placeholder="例如：客户服务中台" required>`)}${field("项目说明", `<textarea name="description" placeholder="项目服务谁，解决什么问题…">${escape(p.description)}</textarea>`)}${repositoryFields(p)}${field("代码阅读方式", `<select name="agent_read_mode"><option value="legacy" ${p.agent_read_mode !== "sandbox" ? "selected" : ""}>原有 Git 查询</option><option value="sandbox" ${p.agent_read_mode === "sandbox" ? "selected" : ""}>隔离源码阅读</option></select>`, "隔离阅读为每次分析提供独立的只读源码，需要管理员先配置运行环境。")}${field("分析代码版本", `<input name="agent_ref" value="${escape(p.agent_ref || "")}" placeholder="留空跟随默认分支，也可填写分支或完整提交 SHA">`, "隔离阅读在每轮开始时固定版本，分析期间不会随仓库同步变化。")}`;
+function codeReadingFields(p = {}) {
+  return `${field("代码阅读方式", `<select name="agent_read_mode"><option value="legacy" ${p.agent_read_mode !== "sandbox" ? "selected" : ""}>原有 Git 查询</option><option value="sandbox" ${p.agent_read_mode === "sandbox" ? "selected" : ""}>隔离源码阅读</option></select>`, "隔离阅读为每次分析提供独立的只读源码，需要管理员先配置运行环境。")}${field("分析代码版本", `<input name="agent_ref" value="${escape(p.agent_ref || "")}" placeholder="留空跟随默认分支，也可填写分支或完整提交 SHA">`, "隔离阅读在每轮开始时固定版本。")}`;
 }
+function projectFields(p = {}) {
+  return `${field("项目名称", `<input name="name" value="${escape(p.name)}" placeholder="例如：客户服务中台" required>`)}${field("项目说明", `<textarea name="description" placeholder="项目服务谁，解决什么问题…">${escape(p.description)}</textarea>`)}${repositoryFields(p)}${codeReadingFields(p)}`;
+}
+
 function repositoryPayload(form) {
   const data = new FormData(form),
     mode = data.get("auth_mode");
@@ -978,8 +1001,8 @@ function repositoryPayload(form) {
   };
 }
 async function loadRepositoryAuth() {
-  const form = $("#project-form");
-  if (!form?.dataset.id || !canManageProject()) return;
+  const form = $("#git-form") || $("#project-form");
+  if (!form?.dataset.id || !state.project_access?.pages.includes("git")) return;
   const modeFields = $$(
     "[data-auth-fields] input, [data-auth-fields] textarea, [data-auth-fields] button",
     form,
@@ -1063,16 +1086,16 @@ const roleNames = { product: "产品", developer: "开发", tester: "测试", ad
 function memberRoles(m) { return m.roles || (m.role ? [m.role] : []); }
 function roleChecks(selected = ["developer"], label = "项目角色") { return `<fieldset class="role-checks"><legend class="sr-only">${escape(label)}</legend>${Object.entries(roleNames).map(([role, name]) => `<label><input type="checkbox" name="roles" value="${role}" ${selected.includes(role) ? "checked" : ""}><span>${name}</span></label>`).join("")}</fieldset>`; }
 function settingsPage() {
-  return `<div class="page">${heading("项目设置", "管理项目资料、仓库和成员角色。")}<div class="settings-grid"><section class="settings-section"><h2>项目资料</h2><p>仓库用于读取和分析，发布由原有开发流程完成。</p><form id="project-form" data-id="${state.project.id}">${projectFields(state.project)}<div class="form-error"></div><button class="primary" type="submit">保存设置</button></form></section><section class="settings-section"><div class="row between"><h2>项目成员</h2>${canManageProject() ? action("invite-member", icon("plus") + " 添加成员", "ghost", `data-project="${escape(state.project.id)}"`) : ""}</div><p>一位成员可以同时担任多个角色。角色决定谁收到哪类待办：评审和验收给产品，认领和上线给开发，测试和 Bug 验证给测试（项目里没有测试时给产品）。各角色的业务协作能力相同，管理员还可以添加、移除成员和分配角色。</p><div id="project-members"><p class="hint">正在读取成员…</p></div><p class="hint">只有被分配到项目的成员可以访问。平台 Agent 由平台管理员统一配置；个人接入请进入「我的 MCP」。</p></section></div></div>`;
+  return `<div class="page">${heading("项目设置", "管理项目名称和说明。")}<section class="settings-section settings-form"><form id="project-settings-form" data-id="${escape(state.project.id)}">${field("项目名称", `<input name="name" required value="${escape(state.project.name)}">`)}${field("项目说明", `<textarea name="description">${escape(state.project.description)}</textarea>`)}<div class="form-error" role="alert"></div><button class="primary" type="submit">保存项目设置</button></form></section></div>`;
+}
+function gitPage() {
+  return `<div class="page">${heading("Git 设置", "连接仓库，配置默认分支、认证和源码阅读方式。")}<section class="settings-section settings-form"><form id="git-form" data-id="${escape(state.project.id)}">${repositoryFields(state.project)}${codeReadingFields(state.project)}<div class="form-error" role="alert"></div><button class="primary" type="submit">保存 Git 设置</button></form></section></div>`;
 }
 async function loadProjectMembers(projectID, target = "#project-members") {
-  try {
-    const root = $(target); if (!root) return;
-    const data = await api(`/projects/${encodeURIComponent(projectID)}/members`);
-    if (!root.isConnected) return;
-    root.innerHTML = data.items.length ? `<div class="member-list">${data.items.map((m) => `<div class="member-row"><div class="grow"><strong>${escape(m.user.name)}</strong><p class="hint">${escape([m.user.login_id, m.department_name].filter(Boolean).join(" · "))}</p></div>${data.can_manage ? `${roleChecks(memberRoles(m), `${m.user.name}的项目角色`)}${action("save-member-role", "保存", "ghost", `data-project="${escape(projectID)}" data-user="${escape(m.user.id)}"`)}${action("remove-member", "移除", "ghost danger", `data-project="${escape(projectID)}" data-user="${escape(m.user.id)}" data-name="${escape(m.user.name)}"`)}` : `<span class="member-badges">${memberRoles(m).map((r) => `<span class="badge">${roleNames[r] || escape(r)}</span>`).join("")}</span>`}</div>`).join("")}</div>` : '<p class="context-note">尚未分配成员。请先添加一位项目管理员。</p>';
-  } catch (e) { if ($(target)) $(target).textContent = e.message; }
+  try { await accessUI.loadMembers(projectID, target); }
+  catch (e) { const root=$(target);if(root)root.textContent=e.message; }
 }
+
 function mcpPage() {
   return `<div class="page">${heading("我的 MCP", "使用自己的账号授权 Codex、Claude Code 等 Agent 客户端。")}<div class="settings-grid"><section class="settings-section"><div class="row between"><h2>个人接入</h2><span id="mcp-status" class="badge">读取中</span></div><p>开通后，在 Agent 客户端添加下方地址，通过浏览器登录并确认授权项目。</p><pre class="code-block">${escape(location.origin + appURL("/mcp"))}</pre>${action("copy-mcp-url", icon("copy") + " 复制地址")}${action("toggle-mcp", "开通个人 MCP", "primary", 'id="mcp-toggle" disabled')}<p class="hint">每次授权仅访问所选项目，权限随项目成员关系生效。服务端无需联网读取客户端元数据。</p><details class="mcp-instructions"><summary>接入方式与协作顺序</summary><pre class="code-block">${escape(JSON.stringify({mcpServers:{"ai-pm":{url:location.origin+appURL("/mcp")}}},null,2))}</pre><p>在客户端选择 OAuth 登录。授权时选择项目；另一个项目需要另建连接并授权。</p><p>产品可以在客户端对话中创建需求、上传截图和文档、补充或确认评审、管理当前里程碑、查看项目时间线，无需认领开发任务。修改或推进前需由你明确提出要求，操作会保留本人身份和历史。</p><p class="hint">开发前先用 work_list 查看需求及协同任务。开发协作顺序：task_list → task_get_context → task_claim → task_report_work → task_submit_result。保留 claim_id，提交前读取最新修订。</p></details></section><section class="settings-section"><h2>已授权客户端</h2><p>撤销单个连接，或关闭个人 MCP 以撤销全部连接。</p><div id="mcp-grants"><p class="hint">正在读取授权…</p></div></section></div></div>`;
 }
@@ -1109,8 +1132,9 @@ function departmentOptions(roots, prefix = "") {
 }
 async function employeeDialog(projectID, platform = false) {
   const project = state.projects.find((p) => p.id === projectID) || state.platformProjects.find((p) => p.id === projectID);
-  modal(platform ? "添加平台管理员" : `添加项目成员 · ${escape(project?.name || "项目")}`, `<form id="employee-search" data-project="${escape(projectID || "")}" data-platform="${platform}"><div class="row employee-search-row"><input name="q" placeholder="搜索姓名、账号或部门" aria-label="搜索成员"><button type="submit">搜索</button></div><select id="department-filter" name="department_id" aria-label="按部门筛选"><option value="">全部部门</option></select></form><p class="hint" id="directory-status" role="status">正在读取成员目录…</p><div id="employee-results"></div><form id="member-form" data-project="${escape(projectID || "")}" data-platform="${platform}" hidden><div class="selected-employee" id="selected-employee"></div>${platform ? '<p class="notice">该成员将可以配置平台 Agent，并管理所有项目的成员授权。</p>' : field("项目角色", roleChecks(), "可多选。")}<div class="form-error"></div><div class="modal-actions"><button type="submit" class="primary">确认${platform ? "授予平台管理权限" : "加入项目"}</button></div></form>`);
+  modal(platform ? "添加平台管理员" : `添加项目成员 · ${escape(project?.name || "项目")}`, `<form id="employee-search" data-project="${escape(projectID || "")}" data-platform="${platform}"><div class="row employee-search-row"><input name="q" placeholder="搜索姓名、账号或部门" aria-label="搜索成员"><button type="submit">搜索</button></div><select id="department-filter" name="department_id" aria-label="按部门筛选"><option value="">全部部门</option></select></form><p class="hint" id="directory-status" role="status">正在读取成员目录…</p><div id="employee-results"></div><form id="member-form" data-project="${escape(projectID || "")}" data-platform="${platform}" hidden><div class="selected-employee" id="selected-employee"></div>${platform ? '<p class="notice">该成员将可以配置平台 Agent，并管理所有项目的成员授权。</p>' : accessUI.memberFields()}<div class="form-error"></div><div class="modal-actions"><button type="submit" class="primary">确认${platform ? "授予平台管理权限" : "加入项目"}</button></div></form>`);
   await searchEmployees(1);
+  if (!platform) await accessUI.mountMemberForm($("#member-form"),projectID,["developer"],["developer"]);
 }
 async function searchEmployees(page = 1) {
   const form = $("#employee-search");if (!form) return;
@@ -1127,7 +1151,7 @@ async function searchEmployees(page = 1) {
   } catch (e) { if (revision === directoryRevision && $("#employee-search") === form) {$("#directory-status").textContent = e.message;$("#employee-results").innerHTML = action("retry-directory", "重新读取", "ghost");} }
 }
 function codePage() {
-  return `<div class="page">${heading("代码与变更", `默认分支 ${escape(state.project.branch)} · ${date(state.project.synced_at)}`, action("sync", icon("refresh") + " 同步仓库", "primary"))}${!state.project.sha ? empty(state.project.syncing ? "正在同步代码仓库" : "尚未读取代码", state.project.syncing ? "首次同步完成后会自动显示文件列表。" : "在项目设置中填写仓库地址，然后同步。", action("navigate", "项目设置", "", 'data-page="settings"')) : `<div class="toolbar"><input id="code-search" placeholder="搜索代码内容…" aria-label="代码搜索">${action("search-code", "搜索")}${action("git-log", "最近提交", "ghost")}<span class="mono muted">${state.project.sha.slice(0, 12)}</span></div><div class="file-browser"><div class="file-list" id="file-list"><p class="hint">正在读取目录…</p></div><div class="file-content" id="file-content"><p class="context-note">选择文件查看当前版本内容。</p></div></div>`}</div>`;
+  return `<div class="page">${heading("代码与变更", `默认分支 ${escape(state.project.branch)} · ${date(state.project.synced_at)}`, action("sync", icon("refresh") + " 同步仓库", "primary"))}${!state.project.sha ? empty(state.project.syncing ? "正在同步代码仓库" : "尚未读取代码", state.project.syncing ? "首次同步完成后会自动显示文件列表。" : "在 Git 设置中填写仓库地址，然后同步。", action("navigate", "Git 设置", "", 'data-page="git"')) : `<div class="toolbar"><input id="code-search" placeholder="搜索代码内容…" aria-label="代码搜索">${action("search-code", "搜索")}${action("git-log", "最近提交", "ghost")}<span class="mono muted">${state.project.sha.slice(0, 12)}</span></div><div class="file-browser"><div class="file-list" id="file-list"><p class="hint">正在读取目录…</p></div><div class="file-content" id="file-content"><p class="context-note">选择文件查看当前版本内容。</p></div></div>`}</div>`;
 }
 async function loadFiles() {
   try {
@@ -1220,7 +1244,7 @@ async function openTask(taskID) {
 // Links such as /?task=<id> from the to-do page open that task in its project.
 async function openLinkedTask(taskID) {
   const messageID = new URLSearchParams(location.search).get("review_message");
-  history.replaceState(null, "", appURL("/"));
+  history.replaceState(null, "", routeURL(location.href,state.page,state.project?.id));
   const { task } = await api(`/tasks/${encodeURIComponent(taskID)}`);
   if (state.project?.id !== task.project_id) await switchProject(task.project_id);
   if (state.project?.id === task.project_id) {
@@ -1459,7 +1483,7 @@ setInterval(async () => {
     document.hidden ||
     !state.project ||
     $("dialog") ||
-    ["settings", "code", "mcp", "platform"].includes(state.page) ||
+    ["settings", "git", "access", "code", "mcp", "platform"].includes(state.page) ||
     document.activeElement?.matches("input, textarea, select") ||
     $("textarea[name=question]")?.value.trim() ||
     (state.page === "chat" &&
@@ -1482,7 +1506,7 @@ setInterval(async () => {
       $("dialog") ||
       state.switchingProject ||
       projectMenuOpen() ||
-      ["settings", "code", "mcp", "platform"].includes(state.page) ||
+      ["settings", "git", "access", "code", "mcp", "platform"].includes(state.page) ||
       document.activeElement?.matches("input, textarea, select") ||
       $("textarea[name=question]")?.value.trim() ||
       (state.page === "chat" &&
@@ -1516,14 +1540,18 @@ setInterval(async () => {
     refreshing = false;
   }
 }, 6000);
-async function navigate(page) {
+async function navigate(page, {historyMode='push'} = {}) {
   if (page === "platform" && !isPlatformAdmin()) { toast("需要平台管理员权限"); return; }
+  if (!Object.hasOwn(paths,page)) return;
+  if (state.project_access && !allowedPage(page,state.project_access,isPlatformAdmin())) {toast('没有访问此页面的权限');return;}
   state.page = page;
   state.search = "";
   state.filter = "";
   state.versionFilter = "";
   closeModal();
   await refresh();
+  expandNavigationGroup();
+  if(historyMode!=='none')syncRoute(historyMode);
   render();
   pollActiveRuns();
 }
@@ -1534,6 +1562,15 @@ document.addEventListener("click", async (event) => {
   if (!button) return;
   const a = button.dataset.action;
   try {
+    if (await accessUI.click(button)) return;
+    if (a === 'toggle-nav-group') {
+      const collapsed = new Set(collapsedNavigation()), group = button.dataset.group;
+      if(collapsed.has(group))collapsed.delete(group);else collapsed.add(group);
+      saveCollapsedNavigation([...collapsed]);
+      const open=!collapsed.has(group);button.setAttribute('aria-expanded',String(open));
+      document.getElementById('nav-group-'+group).hidden=!open;
+      return;
+    }
     if(a==='toggle-version-group'){state.versionGrouping=!state.versionGrouping;renderPage();return;}
     if(a==='iterate-task'){await taskForm(null,button.dataset.id);return;}
     if(a==='iteration-more'){
@@ -2020,7 +2057,7 @@ let employeeSearchTimer;
 document.addEventListener("input", (event) => {
  if (event.target.matches("#employee-search input[name=q]")) {clearTimeout(employeeSearchTimer);employeeSearchTimer = setTimeout(() => searchEmployees(1), 300);}
   if (
-    event.target.closest("#project-form") &&
+    event.target.closest("#project-form, #git-form") &&
     [
       "repository",
       "git_username",
@@ -2062,6 +2099,7 @@ document.addEventListener("submit", async (event) => {
   if (error) error.textContent = "";
   if (submitter) submitter.disabled = true;
   try {
+    if (await accessUI.submit(form)) return;
     let afterTask = "";
     if (form.id === "conversation-form") {
       const projectID = form.dataset.projectId, conversation = form.dataset.id;
@@ -2082,7 +2120,7 @@ document.addEventListener("submit", async (event) => {
     } else if (form.id === "member-form") {
       if (!form.dataset.user) throw new Error("请先选择成员");
       if (form.dataset.platform === "true") await api(`/platform/admins/${encodeURIComponent(form.dataset.user)}`, {enabled:true}, "PUT");
-      else await api(`/projects/${encodeURIComponent(form.dataset.project)}/members/${encodeURIComponent(form.dataset.user)}`, {roles:new FormData(form).getAll("roles")}, "PUT");
+      else await api(`/projects/${encodeURIComponent(form.dataset.project)}/members/${encodeURIComponent(form.dataset.user)}`, accessUI.memberInput(form), "PUT");
       toast(form.dataset.platform === "true" ? "平台管理员已添加" : "成员已加入项目");
     } else if (form.id === "remove-access-form") {
       if (form.dataset.platform === "true") await api(`/platform/admins/${encodeURIComponent(form.dataset.user)}`, {enabled:false}, "PUT");
@@ -2106,6 +2144,14 @@ document.addEventListener("submit", async (event) => {
       await api(`/platform/channels/${encodeURIComponent(form.dataset.name)}`, {enabled:data.enabled === "on", sign_in:data.sign_in === "on", public_url:data.public_url, values}, "PUT");
       toast("消息推送配置已保存");
     } else if (form.id === "disable-mcp-form") {await api("/mcp", {enabled:false}, "PUT");closeModal();await loadMCP();toast("个人 MCP 已关闭，授权已撤销");return;
+    } else if (form.id === 'project-settings-form') {
+      state.project = await api(`/projects/${encodeURIComponent(form.dataset.id)}/settings`, {name:data.name,description:data.description}, 'PATCH');
+      toast('项目设置已保存');
+    } else if (form.id === 'git-form') {
+      const payload={...repositoryPayload(form),branch:data.branch,agent_read_mode:data.agent_read_mode,agent_ref:data.agent_ref};
+      delete payload.project_id;
+      state.project=await api(`/projects/${encodeURIComponent(form.dataset.id)}/git`,payload,'PATCH');
+      toast(state.project.syncing?'Git 设置已保存，正在同步代码仓库':'Git 设置已保存');
     } else if (form.id === "project-form") {
       const project = {
         name: data.name,
@@ -2248,15 +2294,24 @@ document.addEventListener("submit", async (event) => {
     if (submitter) submitter.disabled = false;
   }
 });
+window.addEventListener("popstate", async () => {
+  try {
+    const route=routeFromURL(location.href);
+    if(route.project && route.project!==state.project?.id)await switchProject(route.project,{updateURL:false});
+    await navigate(route.page,{historyMode:"none"});
+  } catch(e) {toast(e.message);}
+});
 try {
   state.auth = await api("/auth/session");
   if (signInPending()) renderLogin();
   else {
     await refresh();
+    expandNavigationGroup();
     render();
     pollActiveRuns();
     const linked = new URLSearchParams(location.search).get("task");
     if (linked) openLinkedTask(linked).catch((e) => toast(e.message));
+    else syncRoute();
   }
 } catch (e) {
   if (signInPending()) renderLogin(e.message);
