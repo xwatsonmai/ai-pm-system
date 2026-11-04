@@ -17,7 +17,7 @@ make test
 ./deploy/package.sh 20261027-v1
 ```
 
-打包脚本会交叉编译 Linux amd64 二进制，生成 `bin/releases/<release>.tar.gz`。包里有二进制、Pi 运行时源文件、Dockerfile、Compose 文件、`update.py` 和 `SHA256SUMS`，不包含 `data/`、凭据或本机的 `node_modules`。
+打包脚本会交叉编译 Linux amd64 二进制，生成 `bin/releases/<release>.tar.gz`。包里有应用、沙盒 runner 和数据库维护二进制、Pi 运行时源文件、Dockerfile、Compose 文件、`update.py` 和 `SHA256SUMS`，不包含 `data/`、凭据或本机的 `node_modules`。
 
 ## 2. 在服务器上构建镜像
 
@@ -129,6 +129,7 @@ python3 releases/20261028-v2/update.py apply --release 20261028-v2 \
   --health-url http://your-host:8090/api/health
 ```
 
+- 更新脚本自动使用同目录的 `ai-pm-db-maintenance` 进行只读空闲检查与一致性在线备份，使用与应用相同的 SQLite 引擎，避免宿主旧 SQLite 无法读取分页表达式索引。可用 `--sqlite-helper` 显式指定已校验的维护工具；准备后工具路径和摘要改变会阻止切换。未附带工具的旧发布包仍使用宿主 SQLite，需确保其支持数据库格式。
 - `prepare` 用 SQLite 在线备份生成一致的数据库快照，连同配置打包到 `backups/pre-<release>.tar.gz` 并校验。有 Agent 分析、需求评审或续答任务正在运行时，它会拒绝执行。
 - `apply` 需要在 `prepare` 之后 15 分钟内执行。它停止旧容器、启动新镜像，每 100ms 探测一次健康检查；新版本没能恢复时，会自动切回旧镜像，并保留当前数据。
 - 数据格式或权限模型不兼容旧服务时，先验证迁移和恢复方案，并给 `apply` 传 `--no-image-rollback`。启动失败后将停止目标应用、保留当前数据、目标镜像配置和备份，记录 `manual_recovery_required`，由维护者按兼容性核验结果继续恢复；不会自动启动旧写入程序。
@@ -138,7 +139,7 @@ python3 releases/20261028-v2/update.py apply --release 20261028-v2 \
 
 ## 备份
 
-`shared/` 下的内容都需要备份，其中 `shared/data/repository.key` 是仓库凭据的加密主密钥，缺了它就无法解密已保存的仓库凭据。服务运行时不要直接复制 `ai-pm.db`，应该用 `sqlite3 ai-pm.db ".backup backup.db"`，或者用上面的 `update.py prepare` 生成快照。
+`shared/` 下的内容都需要备份，其中 `shared/data/repository.key` 是仓库凭据的加密主密钥，缺了它就无法解密已保存的仓库凭据。服务运行时不要直接复制 `ai-pm.db`，应该用发布包的 `ai-pm-db-maintenance backup ai-pm.db backup.db`，或者用上面的 `update.py prepare` 生成快照。维护工具不会启动应用迁移、Agent 或通知，目标必须不存在；不要使用无法解析 JSON 表达式索引的旧版宿主 SQLite。
 
 ## 可选：隔离源码阅读
 

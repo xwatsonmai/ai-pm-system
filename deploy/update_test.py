@@ -145,6 +145,31 @@ class UpdateTest(unittest.TestCase):
         self.assertEqual(report["unavailable_upper_bound_seconds"], 0.3)
         self.assertEqual(report["failed_samples"], 1)
 
+    def test_packaged_helper_avoids_host_sqlite_for_backup_and_idle(self):
+        helper = self.root / "maintenance tool"
+        source = self.root / "shared/data/ai-pm.db"
+        destination = self.root / "new snapshot.db"
+        with patch.object(update.sqlite3, "connect", side_effect=AssertionError("legacy SQLite must not open expression indexes")), patch.object(update, "run", return_value="") as run:
+            update.online_backup(source, destination, helper)
+            update.idle(self.root, helper)
+        self.assertEqual(run.call_args_list[0][0][0], [str(helper), "backup", str(source), str(destination)])
+        self.assertEqual(run.call_args_list[1][0][0], [str(helper), "idle", str(source)])
+        self.assertEqual(run.call_args_list[2][0][0][:3], ["docker", "ps", "-q"])
+
+    def test_changed_database_helper_blocks_before_stop(self):
+        updater = self.prepared()
+        helper = self.root / "database-helper"
+        helper.write_bytes(b"verified helper")
+        updater.sqlite_helper = helper
+        prepared_path = updater.directory / "prepared.json"
+        prepared = json.loads(prepared_path.read_text())
+        prepared["database_helper"] = updater.helper_identity()
+        update.save(prepared_path, prepared)
+        helper.write_bytes(b"unexpected replacement")
+        with self.assertRaisesRegex(RuntimeError, "Database helper changed"):
+            updater.apply()
+        self.assertFalse(any(call[0] == "stop" for call in self.calls))
+
 
 if __name__ == "__main__":
     unittest.main()
