@@ -14,6 +14,16 @@ const CollaborationLease = 10 * time.Minute
 // Reconstruct the conversation owner, including personal MCP membership. Older
 // local token identities remain valid only while that exact token still exists.
 func (s *Service) CollaborationOwner(ctx context.Context, id, kind, project string) (domain.Actor, error) {
+	a, err := s.ProjectOwnerActor(ctx, id, kind, project)
+	if err != nil {
+		return a, err
+	}
+	return a, s.RequirePages(ctx, a, project, "chat")
+}
+
+// ProjectOwnerActor reconstructs a persisted human/client identity without
+// lending it any background worker capabilities.
+func (s *Service) ProjectOwnerActor(ctx context.Context, id, kind, project string) (domain.Actor, error) {
 	a := domain.Actor{ID: id, Kind: kind, ProjectID: project, Name: "会话发起人（平台 Agent 代办）"}
 	if id == "" || (kind != "human" && kind != "developer") {
 		return a, domain.ErrForbidden
@@ -185,7 +195,7 @@ func (s *Service) GetCollaboration(ctx context.Context, a domain.Actor, id strin
 	if err != nil {
 		return domain.CollaborationView{}, err
 	}
-	if err = s.CheckProject(ctx, a, v.ProjectID, false); err != nil {
+	if err = s.RequirePages(ctx, a, v.ProjectID, "chat"); err != nil {
 		return domain.CollaborationView{}, err
 	}
 	if a.Kind != "developer" && a.Kind != "platform" && (a.ID != v.OwnerID || a.Kind != v.OwnerKind) {
@@ -210,7 +220,7 @@ func (s *Service) GetCollaboration(ctx context.Context, a domain.Actor, id strin
 }
 
 func (s *Service) ListCollaborations(ctx context.Context, a domain.Actor, project string) ([]domain.CollaborationView, error) {
-	if err := s.CheckProject(ctx, a, project, false); err != nil {
+	if err := s.RequirePages(ctx, a, project, "chat"); err != nil {
 		return nil, err
 	}
 	all, err := s.Store.ListCollaborations(ctx, project)
@@ -236,7 +246,7 @@ func (s *Service) ActCollaboration(ctx context.Context, a domain.Actor, id strin
 	if err != nil {
 		return domain.CollaborationMutation{}, err
 	}
-	if err = s.CheckProject(ctx, a, v.ProjectID, false); err != nil {
+	if err = s.RequirePages(ctx, a, v.ProjectID, "chat"); err != nil {
 		return domain.CollaborationMutation{}, err
 	}
 	owner := a.ID == v.OwnerID && a.Kind == v.OwnerKind
@@ -378,6 +388,16 @@ func (s *Service) WorkList(ctx context.Context, a domain.Actor) (map[string]any,
 		if v.Status == "pending" || v.LeaseUntil <= domain.Now() || v.Claimant == a.ID {
 			items = append(items, developerCollaboration(v))
 		}
+	}
+	p, e := s.Store.GetProject(ctx, a.ProjectID)
+	if e != nil {
+		return nil, e
+	}
+	if !CanAccessPage(a, p, "tasks") {
+		ready = []domain.Task{}
+	}
+	if !CanAccessPage(a, p, "chat") {
+		items = []domain.Collaboration{}
 	}
 	return map[string]any{"tasks": ready, "collaborations": items, "as_of": domain.Now(), "lease_seconds": int(CollaborationLease.Seconds())}, nil
 }

@@ -57,7 +57,7 @@ func (s *Service) ManageProjectVersionFromMCP(c context.Context, a domain.Actor,
 	if e != nil {
 		return ProjectVersionMutation{}, e
 	}
-	if in.Action != "complete" && in.Action != "close" && in.Action != "reopen" && in.Action != "start" {
+	if in.Action != "complete" && in.Action != "close" && in.Action != "reopen" && in.Action != "start" && in.Action != "set_default" {
 		return ProjectVersionMutation{}, domain.ErrForbidden
 	}
 	if strings.TrimSpace(in.Body) == "" {
@@ -151,7 +151,7 @@ func (s *Service) UploadProductAttachment(c context.Context, a domain.Actor, nam
 	if e != nil {
 		return domain.Attachment{}, e
 	}
-	if e = s.CheckProject(c, a, a.ProjectID, false); e != nil {
+	if e = s.RequirePages(c, a, a.ProjectID, "tasks", "reviews"); e != nil {
 		return domain.Attachment{}, e
 	}
 	if request == "" {
@@ -162,6 +162,7 @@ func (s *Service) UploadProductAttachment(c context.Context, a domain.Actor, nam
 		return item, e
 	}
 	item.ID = "att_" + Hash("product-upload:" + receiptKey(a, a.ProjectID, request))[:24]
+	item.UploaderID, item.UploaderKind = attachmentUploader(a)
 	item.Authorization = auth
 	item.UploadFingerprint = authorizedFingerprint([]string{name, Hash(string(content))}, auth)
 	existing, e := s.Store.GetAttachment(c, item.ID)

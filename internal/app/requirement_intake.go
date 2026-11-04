@@ -68,8 +68,9 @@ func intakeDocument(in RequirementIntakeInput) string {
 }
 
 type ResolveRequirementIntakeInput struct {
-	Action    string `json:"action"`
-	RequestID string `json:"request_id"`
+	ProjectVersionID string `json:"project_version_id,omitempty"`
+	Action           string `json:"action"`
+	RequestID        string `json:"request_id"`
 }
 
 func questionConversation(r domain.Run) string {
@@ -110,7 +111,7 @@ func (s *Service) RequirementIntakes(c context.Context, a domain.Actor, project 
 	if a.Kind != "human" {
 		return nil, domain.ErrForbidden
 	}
-	if err := s.CheckProject(c, a, project, false); err != nil {
+	if err := s.RequirePages(c, a, project, "tasks"); err != nil {
 		return nil, err
 	}
 	items, err := s.Store.ListRequirementIntakes(c, project)
@@ -169,7 +170,7 @@ func (s *Service) ConversationIntakeContext(c context.Context, r domain.Run) ([]
 func (s *Service) ProposeRequirement(c context.Context, runID string, in RequirementIntakeInput) (domain.RequirementIntake, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r, _, err := s.requirementIntakeOwner(c, runID)
+	r, a, err := s.requirementIntakeOwner(c, runID)
 	if err != nil {
 		return domain.RequirementIntake{}, err
 	}
@@ -199,7 +200,7 @@ func (s *Service) ProposeRequirement(c context.Context, runID string, in Require
 			return domain.RequirementIntake{}, errors.New("只能关联当前会话中用户已经发送的附件")
 		}
 	}
-	files, err := s.taskAttachments(c, r.ProjectID, in.AttachmentIDs)
+	files, err := s.taskAttachments(c, a, r.ProjectID, in.AttachmentIDs)
 	if err != nil {
 		return domain.RequirementIntake{}, err
 	}
@@ -222,7 +223,7 @@ func (s *Service) ProposeRequirement(c context.Context, runID string, in Require
 // ResolveRequirementFromQuestion is only invoked by a human question's tool.
 // The model interprets intent, but must cite the current human message verbatim;
 // attachments, previous assistant messages and background results are not consent.
-func (s *Service) ResolveRequirementFromQuestion(c context.Context, runID, id, action, confirmation string) (domain.RequirementIntake, error) {
+func (s *Service) ResolveRequirementFromQuestion(c context.Context, runID, id, action, confirmation string, targets ...string) (domain.RequirementIntake, error) {
 	r, a, err := s.requirementIntakeOwner(c, runID)
 	if err != nil {
 		return domain.RequirementIntake{}, err
@@ -237,7 +238,11 @@ func (s *Service) ResolveRequirementFromQuestion(c context.Context, runID, id, a
 	if v.ProjectID != r.ProjectID || v.ConversationID != questionConversation(r) {
 		return v, domain.ErrForbidden
 	}
-	return s.resolveRequirementIntake(c, a, id, ResolveRequirementIntakeInput{Action: action, RequestID: "question:" + r.ID + ":" + id + ":" + action}, r.ID)
+	target := ""
+	if len(targets) > 0 {
+		target = targets[0]
+	}
+	return s.resolveRequirementIntake(c, a, id, ResolveRequirementIntakeInput{ProjectVersionID: target, Action: action, RequestID: "question:" + r.ID + ":" + id + ":" + action}, r.ID)
 }
 
 func (s *Service) ResolveRequirementIntake(c context.Context, a domain.Actor, id string, in ResolveRequirementIntakeInput) (domain.RequirementIntake, error) {
@@ -254,7 +259,7 @@ func (s *Service) resolveRequirementIntake(c context.Context, a domain.Actor, id
 	if a.Kind != "human" || a.ID != v.OwnerID {
 		return domain.RequirementIntake{}, domain.ErrForbidden
 	}
-	if err = s.CheckProject(c, a, v.ProjectID, false); err != nil {
+	if err = s.RequirePages(c, a, v.ProjectID, "tasks"); err != nil {
 		return v, err
 	}
 	if _, err = s.Store.GetRun(c, v.OriginRunID); err != nil {
@@ -267,7 +272,11 @@ func (s *Service) resolveRequirementIntake(c context.Context, a domain.Actor, id
 		return v, errors.New("请选择创建或暂不创建")
 	}
 	key := "requirement-intake:" + receiptKey(a, v.ProjectID, in.RequestID)
-	fp := fingerprint([]string{id, in.Action, runID})
+	parts := []string{id, in.Action, runID}
+	if in.ProjectVersionID != "" {
+		parts = append(parts, in.ProjectVersionID)
+	}
+	fp := fingerprint(parts)
 	if receipt, e := s.Store.GetReceipt(c, key); e == nil {
 		if receipt.Fingerprint != fp {
 			return v, domain.ErrRequestReused
@@ -306,7 +315,7 @@ func (s *Service) resolveRequirementIntake(c context.Context, a domain.Actor, id
 	}
 	var batches []domain.MilestoneBatch
 	if task != nil {
-		plan, e := s.taskMilestoneBatch(c, a, task)
+		plan, e := s.taskMilestoneBatch(c, a, task, in.ProjectVersionID)
 		if e != nil {
 			return v, e
 		}

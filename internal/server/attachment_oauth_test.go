@@ -12,7 +12,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestDesktopAttachmentOAuthIsReadOnlyProjectScopedAndRevocable(t *testing.T) {
@@ -34,7 +36,7 @@ func TestDesktopAttachmentOAuthIsReadOnlyProjectScopedAndRevocable(t *testing.T)
 				t.Fatal(err)
 			}
 			for _, p := range []*domain.Project{&project, &other} {
-				p.Memberships = []domain.ProjectMember{{UserID: "local-owner", Roles: []string{"admin"}}, {UserID: "employee", Roles: []string{"developer"}}}
+				p.Memberships = []domain.ProjectMember{{UserID: "local-owner", Roles: []string{"admin"}}, {UserID: "employee", Roles: []string{"developer"}}, {UserID: "colleague", Roles: []string{"developer"}}}
 				if err = db.PutProject(ctx, *p); err != nil {
 					t.Fatal(err)
 				}
@@ -43,12 +45,33 @@ func TestDesktopAttachmentOAuthIsReadOnlyProjectScopedAndRevocable(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
+			if _, err = svc.CreateTask(ctx, app.Human(), project.ID, app.TaskInput{Title: "Desktop attachment", AttachmentIDs: []string{file.ID}, RequestID: "bind-file"}); err != nil {
+				t.Fatal(err)
+			}
 			foreign, err := svc.SaveAttachment(ctx, app.Human(), other.ID, "foreign.md", []byte("private"))
 			if err != nil {
 				t.Fatal(err)
 			}
 			if err = db.PutMCPAccount(ctx, domain.MCPAccount{UserID: "employee", Enabled: true}); err != nil {
 				t.Fatal(err)
+			}
+			web := domain.Actor{ID: "employee", Kind: "human"}
+			personal := domain.Actor{ID: "employee", UserID: "employee", Kind: "developer", ProjectID: project.ID}
+			webFile, err := svc.SaveAttachment(ctx, web, project.ID, "web-private.txt", []byte("Web private bytes"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			mcpFile, err := svc.UploadProductAttachment(ctx, personal, "mcp-private.txt", "private-upload", []byte("MCP private bytes"), app.ProductAuthorization{UserConfirmed: true, UserInstruction: "上传这份文件"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, item := range []struct {
+				id, kind string
+				file     domain.Attachment
+			}{{"web-private", "human", webFile}, {"mcp-private", "developer", mcpFile}} {
+				if err = db.PutRun(ctx, domain.Run{ID: item.id, ProjectID: project.ID, ConversationID: item.id, Kind: "question", OwnerID: "employee", OwnerKind: item.kind, Attachments: []domain.Attachment{item.file}, Status: "succeeded"}); err != nil {
+					t.Fatal(err)
+				}
 			}
 			site := httptest.NewUnstartedServer(nil)
 			public := "http://" + site.Listener.Addr().String() + base
@@ -64,11 +87,24 @@ func TestDesktopAttachmentOAuthIsReadOnlyProjectScopedAndRevocable(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
+			cookieRecorder := httptest.NewRecorder()
+			if err = manager.Issue(ctx, cookieRecorder, httptest.NewRequest("GET", public+"/", nil), auth.Identity{User: domain.User{ID: "employee", Name: "Developer"}, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+				t.Fatal(err)
+			}
+			webCookie := cookieRecorder.Result().Cookies()[0]
 			site.Config.Handler = (&server.Server{App: svc, Auth: manager}).Handler()
 			site.Start()
 			defer site.Close()
 			grant := domain.OAuthGrant{ID: "valid", ClientID: "desktop", UserID: "employee", UserName: "Developer", ProjectID: project.ID, Resource: public + "/mcp", AccessHash: app.Hash("valid"), RefreshHash: app.Hash("refresh"), AccessExpiresAt: domain.Now() + 60000, RefreshExpiresAt: domain.Now() + 120000, AccountGeneration: 1}
 			if err = db.PutOAuthGrant(ctx, grant, ""); err != nil {
+				t.Fatal(err)
+			}
+			if err = db.PutMCPAccount(ctx, domain.MCPAccount{UserID: "colleague", Enabled: true}); err != nil {
+				t.Fatal(err)
+			}
+			colleague := grant
+			colleague.ID, colleague.UserID, colleague.AccessHash, colleague.RefreshHash = "colleague", "colleague", app.Hash("colleague"), app.Hash("colleague-refresh")
+			if err = db.PutOAuthGrant(ctx, colleague, ""); err != nil {
 				t.Fatal(err)
 			}
 			expired := grant
@@ -101,6 +137,54 @@ func TestDesktopAttachmentOAuthIsReadOnlyProjectScopedAndRevocable(t *testing.T)
 			}
 			if got := request("GET", path, "valid", 200); got != "original bytes\n" {
 				t.Fatal(got)
+			}
+			webRequest := func(path string, status int) string {
+				t.Helper()
+				req, _ := http.NewRequest("GET", public+path, nil)
+				req.AddCookie(webCookie)
+				resp, e := site.Client().Do(req)
+				if e != nil {
+					t.Fatal(e)
+				}
+				defer resp.Body.Close()
+				raw, _ := io.ReadAll(resp.Body)
+				if resp.StatusCode != status {
+					t.Fatalf("Web GET %s: %d want %d %s", path, resp.StatusCode, status, raw)
+				}
+				return string(raw)
+			}
+			for _, item := range []domain.Attachment{webFile, mcpFile} {
+				privatePath := "/api/projects/" + project.ID + "/attachments/" + item.ID
+				request("GET", privatePath, "valid", 200)
+				request("GET", privatePath, "colleague", 403)
+				webRequest(privatePath, 200)
+			}
+			webRequest("/api/runs/mcp-private", 200)
+			conversations := webRequest("/api/projects/"+project.ID+"/conversations?page=1", 200)
+			if !strings.Contains(conversations, "web-private") || !strings.Contains(conversations, "mcp-private") {
+				t.Fatal("Web and personal MCP split one employee's private runs", conversations)
+			}
+			if _, err = svc.CreateRequirementFromMCP(ctx, domain.Actor{ID: "colleague", UserID: "colleague", Kind: "developer", ProjectID: project.ID}, app.TaskInput{Title: "Copy private file", AttachmentIDs: []string{webFile.ID}, RequestID: "copy-private"}, app.ProductAuthorization{UserConfirmed: true, UserInstruction: "创建需求"}); err == nil {
+				t.Fatal("MCP reused another employee's private attachment ID")
+			}
+			// A current role change revokes both Web and existing OAuth downloads.
+			project.ProjectRoles = append(project.ProjectRoles, domain.ProjectRole{ID: "tasks-only", Name: "Tasks only", Pages: []string{"tasks"}, Version: 1})
+			project.Memberships[1].Roles = []string{"tasks-only"}
+			project.AccessVersion++
+			if err = db.PutProject(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			for _, item := range []domain.Attachment{webFile, mcpFile} {
+				privatePath := "/api/projects/" + project.ID + "/attachments/" + item.ID
+				request("GET", privatePath, "valid", 403)
+				webRequest(privatePath, 403)
+			}
+			webRequest("/api/runs/mcp-private", 403)
+			request("GET", path, "valid", 200)
+			project.Memberships[1].Roles = []string{"developer"}
+			project.AccessVersion++
+			if err = db.PutProject(ctx, project); err != nil {
+				t.Fatal(err)
 			}
 			request("GET", path, "", 401)
 			request("GET", path, "bad", 401)

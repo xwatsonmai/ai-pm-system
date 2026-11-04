@@ -93,11 +93,27 @@ func (d *DB) CommitVersionPlan(c context.Context, versions []domain.VersionWrite
 			return err
 		}
 	}
+	skipParentSync := map[string]bool{}
+	// Validate all references against the same pre-write snapshot, including a
+	// new acceptance Bug whose ended parent is moving in this transaction.
 	for _, write := range tasks {
-		t := write.Value
-		if err = validateTestingWrite(c, tx, t, write.Expected); err != nil {
+		if err = validateTestingWrite(c, tx, write.Value, write.Expected); err != nil {
 			return err
 		}
+		if write.Expected > 0 && write.Value.ParentRequirementID != "" {
+			old, e := txTask(c, tx, write.Value.ID)
+			if e != nil {
+				return e
+			}
+			next := write.Value
+			old.Version, old.UpdatedAt, old.ProjectVersionID = next.Version, next.UpdatedAt, next.ProjectVersionID
+			a, _ := json.Marshal(old)
+			b, _ := json.Marshal(next)
+			skipParentSync[next.ID] = string(a) == string(b)
+		}
+	}
+	for _, write := range tasks {
+		t := write.Value
 		if t.Version != write.Expected+1 {
 			return domain.ErrConflict
 		}
@@ -133,6 +149,9 @@ func (d *DB) CommitVersionPlan(c context.Context, versions []domain.VersionWrite
 		}
 	}
 	for _, write := range tasks {
+		if skipParentSync[write.Value.ID] {
+			continue
+		}
 		if err = syncBugParent(c, tx, write.Value); err != nil {
 			return err
 		}

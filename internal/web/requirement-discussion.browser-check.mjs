@@ -88,7 +88,7 @@ try{
  const png=await page.locator('.rc-title').screenshot();
  await page.locator('.review-file-input').setInputFiles({name:'所在地截图.png',mimeType:'image/png',buffer:png});await page.locator('.review-pending-files').filter({hasText:'所在地截图.png'}).waitFor();
  // Lose the response after saving: retrying the same draft must not duplicate it.
- let lost=false;await page.route(`**/api/tasks/${task.id}/requirement-review`,async route=>{if(route.request().method()==='POST'&&route.request().postDataJSON()?.action==='discuss'&&!lost){lost=true;await route.fetch();await route.abort('failed')}else await route.continue()});
+ let lost=false;await page.route(`**/api/tasks/${task.id}/requirement-review*`,async route=>{if(route.request().method()==='POST'&&route.request().postDataJSON()?.action==='discuss'&&!lost){lost=true;await route.fetch();await route.abort('failed')}else await route.continue()});
  await page.locator('#review-input').fill('为什么只显示国家？我不确定是不是 Bug。');await page.locator('.review-send').click();await page.locator('.review-send-error').filter({hasText:'草稿已保留'}).waitFor();await page.locator('.review-send').click();
  room=await waitReview(task.id,'answered');await page.locator('.rc-bubble').filter({hasText:'当前提测版本按已确认需求记录到国家级'}).waitFor();
  assert.equal(room.conversation_id,originalSession);assert.equal(room.messages.filter(m=>m.action==='discuss').length,1);assert.equal(room.messages.find(m=>m.action==='discuss').attachments.length,1);

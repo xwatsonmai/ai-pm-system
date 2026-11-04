@@ -69,7 +69,7 @@ type RequirementPoolResult struct {
 // pagination. Neither value is inferred from the returned page by the model.
 func (s *Service) RequirementPool(c context.Context, a domain.Actor, project string, q RequirementPoolQuery) (RequirementPoolResult, error) {
 	var out RequirementPoolResult
-	if err := s.CheckProject(c, a, project, false); err != nil {
+	if err := s.RequirePages(c, a, project, "tasks", "reviews", "versions"); err != nil {
 		return out, err
 	}
 	statuses := []string{"clarify", "ready", "doing", "aligning", "testing", "fixing", "retest", "verifying", "resolved", "pending_release", "review", "done", "closed", "rejected", "canceled"}
@@ -195,6 +195,10 @@ func (s *Service) QuestionContext(c context.Context, a domain.Actor, project str
 		}
 		items = append(items, requirementSummary(t))
 	}
+	if !CanAccessAnyPage(a, p, "tasks", "reviews", "versions") {
+		items = []RequirementSummary{}
+	}
+	p = ProjectForActor(a, p)
 	return map[string]any{"project": p, "conversation_tasks": items, "as_of": domain.Now()}, nil
 }
 
@@ -246,7 +250,7 @@ func (s *Service) RequirementDetail(c context.Context, a domain.Actor, project s
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out RequirementDetailResult
-	if err := s.CheckProject(c, a, project, false); err != nil {
+	if err := s.RequirePages(c, a, project, "tasks", "reviews", "versions"); err != nil {
 		return out, err
 	}
 	if q.TaskID == "" || q.ReviewLimit < 0 || q.ReviewLimit > 20 || (q.ReviewBefore != nil && *q.ReviewBefore < 0) {
@@ -279,8 +283,12 @@ func (s *Service) RequirementDetail(c context.Context, a domain.Actor, project s
 		return out, err
 	}
 	files := []domain.Artifact{}
+	p, err := s.Store.GetProject(c, project)
+	if err != nil {
+		return out, err
+	}
 	for _, v := range artifacts {
-		if v.TaskID == t.ID {
+		if v.TaskID == t.ID && VisibleArtifact(a, p, v) {
 			files = append(files, v)
 		}
 	}

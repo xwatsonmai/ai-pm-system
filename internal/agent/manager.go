@@ -155,7 +155,14 @@ func (m *Manager) startAtRef(c context.Context, a domain.Actor, p, t, kind, prom
 	if !app.CanRead(a, project) {
 		return domain.Run{}, domain.ErrForbidden
 	}
-	if project.AgentReadMode == "sandbox" && m.SandboxSocket == "" {
+	if kind == "question" {
+		if e := m.App.RequirePages(c, a, p, "chat"); e != nil {
+			return domain.Run{}, e
+		}
+	} else if e := m.App.RequirePages(c, a, p, "tasks"); e != nil {
+		return domain.Run{}, e
+	}
+	if project.AgentReadMode == "sandbox" && m.SandboxSocket == "" && app.CanAccessPage(a, project, "code") {
 		return domain.Run{}, errors.New("该项目已启用隔离阅读，但沙盒 runner 尚未配置；不会回退到非隔离执行")
 	}
 	if codeRef != "" && project.AgentReadMode != "sandbox" && !(review != nil && ((review.Source.BugContext != nil && review.Source.BugContext.SHA == codeRef) || (review.Source.ReviewingChange() && review.Source.RequirementChange.SHA == codeRef) || (review.Mode == "discussion" && review.Source.Submission != nil && review.Source.Submission.SHA == codeRef))) {
@@ -255,14 +262,17 @@ func (m *Manager) startAtRef(c context.Context, a domain.Actor, p, t, kind, prom
 		}
 	}
 	r.CodeRef = strings.TrimSpace(codeRef)
-	if project.AgentReadMode == "sandbox" {
+	if project.AgentReadMode == "sandbox" && app.CanAccessPage(a, project, "code") {
 		r.CodeSnapshot = &domain.CodeSnapshot{Status: "preparing"}
 	}
 	if review != nil {
 		r.ReviewGeneration = review.Generation
 	}
+	if a.Kind == "human" || a.Kind == "developer" {
+		r.OwnerID, r.OwnerKind = a.ID, a.Kind
+	}
 	if kind == "question" {
-		r.OwnerID, r.OwnerKind, r.TitleStatus = a.ID, a.Kind, "pending"
+		r.TitleStatus = "pending"
 	}
 	seen := map[string]bool{}
 	total, textLength := 0, 0
@@ -271,7 +281,7 @@ func (m *Manager) startAtRef(c context.Context, a domain.Actor, p, t, kind, prom
 			return r, errors.New("消息中存在重复附件")
 		}
 		seen[id] = true
-		a, err := m.App.Store.GetAttachment(c, id)
+		a, err := m.App.AttachmentAs(c, a, p, id)
 		if err != nil {
 			return r, err
 		}
@@ -490,6 +500,29 @@ func (m *Manager) execute(ctx context.Context, r domain.Run, profile domain.Prof
 	if r.Kind == "requirement_review" {
 		r.ReviewEvidence = &domain.RequirementReviewEvidence{References: []domain.RequirementReviewReference{}}
 	}
+	if userOwnedRun(r) {
+		owner, err := m.runReadActor(ctx, r)
+		if err != nil {
+			m.fail(ctx, r, err)
+			return
+		}
+		actor = owner
+		p, err := m.App.Store.GetProject(ctx, r.ProjectID)
+		if err != nil {
+			m.fail(ctx, r, err)
+			return
+		}
+		if !app.CanAccessPage(actor, p, "code") {
+			r.CodeSnapshot = nil
+			r.CodeRef = ""
+		}
+	}
+	if userOwnedRun(r) {
+		guarded, stop := context.WithCancel(ctx)
+		defer stop()
+		ctx = guarded
+		go m.guardRunPermissions(ctx, stop, r, r.CodeSnapshot != nil)
+	}
 	contextData, e := m.initialContext(ctx, actor, r)
 	if e != nil {
 		m.fail(ctx, r, e)
@@ -553,7 +586,7 @@ func (m *Manager) execute(ctx context.Context, r domain.Run, profile domain.Prof
 	images := []map[string]string{}
 	reviewFiles := []map[string]any{}
 	for _, meta := range r.Attachments {
-		a, err := m.App.Store.GetAttachment(ctx, meta.ID)
+		a, err := m.App.AttachmentAs(ctx, actor, r.ProjectID, meta.ID)
 		if err != nil {
 			m.fail(ctx, r, err)
 			return
@@ -864,6 +897,17 @@ func (w *tailWriter) String() string { w.mu.Lock(); defer w.mu.Unlock(); return 
 var _ io.Writer = (*tailWriter)(nil)
 
 func (m *Manager) callTool(c context.Context, a domain.Actor, r domain.Run, callID, name string, raw json.RawMessage) (any, error) {
+	if userOwnedRun(r) {
+		owner, e := m.runReadActor(c, r)
+		if e != nil {
+			return nil, e
+		}
+		a = owner
+		if e = m.authorizeRunTool(c, a, r, name); e != nil {
+			return nil, e
+		}
+	}
+
 	if name == "propose_requirement" || name == "resolve_requirement_proposal" {
 		return m.requirementIntakeTool(c, r, name, raw)
 	}
@@ -965,7 +1009,7 @@ func (m *Manager) callTool(c context.Context, a domain.Actor, r domain.Run, call
 		} else {
 			data, err = m.App.Context(c, a, r.ProjectID, args["task_id"])
 		}
-		if err == nil && r.CodeSnapshot != nil {
+		if err == nil && r.CodeSnapshot != nil && (!userOwnedRun(r) || m.App.RequirePages(c, a, r.ProjectID, "code") == nil) {
 			data["code_snapshot"] = r.CodeSnapshot
 		}
 		return data, err
@@ -995,13 +1039,21 @@ func (m *Manager) callTool(c context.Context, a domain.Actor, r domain.Run, call
 		if r.CodeSnapshot != nil {
 			args["sha"] = r.CodeSnapshot.SHA
 		}
-		return m.App.Artifact(c, a, domain.Artifact{ID: "analysis_" + r.ID + "_" + app.Hash(callID)[:12], ProjectID: r.ProjectID, TaskID: r.TaskID, Kind: args["kind"], Title: args["title"], Body: args["body"], SHA: args["sha"]})
+		writer := a
+		if userOwnedRun(r) {
+			writer = domain.Actor{ID: "platform", Name: "平台 Agent", Kind: "platform", ProjectID: r.ProjectID}
+		}
+		return m.App.Artifact(c, writer, domain.Artifact{ID: "analysis_" + r.ID + "_" + app.Hash(callID)[:12], OriginRunID: r.ID, ProjectID: r.ProjectID, TaskID: r.TaskID, Kind: args["kind"], Title: args["title"], Body: args["body"], SHA: args["sha"]})
 	case "create_bug":
 		if r.Kind != "triage" {
 			return nil, domain.ErrForbidden
 		}
 		v := app.TaskInput{Title: args["title"], Kind: "bug", Description: args["description"], Acceptance: strings.Split(args["acceptance"], "\n"), Priority: "next", RequestID: "bug_" + app.Hash(args["title"]+args["description"])}
-		return m.App.CreateTask(c, a, r.ProjectID, v)
+		writer := a
+		if userOwnedRun(r) {
+			writer = domain.Actor{ID: "platform", Name: "平台 Agent", Kind: "platform", ProjectID: r.ProjectID}
+		}
+		return m.App.CreateTask(c, writer, r.ProjectID, v)
 	default:
 		return nil, fmt.Errorf("未开放的工具：%s", name)
 	}

@@ -9,12 +9,13 @@ import (
 )
 
 type MCPTaskResolutionInput struct {
-	Action          string
-	RequestID       string
-	Version         int
-	Reason          string
-	UserConfirmed   bool
-	UserInstruction string
+	DestinationVersionID string
+	Action               string
+	RequestID            string
+	Version              int
+	Reason               string
+	UserConfirmed        bool
+	UserInstruction      string
 }
 
 // ResolveTaskFromMCP delegates only the three lifecycle decisions explicitly
@@ -43,5 +44,5 @@ func (s *Service) ResolveTaskFromMCP(c context.Context, a domain.Actor, id strin
 		return domain.Mutation{}, errors.New("缺少 request_id")
 	}
 	authorization := &domain.TaskActionAuthorization{Source: "mcp", UserID: a.UserID, ActorID: a.ID, UserConfirmed: true, UserInstruction: strings.TrimSpace(in.UserInstruction)}
-	return s.actTask(c, a, id, Action{Action: in.Action, RequestID: in.RequestID, Version: in.Version, Body: in.Reason}, authorization)
+	return s.actTask(c, a, id, Action{Action: in.Action, RequestID: in.RequestID, Version: in.Version, Body: in.Reason, DestinationVersionID: in.DestinationVersionID}, authorization)
 }

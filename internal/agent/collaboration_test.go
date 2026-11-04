@@ -99,6 +99,7 @@ func TestReplyDeletionCancellationRevocationAndBusyConversation(t *testing.T) {
 				p, _ := db.GetProject(ctx, v.ProjectID)
 				p.OwnerID = "bob"
 				p.AccessMembers = nil
+				p.Memberships = []domain.ProjectMember{{UserID: "bob", Roles: []string{"admin"}}}
 				if err := db.PutProject(ctx, p); err != nil {
 					t.Fatal(err)
 				}

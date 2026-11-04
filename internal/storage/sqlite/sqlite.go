@@ -56,6 +56,10 @@ func (d *DB) migrate() error {
  CREATE TABLE IF NOT EXISTS project_versions (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,name_key TEXT NOT NULL,version INTEGER NOT NULL,payload TEXT NOT NULL,UNIQUE(project_id,name_key));
  CREATE INDEX IF NOT EXISTS project_versions_project ON project_versions(project_id);
  CREATE INDEX IF NOT EXISTS tasks_project ON tasks(project_id);
+ CREATE INDEX IF NOT EXISTS tasks_list_updated ON tasks(project_id,json_extract(payload,'$.updated_at') DESC,id DESC);
+ CREATE INDEX IF NOT EXISTS tasks_list_status ON tasks(project_id,json_extract(payload,'$.status'));
+ CREATE INDEX IF NOT EXISTS tasks_list_parent ON tasks(project_id,json_extract(payload,'$.parent_requirement_id'));
+ CREATE INDEX IF NOT EXISTS documents_run_history ON documents(kind,project_id,json_extract(payload,'$.started_at') DESC,id DESC);
  CREATE TABLE IF NOT EXISTS requirement_iterations (task_id TEXT PRIMARY KEY,project_id TEXT NOT NULL,root_task_id TEXT NOT NULL,parent_task_id TEXT NOT NULL,at INTEGER NOT NULL);
  CREATE INDEX IF NOT EXISTS requirement_iterations_root ON requirement_iterations(project_id,root_task_id,at,task_id);
  CREATE TABLE IF NOT EXISTS requirement_reviews (task_id TEXT PRIMARY KEY,version INTEGER NOT NULL,payload TEXT NOT NULL);
@@ -126,7 +130,10 @@ func (d *DB) migrate() error {
  CREATE TABLE IF NOT EXISTS channel_bindings (channel TEXT NOT NULL,user_id TEXT NOT NULL,external_id TEXT NOT NULL,at INTEGER NOT NULL,PRIMARY KEY(channel,user_id),UNIQUE(channel,external_id));
  INSERT OR IGNORE INTO schema_migrations(version) VALUES(14);
  `)
-	return err
+	if err != nil {
+		return err
+	}
+	return d.migrateProjectAccess()
 }
 func decode[T any](s string) (T, error) { var v T; err := json.Unmarshal([]byte(s), &v); return v, err }
 func get[T any](ctx context.Context, d *DB, kind, id string) (T, error) {
@@ -183,13 +190,7 @@ func (d *DB) GetProject(c context.Context, id string) (domain.Project, error) {
 	return get[domain.Project](c, d, "project", id)
 }
 func (d *DB) PutProject(c context.Context, p domain.Project) error {
-	return d.put(c, "project", p.ID, p.ID, p)
-}
-func (d *DB) ListArtifacts(c context.Context, p string) ([]domain.Artifact, error) {
-	return list[domain.Artifact](c, d, "artifact", p)
-}
-func (d *DB) GetArtifact(c context.Context, id string) (domain.Artifact, error) {
-	return get[domain.Artifact](c, d, "artifact", id)
+	return d.put(c, "project", p.ID, p.ID, domain.NormalizeProjectAccess(p))
 }
 func (d *DB) PutArtifact(c context.Context, a domain.Artifact) error {
 	if a.Kind == "git" && a.Source == "git" {
@@ -203,7 +204,7 @@ func (d *DB) PutArtifact(c context.Context, a domain.Artifact) error {
 	if err != nil {
 		return err
 	}
-	old, err := d.GetArtifact(c, a.ID)
+	old, err := get[domain.Artifact](c, d, "artifact", a.ID)
 	if err != nil {
 		return err
 	}

@@ -12,12 +12,14 @@ import (
 )
 
 type ProjectVersionInput struct {
-	Name       string `json:"name"`
-	Goal       string `json:"goal"`
-	Owner      string `json:"owner"`
-	TargetDate string `json:"target_date"`
-	Version    int    `json:"version"`
-	RequestID  string `json:"request_id"`
+	Name           string `json:"name"`
+	Goal           string `json:"goal"`
+	Owner          string `json:"owner"`
+	TargetDate     string `json:"target_date"`
+	Version        int    `json:"version"`
+	RequestID      string `json:"request_id"`
+	SetDefault     bool   `json:"set_default,omitempty"`
+	DefaultVersion int    `json:"default_version,omitempty"`
 }
 type VersionTaskRef struct {
 	ID       string `json:"id"`
@@ -35,11 +37,13 @@ type VersionAssignmentInput struct {
 	UserInstruction  string           `json:"user_instruction,omitempty"`
 }
 type ProjectVersionAction struct {
+	CreateSuccessor      bool             `json:"create_successor,omitempty"`
 	Action               string           `json:"action"`
 	Version              int              `json:"version"`
 	Body                 string           `json:"body"`
 	DestinationVersionID string           `json:"destination_version_id,omitempty"`
 	DestinationVersion   int              `json:"destination_version,omitempty"`
+	DefaultVersion       int              `json:"default_version,omitempty"`
 	Environment          string           `json:"environment,omitempty"`
 	Items                []VersionTaskRef `json:"items,omitempty"`
 	RequestID            string           `json:"request_id"`
@@ -48,31 +52,23 @@ type ProjectVersionMutation struct {
 	ProjectVersion *domain.ProjectVersion `json:"project_version,omitempty"`
 	Tasks          []domain.Task          `json:"tasks"`
 }
-type ProjectVersionCounts struct {
-	Total           int            `json:"total"`
-	Included        int            `json:"included"`
-	Removed         int            `json:"removed"`
-	Ended           int            `json:"ended"`
-	DevelopmentDone int            `json:"development_done"`
-	Released        int            `json:"released"`
-	Accepted        int            `json:"accepted"`
-	Blocked         int            `json:"blocked"`
-	ByStatus        map[string]int `json:"by_status"`
-}
+type ProjectVersionCounts = domain.ProjectVersionCounts
 type ProjectVersionSummary struct {
-	ID          string               `json:"id"`
-	Name        string               `json:"name"`
-	Goal        string               `json:"goal"`
-	Owner       string               `json:"owner"`
-	TargetDate  string               `json:"target_date"`
-	Status      string               `json:"status"`
-	Phase       string               `json:"phase"`
-	Version     int                  `json:"version"`
-	ScopeFrozen bool                 `json:"scope_frozen"`
-	Current     bool                 `json:"current"`
-	StartedAt   int64                `json:"started_at,omitempty"`
-	EndedAt     int64                `json:"ended_at,omitempty"`
-	Counts      ProjectVersionCounts `json:"counts"`
+	ID             string               `json:"id"`
+	Name           string               `json:"name"`
+	Goal           string               `json:"goal"`
+	Owner          string               `json:"owner"`
+	TargetDate     string               `json:"target_date"`
+	Status         string               `json:"status"`
+	Phase          string               `json:"phase"`
+	Version        int                  `json:"version"`
+	ScopeFrozen    bool                 `json:"scope_frozen"`
+	Current        bool                 `json:"current"` // legacy alias of is_default
+	IsDefault      bool                 `json:"is_default"`
+	DefaultVersion int                  `json:"default_version"`
+	StartedAt      int64                `json:"started_at,omitempty"`
+	EndedAt        int64                `json:"ended_at,omitempty"`
+	Counts         ProjectVersionCounts `json:"counts"`
 }
 type ProjectVersionDetail struct {
 	ProjectVersion domain.ProjectVersion `json:"project_version"`
@@ -107,6 +103,9 @@ func projectVersionSummary(v domain.ProjectVersion) ProjectVersionSummary {
 			c.Accepted++
 		}
 	}
+	if v.ListingCounts != nil {
+		c = *v.ListingCounts
+	}
 	phase := "planning"
 	if v.Status == "active" || c.ByStatus["testing"]+c.ByStatus["fixing"]+c.ByStatus["retest"]+c.ByStatus["verifying"]+c.ByStatus["doing"]+c.ByStatus["aligning"]+c.ByStatus["pending_release"]+c.ByStatus["review"]+c.ByStatus["done"] > 0 {
 		phase = "in_progress"
@@ -132,21 +131,23 @@ func projectVersionSummary(v domain.ProjectVersion) ProjectVersionSummary {
 	if v.Status == "closed" {
 		phase = "closed"
 	}
-	return ProjectVersionSummary{ID: v.ID, Name: v.Name, Goal: v.Goal, Owner: v.Owner, TargetDate: v.TargetDate, Status: v.Status, Phase: phase, Version: v.Version, ScopeFrozen: false, Current: v.Status == "active", StartedAt: v.StartedAt, EndedAt: v.EndedAt, Counts: c}
+	return ProjectVersionSummary{ID: v.ID, Name: v.Name, Goal: v.Goal, Owner: v.Owner, TargetDate: v.TargetDate, Status: v.Status, Phase: phase, Version: v.Version, ScopeFrozen: false, Current: false, StartedAt: v.StartedAt, EndedAt: v.EndedAt, Counts: c}
 }
 func (s *Service) ProjectVersions(c context.Context, a domain.Actor, p string) ([]ProjectVersionSummary, error) {
 	if e := s.CheckProject(c, a, p, false); e != nil {
 		return nil, e
 	}
-	vs, e := s.Store.ListProjectVersions(c, p)
-	if e != nil {
-		return nil, e
-	}
 	out := []ProjectVersionSummary{}
-	for _, v := range vs {
-		out = append(out, projectVersionSummary(v))
+	for page := 1; ; page++ {
+		result, e := s.ProjectVersionsPage(c, a, p, domain.VersionListQuery{PageQuery: domain.PageQuery{Page: page, PageSize: 100}})
+		if e != nil {
+			return nil, e
+		}
+		out = append(out, result.Items...)
+		if len(out) >= result.Total {
+			return out, nil
+		}
 	}
-	return out, nil
 }
 func (s *Service) ProjectVersionContext(c context.Context, a domain.Actor, id string) (ProjectVersionDetail, error) {
 	v, e := s.Store.GetProjectVersion(c, id)
@@ -156,7 +157,13 @@ func (s *Service) ProjectVersionContext(c context.Context, a domain.Actor, id st
 	if e = s.CheckProject(c, a, v.ProjectID, false); e != nil {
 		return ProjectVersionDetail{}, e
 	}
-	return ProjectVersionDetail{v, projectVersionSummary(v)}, nil
+	state, e := s.Store.GetCurrentMilestone(c, v.ProjectID)
+	if e != nil {
+		return ProjectVersionDetail{}, e
+	}
+	summary := projectVersionSummary(v)
+	summary.IsDefault, summary.Current, summary.DefaultVersion = v.ID == state.VersionID, v.ID == state.VersionID, state.Version
+	return ProjectVersionDetail{v, summary}, nil
 }
 func (s *Service) versionPrior(c context.Context, key, fp string) (ProjectVersionMutation, bool, error) {
 	r, e := s.Store.GetReceipt(c, key)
@@ -195,11 +202,14 @@ type versionPlan struct {
 	p             string
 	versions      map[string]*domain.ProjectVersion
 	expected      map[string]int
+	checks        map[string]domain.ProjectVersionCheck
 	tasks         []domain.VersionTaskWrite
 	events        []domain.Event
 	now           int64
 	state         domain.CurrentMilestone
 	stateExpected int
+	stateOriginal string
+	stateRead     bool
 }
 
 func (s *Service) newVersionPlan(c context.Context, a domain.Actor, p string) (*versionPlan, error) {
@@ -214,7 +224,7 @@ func (s *Service) newVersionPlan(c context.Context, a domain.Actor, p string) (*
 	if e != nil {
 		return nil, e
 	}
-	plan := &versionPlan{state: state, stateExpected: state.Version, s: s, c: c, a: a, p: p, versions: map[string]*domain.ProjectVersion{}, expected: map[string]int{}, tasks: []domain.VersionTaskWrite{}, events: []domain.Event{}, now: domain.Now()}
+	plan := &versionPlan{state: state, stateExpected: state.Version, stateOriginal: state.VersionID, s: s, c: c, a: a, p: p, versions: map[string]*domain.ProjectVersion{}, expected: map[string]int{}, checks: map[string]domain.ProjectVersionCheck{}, tasks: []domain.VersionTaskWrite{}, events: []domain.Event{}, now: domain.Now()}
 	for _, v := range vs {
 		copy := v
 		plan.versions[v.ID] = &copy
@@ -229,6 +239,9 @@ func (p *versionPlan) touch(id string) *domain.ProjectVersion {
 		}
 	}
 	return v
+}
+func (p *versionPlan) check(v *domain.ProjectVersion) {
+	p.checks[v.ID] = domain.ProjectVersionCheck{ID: v.ID, ProjectID: v.ProjectID, Version: v.Version, Status: v.Status}
 }
 func (p *versionPlan) history(v *domain.ProjectVersion, action, body string, ids []string, instruction string) {
 	userID := p.a.UserID
@@ -254,9 +267,25 @@ func (p *versionPlan) batch() domain.MilestoneBatch {
 		v.UpdatedAt = p.now
 		writes = append(writes, domain.VersionWrite{Value: *v, Expected: p.expected[id]})
 	}
-	state := p.state
-	state.Version = p.stateExpected + 1
-	return domain.MilestoneBatch{State: &state, Expected: p.stateExpected, Versions: writes, Events: p.events}
+	batch := domain.MilestoneBatch{Versions: writes, Events: p.events}
+	for id, check := range p.checks {
+		// A write already validates the same snapshot with CAS. New versions do
+		// not exist in storage until this batch is applied.
+		if _, written := p.expected[id]; !written {
+			batch.Checks = append(batch.Checks, check)
+		}
+	}
+	sort.Slice(batch.Checks, func(i, j int) bool { return batch.Checks[i].ID < batch.Checks[j].ID })
+	if p.state.VersionID != p.stateOriginal {
+		state := p.state
+		state.Version = p.stateExpected + 1
+		batch.State, batch.Expected = &state, p.stateExpected
+	}
+	if batch.State == nil && p.stateRead {
+		check := p.state
+		batch.CheckState = &check
+	}
+	return batch
 }
 func (p *versionPlan) finish(key, fp, target string) (ProjectVersionMutation, error) {
 	batch := p.batch()
@@ -308,14 +337,16 @@ func (s *Service) saveProjectVersion(c context.Context, a domain.Actor, p, id st
 	creating := id == ""
 	var v *domain.ProjectVersion
 	if id == "" {
-		if plan.state.VersionID != "" {
-			return ProjectVersionMutation{}, fmt.Errorf("%w: 当前已有进行中的里程碑，请先结束它", domain.ErrConflict)
-		}
 		id = domain.ID("ver_")
 		v = &domain.ProjectVersion{ID: id, ProjectID: p, Status: "active", StartedAt: plan.now, Scope: []domain.VersionScopeItem{}, Releases: []domain.VersionRelease{}, History: []domain.VersionHistoryEntry{}, CreatedAt: plan.now}
 		plan.versions[id] = v
 		plan.expected[id] = 0
-		plan.state.VersionID = id
+		if plan.state.VersionID == "" || in.SetDefault {
+			if in.DefaultVersion != 0 && in.DefaultVersion != plan.stateExpected {
+				return ProjectVersionMutation{}, domain.ErrConflict
+			}
+			plan.state.VersionID = id
+		}
 	} else {
 		v = plan.touch(id)
 		if v == nil {
@@ -353,12 +384,44 @@ func (p *versionPlan) move(refs []VersionTaskRef, target, reason, instruction st
 		if destination == nil {
 			return domain.ErrNotFound
 		}
-		if destination.Status != "active" || target != p.state.VersionID {
-			return fmt.Errorf("%w: 只能归入当前进行中的里程碑", domain.ErrConflict)
+		if destination.Status != "active" {
+			return fmt.Errorf("%w: 只能归入进行中的版本", domain.ErrConflict)
 		}
 	}
 	if len(refs) == 0 || len(refs) > 100 || !nonempty(reason) {
 		return errors.New("请选择1–100个需求并填写调整原因")
+	}
+	// Move the live parent/Bug group together. Finished Bug history stays put.
+	all, e := p.s.Store.ListTasks(p.c, p.p)
+	if e != nil {
+		return e
+	}
+	selected := map[string]bool{}
+	for _, ref := range refs {
+		selected[ref.ID] = true
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, t := range all {
+			if domain.TaskFinished(t.Status) || t.ParentRequirementID == "" {
+				continue
+			}
+			if selected[t.ID] || selected[t.ParentRequirementID] {
+				for _, id := range []string{t.ID, t.ParentRequirementID} {
+					if selected[id] {
+						continue
+					}
+					for _, related := range all {
+						if related.ID == id {
+							refs = append(refs, VersionTaskRef{ID: id, Version: related.Version})
+							selected[id] = true
+							changed = true
+							break
+						}
+					}
+				}
+			}
+		}
 	}
 	seen := map[string]bool{}
 	for _, ref := range refs {
@@ -366,6 +429,21 @@ func (p *versionPlan) move(refs []VersionTaskRef, target, reason, instruction st
 			return errors.New("需求编号/最新版本缺失或重复")
 		}
 		seen[ref.ID] = true
+		var prior *domain.VersionTaskWrite
+		for i := range p.tasks {
+			if p.tasks[i].Value.ID == ref.ID {
+				prior = &p.tasks[i]
+				break
+			}
+		}
+		if prior != nil {
+			if prior.Expected != ref.Version {
+				return domain.ErrConflict
+			}
+			if prior.Value.ProjectVersionID == target {
+				continue
+			}
+		}
 		t, e := p.s.Store.GetTask(p.c, ref.ID)
 		if e != nil {
 			return e
@@ -500,26 +578,39 @@ func (s *Service) actProjectVersion(c context.Context, a domain.Actor, id string
 	reason := strings.TrimSpace(in.Body)
 	switch in.Action {
 	case "start":
-		if current.Status != "planned" || plan.state.VersionID != "" {
+		if current.Status != "planned" {
 			return ProjectVersionMutation{}, domain.ErrConflict
 		}
 		current.Status = "active"
 		current.StartedAt = plan.now
 		current.EndedAt = 0
-		plan.state.VersionID = id
+		if plan.state.VersionID == "" {
+			plan.state.VersionID = id
+		}
 		if reason == "" {
 			reason = "开始推进版本"
 		}
 	case "reopen":
-		if (current.Status != "closed" && current.Status != "completed") || reason == "" || plan.state.VersionID != "" {
-			return ProjectVersionMutation{}, errors.New("当前不能有其他进行中里程碑，重新打开需填写原因")
+		if (current.Status != "closed" && current.Status != "completed") || reason == "" {
+			return ProjectVersionMutation{}, errors.New("只可重新打开已结束版本，需填写原因")
 		}
 		current.Status = "active"
 		current.EndedAt = 0
+		if plan.state.VersionID == "" {
+			plan.state.VersionID = id
+		}
+	case "set_default":
+		if current.Status != "active" || in.DefaultVersion != plan.stateExpected {
+			return ProjectVersionMutation{}, fmt.Errorf("%w: 默认版本或目标版本已变化，请刷新", domain.ErrConflict)
+		}
+		plan.stateRead = true
 		plan.state.VersionID = id
+		if reason == "" {
+			reason = "设置为新需求的默认版本"
+		}
 	case "complete":
-		if current.Status != "active" || plan.state.VersionID != id || reason == "" {
-			return ProjectVersionMutation{}, errors.New("只能结束当前里程碑，请填写结论")
+		if current.Status != "active" || reason == "" {
+			return ProjectVersionMutation{}, errors.New("只能结束进行中版本，请填写结论")
 		}
 		for _, item := range current.Scope {
 			if !item.Removed && !domain.TaskFinished(item.Task.Status) {
@@ -528,7 +619,12 @@ func (s *Service) actProjectVersion(c context.Context, a domain.Actor, id string
 		}
 		current.Status = "completed"
 		current.EndedAt = plan.now
-		plan.state.VersionID = ""
+		plan.stateRead = true
+		if plan.state.VersionID == id {
+			if e := plan.replaceDefault(id, in.DestinationVersionID, in.DestinationVersion); e != nil {
+				return ProjectVersionMutation{}, e
+			}
+		}
 	case "close":
 		if current.Status == "closed" || current.Status == "completed" || reason == "" {
 			return ProjectVersionMutation{}, errors.New("请填写关闭原因，已关闭版本不能重复关闭")
@@ -549,19 +645,51 @@ func (s *Service) actProjectVersion(c context.Context, a domain.Actor, id string
 				refs = append(refs, VersionTaskRef{ID: t.ID, Version: t.Version})
 			}
 		}
-		if plan.state.VersionID == id {
+		current.Status, current.EndedAt = "closed", plan.now
+		destination := ""
+		plan.stateRead = true
+		wasDefault := plan.state.VersionID == id
+		if wasDefault {
 			plan.state.VersionID = ""
 		}
-		destination := ""
-		if len(refs) > 0 {
-			if in.DestinationVersionID != "" {
-				return ProjectVersionMutation{}, errors.New("当前仅开放一个里程碑，剩余工作将自动转入下一里程碑")
+		if len(refs) == 0 && wasDefault && !in.CreateSuccessor {
+			if e := plan.replaceDefault(id, in.DestinationVersionID, in.DestinationVersion); e != nil {
+				return ProjectVersionMutation{}, e
 			}
-			successor, err := plan.ensureCurrent()
-			if err != nil {
-				return ProjectVersionMutation{}, err
+		}
+		if len(refs) > 0 || (wasDefault && (in.DestinationVersionID != "" || in.CreateSuccessor)) {
+			if in.CreateSuccessor {
+				previous := plan.state.VersionID
+				successor, err := plan.createMilestone()
+				if err != nil {
+					return ProjectVersionMutation{}, err
+				}
+				destination = successor.ID
+				if !wasDefault {
+					plan.state.VersionID = previous
+				}
+			} else if in.DestinationVersionID != "" {
+				target := plan.versions[in.DestinationVersionID]
+				if target == nil || target.ID == id || target.Status != "active" || target.Version != in.DestinationVersion {
+					return ProjectVersionMutation{}, fmt.Errorf("%w: 后继版本已变化", domain.ErrConflict)
+				}
+				destination = target.ID
+				plan.check(target)
+				if wasDefault {
+					plan.state.VersionID = target.ID
+				}
+			} else {
+				// Legacy clients may omit the destination only when there is no ambiguity.
+				active := plan.otherActive(id)
+				if len(active) > 1 {
+					return ProjectVersionMutation{}, errors.New("存在其他进行中版本，请明确选择剩余工作去向")
+				}
+				successor, err := plan.ensureCurrent()
+				if err != nil {
+					return ProjectVersionMutation{}, err
+				}
+				destination = successor.ID
 			}
-			destination = successor.ID
 		}
 		for start := 0; start < len(refs); start += 100 {
 			end := min(start+100, len(refs))
@@ -573,7 +701,7 @@ func (s *Service) actProjectVersion(c context.Context, a domain.Actor, id string
 		current.Status = "closed"
 		current.EndedAt = plan.now
 	case "publish":
-		if current.Status != "active" || current.ID != plan.state.VersionID || reason == "" || !nonempty(in.Environment) || len(in.Items) == 0 || len(in.Items) > 100 {
+		if current.Status != "active" || reason == "" || !nonempty(in.Environment) || len(in.Items) == 0 || len(in.Items) > 100 {
 			return ProjectVersionMutation{}, errors.New("请选择本次实际上线的需求，填写环境和发布结果；已关闭版本不能上线")
 		}
 		release := domain.VersionRelease{ID: domain.ID("pub_"), Environment: strings.TrimSpace(in.Environment), Body: reason, Actor: a.Name, Source: "human", At: plan.now, Tasks: []domain.Task{}}

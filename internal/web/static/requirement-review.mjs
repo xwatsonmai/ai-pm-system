@@ -36,7 +36,7 @@ export function requirementReviewHTML(task) {
     <nav class="rc-topics" aria-label="话题进度" hidden></nav>
     <div class="rc-body">
       <div class="rc-chat">
-        <div class="review-feed" role="log" aria-label="评审消息" tabindex="0"></div>
+        <div class="review-history-pagination"></div><div class="review-feed" role="log" aria-label="评审消息" tabindex="0"></div>
         <form class="review-composer">
           <p class="review-composer-note" hidden></p>
           <p class="rc-composer-hint" hidden></p>
@@ -100,7 +100,8 @@ export function mountRequirementReview(root, {task,api,userID,messageID = '',onD
   let sourceView = null; // null: closed; {kind:'current'|'snapshot'|'diff', message}
   input.value = draft?.body || '';
   const mentionEditor = mountReviewMentions(root,{input,api,projectID:task.project_id,initial:draft?.mentions || [],changed(){saveDraft();updateActions();}});
-  const endpoint = `/tasks/${encodeURIComponent(task.id)}/requirement-review`;
+  const endpoint = `/tasks/${encodeURIComponent(task.id)}/requirement-review?message_limit=20`;
+  const visibleMessages=new Set();let historyPage=null,historyLoading=false;const proposalNumbers=new Map(),messageOrder=new Map();
   const source = () => v?.source || task;
   const activeForm = () => v?.messages.findLast(message => message.result?.questions?.length && questionIsActive(v,message));
   const hasDraft = () => {
@@ -111,7 +112,7 @@ export function mountRequirementReview(root, {task,api,userID,messageID = '',onD
   const alignmentDone = () => v?.mode === 'development_alignment' && v.status === 'alignment_completed';
   const closed = () => v?.status==='closed' || taskTerminated(source());
   const changeDone = () => v?.status==='change_canceled' || (v?.mode === 'testing_change' && source().requirement_change?.status !== 'reviewing');
-  const discussing = () => discussionAvailable(source());
+  const discussing = () => v?.mode !== 'development_alignment' && discussionAvailable(source());
   const readOnly = () => !discussing() && (closed() || bugReadOnly() || alignmentDone() || changeDone());
   const topicOf = id => (v?.agenda || []).find(t => t.id === id);
   const node = id => [...feed.children].find(child => child.dataset.key === id);
@@ -260,7 +261,8 @@ export function mountRequirementReview(root, {task,api,userID,messageID = '',onD
   }
   // Keyed updates keep focus, typed form values and expanded sections across polling.
   function syncFeed(items) {
-    const states = proposalStates(v), existing = new Map([...feed.children].map(child => [child.dataset.key, child]));
+    const states = proposalStates(v);for(const [id,state] of states)if(proposalNumbers.has(id))state.number=proposalNumbers.get(id);
+    const existing = new Map([...feed.children].map(child => [child.dataset.key, child]));
     let previous = null, appended = null;
     for (const item of items) {
       const html = itemHTML(item, states);
@@ -402,12 +404,23 @@ export function mountRequirementReview(root, {task,api,userID,messageID = '',onD
   }
   function render(next) {
     if (disposed || next.version < lastVersion) return;
+    if(next.message_page){
+      if(!historyPage||!visibleMessages.size)historyPage=next.message_page;else historyPage={...historyPage,total:next.message_page.total};
+      for(const [id,n] of Object.entries(next.message_order||{}))messageOrder.set(id,n);
+      for(const [id,n] of Object.entries(next.proposal_numbers||{}))proposalNumbers.set(id,n);
+      const merged=new Map((v?.messages||[]).map(m=>[m.id,m]));
+      for(const m of next.context_messages||[])merged.set(m.id,m);
+      for(const m of next.messages||[]){merged.set(m.id,m);visibleMessages.add(m.id);}
+      next={...next,messages:[...merged.values()].sort((a,b)=>a.at-b.at||(messageOrder.get(a.id)??0)-(messageOrder.get(b.id)??0))};
+    }
     // Progress changes while the review version stays the same during a round.
     const extra = JSON.stringify([next.needs_recheck,next.recheck_reason,next.compaction,next.incoming_relations,next.creator,next.progress,next.source?.version,next.messages?.map(m=>m.mention_warnings)]);
     if (next.version === lastVersion && extra === lastExtra) return;
     v = next; lastVersion = next.version; lastExtra = extra;
     const nearEnd = feed.scrollHeight-feed.scrollTop-feed.clientHeight < 120;
-    const items = chatTimeline(v,{viewerID:userID});
+    const allItems=chatTimeline(v,{viewerID:userID});
+    const items=historyPage?allItems.filter(item=>!item.message||visibleMessages.has(item.message.id)||questionIsActive(v,item.message)||askIsOpen(v,item.message)):allItems;
+    renderHistoryPager();
     const appended = syncFeed(items);
     renderHeader(items); renderTopics();
     if (sourceView) renderSource();
@@ -420,8 +433,22 @@ export function mountRequirementReview(root, {task,api,userID,messageID = '',onD
     } else if (nearEnd) feed.scrollTop = feed.scrollHeight;
     if (messageID) {
       const target = node(messageID);
-      if (target) { target.scrollIntoView({block:'center'}); target.classList.add('rc-flash'); messageID = ''; }
+      if (target) { target.scrollIntoView({block:'center'}); target.classList.add('rc-flash'); messageID = ''; }else if(historyPage?.has_more&&!historyLoading){void loadOlderMessages();}
     }
+  }
+  function renderHistoryPager(){
+    const target=$('.review-history-pagination');if(!target)return;
+    const text=historyPage?.has_more?`<button type="button" data-review-action="history-more" ${historyLoading?'disabled':''}>${historyLoading?'正在读取…':'加载较早 20 条消息'}</button><span class="hint">共 ${historyPage.total} 条消息</span>`:'';
+    if(target.innerHTML!==text)target.innerHTML=text;
+  }
+  async function loadOlderMessages(){
+    if(historyLoading||!historyPage?.has_more)return;historyLoading=true;renderHistoryPager();
+    const height=feed.scrollHeight,top=feed.scrollTop;
+    try{
+      const older=await api(`${endpoint}&before_message=${encodeURIComponent(historyPage.next_before)}`);if(disposed)return;
+      historyPage=older.message_page;const incoming=older.version<lastVersion?{...v,messages:older.messages,context_messages:older.context_messages,message_page:older.message_page,proposal_numbers:older.proposal_numbers,message_order:older.message_order}:older;lastVersion=-1;render(incoming);feed.scrollTop=top+feed.scrollHeight-height;
+    }catch(error){if(!disposed)$('.review-send-error').textContent=`历史消息暂时无法读取：${error.message}`;}
+    finally{historyLoading=false;if(!disposed){renderHistoryPager();if(messageID&&historyPage?.has_more)void loadOlderMessages();}}
   }
   function setSaving(value) { saving = value; updateActions(); }
   async function command(payload) {
@@ -566,6 +593,7 @@ export function mountRequirementReview(root, {task,api,userID,messageID = '',onD
     const button = event.target.closest('[data-review-action]'); if (!button || button.matches(':disabled')) return;
     event.preventDefault(); event.stopPropagation();
     const action = button.dataset.reviewAction;
+    if(action==='history-more'){void loadOlderMessages();return;}
     if(action === 'file_bug'){if(saving||uploading)return;saveDraft();onFileBug?.();return;}
     if(action === 'change_requirement'){if(saving||uploading)return;saveDraft();onChange?.();return;}
     if(action === 'request_change'){if(saving||uploading)return;if(hasDraft()){$('.review-send-error').textContent='请先发送当前补充，再转为本轮变更；草稿已保留。';saveDraft();input.focus();return;}saveDraft();onChange?.();return;}
@@ -580,7 +608,8 @@ export function mountRequirementReview(root, {task,api,userID,messageID = '',onD
     if (action === 'snapshot' || action === 'diff') { sourceView = {kind:action,message:button.dataset.message}; renderSource(); return; }
     if (action === 'topic') {
       const target = v?.messages.findLast(m => m.result?.ask?.topic_id === button.dataset.topic);
-      const row = target && node(target.id);
+      let row = target && node(target.id);
+      if(!row&&target&&historyPage?.has_more){void loadOlderMessages().then(()=>root.querySelector(`[data-review-action=topic][data-topic="${CSS.escape(button.dataset.topic)}"]`)?.click());return;}
       if (row) { const top = row.getBoundingClientRect().top - feed.getBoundingClientRect().top + feed.scrollTop - 12; feed.scrollTop = top; row.querySelector('.rc-card, .rc-ask')?.classList.add('rc-flash'); setTimeout(()=>row.querySelector('.rc-flash')?.classList.remove('rc-flash'),1200); }
       return;
     }

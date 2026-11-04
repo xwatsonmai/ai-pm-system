@@ -146,7 +146,7 @@ try{
 
  // A lost confirmation response is recoverable with the same request after reopening.
  let lostConfirm=false;
- await page.route(`**/api${endpoint}`,async route=>{if(route.request().method()==='POST'&&route.request().postDataJSON()?.action==='confirm'&&!lostConfirm){lostConfirm=true;await route.fetch();await route.abort('failed')}else await route.continue()});
+ await page.route(`**/api${endpoint}*`,async route=>{if(route.request().method()==='POST'&&route.request().postDataJSON()?.action==='confirm'&&!lostConfirm){lostConfirm=true;await route.fetch();await route.abort('failed')}else await route.continue()});
  await page.locator('.review-confirm').click();await page.locator('.review-send-error').filter({hasText:'输入已保留'}).waitFor();
  assert.equal((await api(`/tasks/${task.id}`)).task.status,'ready');const confirmedVersion=(await api(`/tasks/${task.id}`)).task.version;
  await closeDialog();await openReview(task.title,'问 Agent');
@@ -169,7 +169,7 @@ try{
  await page.locator('.review-file-input').setInputFiles({name:'补充规则.md',mimeType:'text/markdown',buffer:Buffer.from('重复退款必须有记录。')});await page.getByText('附件已上传，发送后进入评审对话',{exact:true}).waitFor();
  const long='触发评审失败。'+('产品补充内容，需要原样保留。'.repeat(500));await page.locator('#review-input').fill(long);
  let lost=false;const slowEndpoint=`/api/tasks/${slow.id}/requirement-review`;
- await page.route(`**${slowEndpoint}`,async route=>{const body=route.request().postDataJSON();if(route.request().method()==='POST'&&body?.action==='message'&&!lost){lost=true;await route.fetch();await route.abort('failed');}else await route.continue();});
+ await page.route(`**${slowEndpoint}*`,async route=>{const body=route.request().postDataJSON();if(route.request().method()==='POST'&&body?.action==='message'&&!lost){lost=true;await route.fetch();await route.abort('failed');}else await route.continue();});
  await page.locator('.review-send').click();await page.locator('.review-send-error').filter({hasText:'草稿已保留'}).waitFor();assert.equal(await page.locator('#review-input').inputValue(),long);
  await closeDialog();await openReview(slow.title);
  assert.equal(await page.locator('.review-send').innerText(),'重试保存');await page.locator('.rc-composer-hint').filter({hasText:'不会重复发送'}).waitFor();
@@ -212,7 +212,7 @@ try{
  await closeDialog();await openNotes();noteForm=page.locator('.review-question-form');
  assert.match(await noteForm.locator('[data-question-id=scope] textarea').inputValue(),/截图说明/);assert.equal(await noteForm.locator('.review-note-image').count(),2);
  const notesEndpoint=`/api/tasks/${noteTask.id}/requirement-review`;let lostNotes=false;
- await page.route(`**${notesEndpoint}`,async route=>{if(route.request().method()==='POST'&&route.request().postDataJSON()?.action==='message'&&!lostNotes){lostNotes=true;await route.fetch();await route.abort('failed')}else await route.continue()});
+ await page.route(`**${notesEndpoint}*`,async route=>{if(route.request().method()==='POST'&&route.request().postDataJSON()?.action==='message'&&!lostNotes){lostNotes=true;await route.fetch();await route.abort('failed')}else await route.continue()});
  await noteForm.locator('.rc-form-submit').click();await page.locator('.review-send-error').filter({hasText:'草稿已保留'}).waitFor();
  await closeDialog();await openNotes();await page.locator('.review-send').filter({hasText:'重试保存'}).click();await page.getByText('消息已保存',{exact:true}).waitFor();
  let noteReview=await api(notesEndpoint.slice(4)),noteMessage=noteReview.messages.find(m=>m.role==='user');

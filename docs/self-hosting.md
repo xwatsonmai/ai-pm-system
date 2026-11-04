@@ -131,6 +131,7 @@ python3 releases/20261028-v2/update.py apply --release 20261028-v2 \
 
 - `prepare` 用 SQLite 在线备份生成一致的数据库快照，连同配置打包到 `backups/pre-<release>.tar.gz` 并校验。有 Agent 分析、需求评审或续答任务正在运行时，它会拒绝执行。
 - `apply` 需要在 `prepare` 之后 15 分钟内执行。它停止旧容器、启动新镜像，每 100ms 探测一次健康检查；新版本没能恢复时，会自动切回旧镜像，并保留当前数据。
+- 数据格式或权限模型不兼容旧服务时，先验证迁移和恢复方案，并给 `apply` 传 `--no-image-rollback`。启动失败后将停止目标应用、保留当前数据、目标镜像配置和备份，记录 `manual_recovery_required`，由维护者按兼容性核验结果继续恢复；不会自动启动旧写入程序。
 - 手动回退：把 `releases/<release>/env.before` 复制为 `.env`，再执行 `docker compose up -d`。
 
 这个流程只适用于数据格式兼容的更新。包含不兼容迁移的版本，需要单独安排迁移和恢复方案。

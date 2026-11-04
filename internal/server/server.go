@@ -77,11 +77,13 @@ func (s *Server) Handler() http.Handler {
 	s.authRoutes(mux)
 	s.accountRoutes(mux)
 	s.platformRoutes(mux)
+	s.projectRoleRoutes(mux)
 	s.notifyRoutes(mux)
 	s.oauthRoutes(mux)
 	s.repositoryRoutes(mux)
 	s.collaborationRoutes(mux)
 	s.projectVersionRoutes(handle)
+	s.paginationRoutes(handle)
 	handle("POST /api/projects/{id}/attachments", s.uploadAttachment)
 	handle("GET /api/projects/{id}/attachments/{attachment}", s.downloadAttachment)
 	handle("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -92,6 +94,9 @@ func (s *Server) Handler() http.Handler {
 		respond(w, map[string]any{"status": "ok", "version": "0.1.0", "database": "sqlite", "runtime": "Pi SDK 1.1.0", "mode": mode})
 	})
 	handle("GET /api/projects", func(w http.ResponseWriter, r *http.Request) {
+		if s.pagedList(w, r, "projects") {
+			return
+		}
 		v, e := s.visibleProjects(r)
 		if e != nil {
 			fail(w, e)
@@ -99,7 +104,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		projects := make([]repositoryProject, 0, len(v))
 		for _, p := range v {
-			projects = append(projects, s.repositoryProject(r.Context(), p))
+			projects = append(projects, s.repositoryProjectFor(r, p))
 		}
 		respond(w, projects)
 	})
@@ -111,7 +116,7 @@ func (s *Server) Handler() http.Handler {
 			fail(w, e)
 			return
 		}
-		v["project"] = s.repositoryProject(r.Context(), v["project"].(domain.Project))
+		v["project"] = s.repositoryProjectFor(r, v["project"].(domain.Project))
 		respond(w, v)
 	})
 	handle("POST /api/projects/{id}/sync", func(w http.ResponseWriter, r *http.Request) {
@@ -124,11 +129,19 @@ func (s *Server) Handler() http.Handler {
 			fail(w, e)
 			return
 		}
-		respond(w, s.repositoryProject(r.Context(), p))
+		respond(w, s.repositoryProjectFor(r, p))
 	})
 	handle("GET /api/projects/{id}/code", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		v, e := s.Git.Read(r.Context(), r.PathValue("id"), gitrepo.Query{Action: q.Get("action"), Ref: q.Get("ref"), Path: q.Get("path"), Query: q.Get("query"), Base: q.Get("base")})
+		paging, explicit, e := pageQuery(r)
+		if e != nil {
+			fail(w, e)
+			return
+		}
+		if !explicit {
+			paging = domain.PageQuery{}
+		}
+		v, e := s.Git.Read(r.Context(), r.PathValue("id"), gitrepo.Query{Page: paging.Page, PageSize: paging.PageSize, Action: q.Get("action"), Ref: q.Get("ref"), Path: q.Get("path"), Query: q.Get("query"), Base: q.Get("base")})
 		if e != nil {
 			fail(w, e)
 			return
@@ -136,6 +149,9 @@ func (s *Server) Handler() http.Handler {
 		respond(w, v)
 	})
 	handle("GET /api/projects/{id}/tasks", func(w http.ResponseWriter, r *http.Request) {
+		if s.pagedList(w, r, "tasks") {
+			return
+		}
 		v, e := s.App.Store.ListTasks(r.Context(), r.PathValue("id"))
 		if e != nil {
 			fail(w, e)
@@ -157,6 +173,9 @@ func (s *Server) Handler() http.Handler {
 		respond(w, v)
 	})
 	handle("GET /api/tasks/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if s.compactTaskContext(w, r) {
+			return
+		}
 		t, e := s.App.Store.GetTask(r.Context(), r.PathValue("id"))
 		if e != nil {
 			fail(w, e)
@@ -215,6 +234,9 @@ func (s *Server) Handler() http.Handler {
 		respond(w, v)
 	})
 	handle("GET /api/profiles", s.onlyAdmin(func(w http.ResponseWriter, r *http.Request) {
+		if s.pagedList(w, r, "profiles") {
+			return
+		}
 		v, e := s.App.Store.ListProfiles(r.Context())
 		if e != nil {
 			fail(w, e)
@@ -239,6 +261,9 @@ func (s *Server) Handler() http.Handler {
 		respond(w, v)
 	}))
 	handle("GET /api/projects/{id}/tokens", func(w http.ResponseWriter, r *http.Request) {
+		if s.pagedList(w, r, "tokens") {
+			return
+		}
 		v, e := s.App.Store.ListTokens(r.Context(), r.PathValue("id"))
 		if e != nil {
 			fail(w, e)
@@ -274,6 +299,9 @@ func (s *Server) Handler() http.Handler {
 		respond(w, map[string]bool{"ok": true})
 	})
 	handle("GET /api/projects/{id}/runs", func(w http.ResponseWriter, r *http.Request) {
+		if s.pagedList(w, r, "runs") {
+			return
+		}
 		v, e := s.App.Store.ListRuns(r.Context(), r.PathValue("id"))
 		if e != nil {
 			fail(w, e)
@@ -325,6 +353,14 @@ func (s *Server) Handler() http.Handler {
 			AttachmentIDs []string `json:"attachment_ids"`
 		}
 		if e := read(r, &in); e != nil {
+			fail(w, e)
+			return
+		}
+		page := "tasks"
+		if in.Kind == "question" {
+			page = "chat"
+		}
+		if e := s.App.RequirePages(r.Context(), s.actor(r), r.PathValue("id"), page); e != nil {
 			fail(w, e)
 			return
 		}

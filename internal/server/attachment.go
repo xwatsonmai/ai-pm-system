@@ -43,7 +43,7 @@ func (s *Server) uploadAttachment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) downloadAttachment(w http.ResponseWriter, r *http.Request) {
-	a, err := s.App.Store.GetAttachment(r.Context(), r.PathValue("attachment"))
+	a, err := s.App.AttachmentAs(r.Context(), s.actor(r), r.PathValue("id"), r.PathValue("attachment"))
 	if err != nil {
 		fail(w, err)
 		return

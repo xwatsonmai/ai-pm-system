@@ -28,7 +28,7 @@ func (s *Service) RequirementIterations(c context.Context, a domain.Actor, id st
 	if e != nil {
 		return out, e
 	}
-	if e = s.CheckProject(c, a, task.ProjectID, false); e != nil {
+	if e = s.RequirePages(c, a, task.ProjectID, "tasks", "reviews", "versions"); e != nil {
 		return out, e
 	}
 	if offset < 0 || limit < 0 || limit > 50 {
@@ -77,7 +77,7 @@ func (s *Service) createRequirementIteration(c context.Context, a domain.Actor, 
 	if e != nil {
 		return out, e
 	}
-	if e = s.CheckProject(c, a, source.ProjectID, false); e != nil {
+	if e = s.RequirePages(c, a, source.ProjectID, "tasks"); e != nil {
 		return out, e
 	}
 	if in.RequestID == "" {
@@ -100,7 +100,7 @@ func (s *Service) createRequirementIteration(c context.Context, a domain.Actor, 
 	if e = validateInput(&in.TaskInput); e != nil {
 		return out, e
 	}
-	files, e := s.taskAttachments(c, source.ProjectID, in.AttachmentIDs)
+	files, e := s.taskAttachments(c, a, source.ProjectID, in.AttachmentIDs)
 	if e != nil {
 		return out, e
 	}
@@ -131,7 +131,7 @@ func (s *Service) createRequirementIteration(c context.Context, a domain.Actor, 
 			return out, e
 		}
 		candidate := task
-		if e = plan.bindTask(&candidate); e != nil {
+		if e = plan.bindTask(&candidate, in.ProjectVersionID); e != nil {
 			if errors.Is(e, domain.ErrConflict) {
 				continue
 			}

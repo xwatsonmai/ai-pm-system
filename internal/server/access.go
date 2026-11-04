@@ -22,7 +22,7 @@ func (s *Server) projectAccess(next http.Handler) http.Handler {
 		switch path[1] {
 		case "projects":
 			id = r.PathValue("id")
-			manage = len(path) > 3 && (path[3] == "tokens" || (path[3] == "members" && (r.Method != "GET" || platformAdmin(s.actor(r)))) || path[3] == "directory")
+			manage = len(path) > 3 && (path[3] == "tokens" || path[3] == "members" || path[3] == "directory" || path[3] == "roles" || (path[3] == "access" && platformAdmin(s.actor(r))))
 		case "tasks":
 			var t domain.Task
 			t, err = s.App.Store.GetTask(r.Context(), r.PathValue("id"))
@@ -30,6 +30,10 @@ func (s *Server) projectAccess(next http.Handler) http.Handler {
 		case "project-versions":
 			var v domain.ProjectVersion
 			v, err = s.App.Store.GetProjectVersion(r.Context(), r.PathValue("id"))
+			id = v.ProjectID
+		case "requirement-intakes":
+			var v domain.RequirementIntake
+			v, err = s.App.Store.GetRequirementIntake(r.Context(), r.PathValue("id"))
 			id = v.ProjectID
 		case "runs":
 			var run domain.Run
@@ -49,6 +53,12 @@ func (s *Server) projectAccess(next http.Handler) http.Handler {
 		}
 		if id != "" {
 			if err = s.App.CheckProject(r.Context(), s.actor(r), id, manage); err != nil {
+				fail(w, err)
+				return
+			}
+		}
+		if id != "" {
+			if err = s.authorizeProjectRoute(r, id, manage, path); err != nil {
 				fail(w, err)
 				return
 			}

@@ -205,10 +205,9 @@ try {
   await page.locator(`tr[data-id="${source.id}"]`).click();
   await page.getByRole("button", { name: "追加迭代", exact: true }).click();
   assert.equal(await page.locator("#task-form [name=title]").inputValue(), "");
-  await page
-    .locator(".milestone-association")
-    .getByText("保存时自动创建里程碑", { exact: true })
-    .waitFor();
+  await page.locator('.milestone-association [data-version-options]').waitFor();
+  assert.equal(await page.locator('#task-form [name=project_version_id]').inputValue(),'');
+  assert.equal(await page.locator('.milestone-association [data-version-options]').inputValue(),'');
   await page.locator(".iteration-snapshot summary").first().click();
   await page
     .locator(".iteration-snapshot-content")
@@ -242,7 +241,9 @@ try {
     ),
   );
   let dropped = false;
+  const iterationRequests=[];
   await page.route(`**/api/tasks/${source.id}/iterations`, async (route) => {
+    if(route.request().method()==='POST')iterationRequests.push(route.request().postDataJSON());
     if (route.request().method() === "POST" && !dropped) {
       dropped = true;
       await route.fetch();
@@ -264,6 +265,8 @@ try {
   await page.locator("#task-form button[type=submit]").click();
   await page.locator("#task-form").waitFor({ state: "detached" });
   assert.equal(await page.locator("dialog").count(), 0);
+  assert.equal(iterationRequests.length,2);
+  assert.deepEqual(iterationRequests[1],iterationRequests[0],'Lost-response retry must preserve the exact automatic/explicit target and request ID');
   let ctx = await api(`/projects/${project.id}/context`),
     children = ctx.tasks.filter((t) => t.iteration);
   assert.equal(children.length, 1);
@@ -275,11 +278,11 @@ try {
   assert.equal(child.iteration.source.description, source.description);
   assert.deepEqual(await current(source), source);
   assert.deepEqual(
-    await api(`/project-versions/${source.project_version_id}`),
-    oldVersion,
+    (await api(`/project-versions/${source.project_version_id}`)).project_version,
+    oldVersion.project_version,
   );
   report.creation =
-    "旧版本已结束时自动进入新当前版本；原需求和旧版本不变；创建先保存并关闭、草稿隔离和丢响应重试通过";
+    "旧版本已结束时自动进入新默认版本；原需求和旧版本不变；创建先保存并关闭、草稿隔离和丢响应重试通过";
   let review;
   for (let n = 0; n < 150; n++) {
     review = await api(`/tasks/${child.id}/requirement-review`);

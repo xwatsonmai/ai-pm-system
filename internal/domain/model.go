@@ -27,6 +27,8 @@ func ID(prefix string) string {
 func Now() int64 { return time.Now().UnixMilli() }
 
 type Project struct {
+	ProjectRoles  []ProjectRole   `json:"project_roles,omitempty"`
+	AccessVersion int             `json:"access_version"`
 	AgentReadMode string          `json:"agent_read_mode,omitempty"`
 	AgentRef      string          `json:"agent_ref,omitempty"`
 	OwnerID       string          `json:"owner_id"`
@@ -152,17 +154,22 @@ type Event struct {
 	ReviewNote *RequirementReviewNote `json:"-"`
 }
 type Artifact struct {
-	ID          string          `json:"id"`
-	ProjectID   string          `json:"project_id"`
-	TaskID      string          `json:"task_id"`
-	Kind        string          `json:"kind"`
-	Title       string          `json:"title"`
-	Body        string          `json:"body"`
-	Source      string          `json:"source"`
-	SHA         string          `json:"sha"`
-	Environment string          `json:"environment"`
-	Data        json.RawMessage `json:"data,omitempty"`
-	At          int64           `json:"at"`
+	OriginRunID       string          `json:"origin_run_id,omitempty"`
+	OriginOwnerID     string          `json:"origin_owner_id,omitempty"`
+	OriginOwnerKind   string          `json:"origin_owner_kind,omitempty"`
+	OriginRunKind     string          `json:"origin_run_kind,omitempty"`
+	OriginUnavailable bool            `json:"origin_unavailable,omitempty"`
+	ID                string          `json:"id"`
+	ProjectID         string          `json:"project_id"`
+	TaskID            string          `json:"task_id"`
+	Kind              string          `json:"kind"`
+	Title             string          `json:"title"`
+	Body              string          `json:"body"`
+	Source            string          `json:"source"`
+	SHA               string          `json:"sha"`
+	Environment       string          `json:"environment"`
+	Data              json.RawMessage `json:"data,omitempty"`
+	At                int64           `json:"at"`
 }
 
 // Conversation stores user edits independently of streaming run updates.
@@ -261,6 +268,8 @@ type Profile struct {
 // Attachment metadata is safe to return in run history; raw bytes and extracted
 // text stay in the persistence adapter and are loaded only for the model/download.
 type Attachment struct {
+	UploaderID        string                   `json:"uploader_id,omitempty"`
+	UploaderKind      string                   `json:"uploader_kind,omitempty"`
 	UploadFingerprint string                   `json:"upload_fingerprint,omitempty"`
 	Authorization     *TaskActionAuthorization `json:"authorization,omitempty"`
 	ID                string                   `json:"id"`
@@ -273,6 +282,13 @@ type Attachment struct {
 	At                int64                    `json:"at"`
 	Content           []byte                   `json:"-"`
 	Text              string                   `json:"-"`
+}
+
+// AttachmentReference is a persisted object containing attachment metadata.
+// Deleted private runs still count as bindings, but do not grant read access.
+type AttachmentReference struct {
+	Kind string
+	ID   string
 }
 type Token struct {
 	ID        string `json:"id"`

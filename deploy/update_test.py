@@ -1,4 +1,5 @@
 import importlib.util
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -39,7 +40,7 @@ class UpdateTest(unittest.TestCase):
         update.online_backup(self.root / "shared/data/ai-pm.db", snapshot)
         self.db.execute("insert into records values('later write')")
         self.db.commit()
-        with sqlite3.connect(str(snapshot)) as db:
+        with closing(sqlite3.connect(str(snapshot))) as db:
             self.assertEqual(db.execute("select value from records").fetchall(), [("committed in WAL",)])
             self.assertEqual(db.execute("pragma quick_check").fetchone()[0], "ok")
         self.assertEqual(self.db.execute("select count(*) from records").fetchone()[0], 2)
@@ -115,6 +116,26 @@ class UpdateTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "configuration changed"):
             updater.apply()
         self.assertFalse(any(call[0] == "stop" for call in self.calls))
+
+    def test_incompatible_update_never_starts_old_writer_or_restores_data(self):
+        updater = self.prepared()
+        self.db.execute("insert into records values('new format business data')")
+        self.db.commit()
+        def unavailable():
+            raise RuntimeError("new image not ready")
+
+        updater.wait_http = unavailable
+        with patch.object(update, "idle"), patch.object(update, "healthy", return_value=True):
+            with self.assertRaisesRegex(RuntimeError, "new image not ready"):
+                updater.apply(automatic_image_rollback=False)
+        self.assertEqual(sum(call[0] == "up" for call in self.calls), 1)
+        self.assertEqual(self.calls[-1], ("stop", "app"))
+        self.assertIn("AI_PM_IMAGE=new-id", (self.root / ".env").read_text())
+        self.assertEqual(self.db.execute("select count(*) from records").fetchone()[0], 2)
+        self.assertTrue((updater.directory / "env.before").is_file())
+        self.assertTrue((self.root / "backups/pre-test-release.tar.gz").is_file())
+        result = json.loads((updater.directory / "result.json").read_text())
+        self.assertEqual(result["outcome"], "manual_recovery_required")
 
     def test_probe_bound_includes_time_to_receive_recovery_response(self):
         probe = update.Probe("http://unused")

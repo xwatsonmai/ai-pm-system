@@ -16,7 +16,7 @@ test:
 	go vet ./...
 	npm test --prefix runtime
 	node --test internal/web/*.test.mjs
-	node --check internal/web/static/app.js
+	node --input-type=module --check < internal/web/static/app.js
 	node --check internal/web/static/requirement-editor.mjs
 	node --check internal/web/static/requirement-review.mjs
 	node --check internal/web/static/requirement-review-state.mjs
@@ -26,3 +26,7 @@ test:
 	node --check internal/web/static/project-timeline.mjs
 	node --check internal/web/static/requirement-iterations.mjs
 	node --check internal/web/static/todo.mjs
+	node --check internal/web/static/navigation.mjs
+	node --check internal/web/static/project-access.mjs
+	node --check internal/web/static/pagination.mjs
+	node --check internal/web/static/version-picker.mjs

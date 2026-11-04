@@ -76,7 +76,7 @@ db.execute("UPDATE documents SET payload=? WHERE kind='project' AND id=?",(json.
   await page.keyboard.insertText('请看 @麦');await options.first().waitFor();await input.press('Enter');
   assert.equal(await chips.count(),1);
   let dropped=false;
-  await page.route(`**/api${endpoint}`,async route=>{
+  await page.route(`**/api${endpoint}*`,async route=>{
     if(route.request().method()==='POST' && route.request().postDataJSON().action==='message' && !dropped){dropped=true;await route.fetch();await route.abort('failed');}else await route.continue();
   });
   const countBefore=users.length;

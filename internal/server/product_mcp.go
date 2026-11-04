@@ -30,18 +30,18 @@ func productSpecs() []toolSpec {
 		return toolSpec{name, description + "。仅用户明确要求后通过个人OAuth执行，保存真实员工身份与授权原话。", fields, required}
 	}
 	return []toolSpec{
-		write("requirement_iterate", "基于已验收(done)的需求/Bug追加独立迭代，保留已验收上下文，原单不回退；自动归入当前里程碑，先保存后后台评审", map[string]string{"task_id": "已验收的起点需求ID", "input": "JSON对象：source_version为起点需求最新version；title、description描述本次变化；kind、acceptance、attachment_ids、priority、reviewer可选"}, "task_id", "input"),
+		write("requirement_iterate", "基于已验收(done)的需求/Bug追加独立迭代，保留已验收上下文，原单不回退；归入指定或默认版本，先保存后后台评审", map[string]string{"task_id": "已验收的起点需求ID", "input": "JSON对象：source_version为起点需求最新version；title、description描述本次变化；kind、acceptance、attachment_ids、priority、reviewer、project_version_id(目标进行中版本)可选"}, "task_id", "input"),
 		{"requirement_iterations", "读取需求迭代记录及最初需求摘要；不限轮数，has_more时继续分页。每轮的正文和冻结上下文用task_get_context读取。", map[string]string{"task_id": "当前项目任意一轮需求ID", "offset": "分页偏移，默认0", "limit": "每页1–50，默认10"}, []string{"task_id"}},
-		{"project_milestone_get", "读取当前里程碑，没有时返回null；读取不会创建。产品创建需求时自动创建/归入当前里程碑。", nil, nil},
+		{"project_milestone_get", "读取默认版本，没有时返回null；读取不会创建。未指定目标的新需求进入默认版本，多个进行中版本可并行。", nil, nil},
 		{"project_timeline", "产品项目时间线：里程碑和需求事件、真实Git提交、明确的SHA关联；仓库读取失败与没有提交分别报告。", map[string]string{"from": "起始毫秒时间戳，可选，默认最近30天", "until": "结束毫秒时间戳，不包含，可选；翻页保持不变", "offset": "需求事件偏移，默认0", "git_offset": "提交偏移，默认0", "git_anchor": "上页返回的提交快照，翻页保持不变", "limit": "每页1–200，默认100"}, nil},
-		write("requirement_create", "产品创建需求/Bug，先持久化完整原文与附件，再后台评审，自动归入当前里程碑；不必认领", map[string]string{"input": "JSON对象：title必填，kind为requirement或bug，description为完整Markdown，可含截图，acceptance为字符串数组；attachment_ids引用已上传附件；priority/reviewer可选"}, "input"),
+		write("requirement_create", "产品创建需求/Bug，先持久化完整原文与附件，再后台评审，归入指定或默认版本；不必认领", map[string]string{"input": "JSON对象：title必填，kind为requirement或bug，description为完整Markdown，可含截图，acceptance为字符串数组；attachment_ids引用已上传附件；priority/reviewer/project_version_id(目标进行中版本)可选"}, "input"),
 		write("requirement_update", "产品修改需求；input只填要修改字段，未提供的字段保留；先读取最新version，保存后需重新核对/评审", map[string]string{"task_id": "需求ID", "input": "JSON对象：version最新正整数必填；可选title、kind、description、acceptance、priority、reviewer、attachment_ids；空数组表示清空附件或验收条件"}, "task_id", "input"),
 		{"requirement_review_get", "读取产品评审对话、问题、已保存答案和最新generation；不发起评审。", map[string]string{"task_id": "需求ID"}, []string{"task_id"}},
 		write("requirement_review_message", "产品补充/纠正评审，可不填表自由回复；输入先保存，模型失败不丢失；不必认领", map[string]string{"task_id": "需求ID", "input": "JSON对象：expected_task_version必填；body自由说明；attachment_ids、reply_to、answers和question_notes可选；action可为message或retry"}, "task_id", "input"),
 		write("requirement_review_confirm", "产品明确确认最新需求稿后进入待认领；不能将Agent觉得可行当作确认", map[string]string{"task_id": "需求ID", "version": "当前task.version", "generation": "最新评审generation"}, "task_id", "version", "generation"),
-		write("project_version_create", "产品创建当前里程碑；已有当前里程碑时拒绝创建第二个", map[string]string{"input": "JSON对象：name必填；goal、owner、target_date(YYYY-MM-DD)可选"}, "input"),
+		write("project_version_create", "产品创建并行版本；默认版本仅决定未指定归属的新需求去向", map[string]string{"input": "JSON对象：name必填；goal、owner、target_date(YYYY-MM-DD)、set_default(是否设为默认)、default_version(默认指针并发编号)可选"}, "input"),
 		write("project_version_update", "产品更新里程碑计划；已有上线记录仍可追加需求、更新计划，历史发布快照不改变", map[string]string{"project_version_id": "里程碑ID", "input": "完整JSON对象：version最新并发编号、name必填，goal、owner、target_date可选"}, "project_version_id", "input"),
-		write("project_version_manage", "产品结束/关闭/重新打开里程碑；complete要求需求均已结束，close自动将剩余开发工作转下一里程碑；不执行部署或验收", map[string]string{"project_version_id": "里程碑ID", "action": "complete/close/reopen/start", "version": "最新里程碑version", "body": "用户提供或确认的结论/原因，必填"}, "project_version_id", "action", "version", "body"),
+		write("project_version_manage", "产品结束/关闭/重新打开里程碑；complete要求需求均已结束，close将剩余开发工作转到明确选择的进行中版本或新建后继版本；不执行部署或验收", map[string]string{"project_version_id": "里程碑ID", "action": "complete/close/reopen/start/set_default", "version": "最新里程碑version", "body": "用户提供或确认的结论/原因，必填", "destination_version_id": "close/complete后继进行中版本，可选", "destination_version": "后继版本最新version", "create_successor": "close显式新建后继版本时填true", "default_version": "set_default必填，读取summary.default_version"}, "project_version_id", "action", "version", "body"),
 		write("requirement_attachment_upload", "上传产品提供的截图/文档，返回附件ID与图片预览地址；相同request_id不重复保存", map[string]string{"name": "文件名", "content_base64": "原始文件base64，解码后最多10MB"}, "name", "content_base64"),
 	}
 }
@@ -184,7 +184,7 @@ func (s *Server) productCall(c context.Context, a domain.Actor, name string, arg
 		if e != nil {
 			return nil, e
 		}
-		return s.App.ManageProjectVersionFromMCP(c, a, args["project_version_id"], app.ProjectVersionAction{Action: args["action"], Version: v, Body: args["body"], RequestID: args["request_id"]}, grant)
+		return s.App.ManageProjectVersionFromMCP(c, a, args["project_version_id"], app.ProjectVersionAction{Action: args["action"], Version: v, Body: args["body"], RequestID: args["request_id"], DestinationVersionID: args["destination_version_id"], DestinationVersion: number(args["destination_version"]), DefaultVersion: number(args["default_version"]), CreateSuccessor: args["create_successor"] == "true"}, grant)
 	case "requirement_attachment_upload":
 		raw := args["content_base64"]
 		if len(raw) > base64.StdEncoding.EncodedLen(attachment.MaxSize) {

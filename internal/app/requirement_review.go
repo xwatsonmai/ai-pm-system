@@ -35,7 +35,7 @@ func (s *Service) RequirementReview(c context.Context, a domain.Actor, id string
 	if err != nil {
 		return domain.RequirementReview{}, err
 	}
-	if err = s.CheckProject(c, a, t.ProjectID, false); err != nil {
+	if err = s.RequirePages(c, a, t.ProjectID, "tasks", "reviews", "versions"); err != nil {
 		return domain.RequirementReview{}, err
 	}
 	v, err := s.Store.GetRequirementReview(c, id)
@@ -141,7 +141,11 @@ func (s *Service) saveRequirementReview(c context.Context, a domain.Actor, id st
 	if err != nil {
 		return domain.RequirementReview{}, err
 	}
-	if err = s.CheckProject(c, a, t.ProjectID, false); err != nil {
+	pages := []string{"tasks"}
+	if t.ParentRequirementID != "" {
+		pages = append(pages, "reviews")
+	}
+	if err = s.RequirePages(c, a, t.ProjectID, pages...); err != nil {
 		return domain.RequirementReview{}, err
 	}
 	if a.Kind != "human" && authorization == nil && !(a.Kind == "platform" && in.Action == "start") {
@@ -263,13 +267,13 @@ func (s *Service) saveRequirementReview(c context.Context, a domain.Actor, id st
 		if in.Action == "message" && (len(in.Answers) > 0 || len(in.QuestionNotes) > 0) && in.ReplyTo == "" {
 			return v, errors.New("表单回答必须关联当前问题消息，请刷新后重试；草稿已保留")
 		}
-		files, e := s.taskAttachments(c, t.ProjectID, in.AttachmentIDs)
+		files, e := s.taskAttachments(c, a, t.ProjectID, in.AttachmentIDs)
 		if e != nil {
 			return v, e
 		}
 		var notes map[string]domain.RequirementQuestionNote
 		if in.Action == "message" && len(in.QuestionNotes) > 0 {
-			notes, e = s.requirementQuestionNotes(c, t.ProjectID, v, in)
+			notes, e = s.requirementQuestionNotes(c, a, t.ProjectID, v, in)
 			if e != nil {
 				return v, e
 			}
@@ -432,7 +436,7 @@ func (s *Service) saveRequirementReview(c context.Context, a domain.Actor, id st
 	return v, err
 }
 
-func (s *Service) requirementQuestionNotes(c context.Context, project string, v domain.RequirementReview, in RequirementReviewInput) (map[string]domain.RequirementQuestionNote, error) {
+func (s *Service) requirementQuestionNotes(c context.Context, a domain.Actor, project string, v domain.RequirementReview, in RequirementReviewInput) (map[string]domain.RequirementQuestionNote, error) {
 	if len(in.QuestionNotes) > 20 {
 		return nil, errors.New("单次最多补充 20 个问题")
 	}
@@ -466,7 +470,7 @@ func (s *Service) requirementQuestionNotes(c context.Context, project string, v 
 	if total > 500000 {
 		return nil, errors.New("单条消息及逐题说明合计超过 50 万字节，请分段发送；草稿仍保留")
 	}
-	files, err := s.taskAttachments(c, project, ids)
+	files, err := s.taskAttachments(c, a, project, ids)
 	if err != nil {
 		return nil, err
 	}

@@ -69,6 +69,13 @@ func Derive(t domain.Task, review *domain.RequirementReview, p domain.Project) [
 	r := recipients{t: t, members: domain.ProjectMembers(p)}
 	out := []Todo{}
 	add := func(kind, key string, to []string, action string, fields ...Field) {
+		eligible := []string{}
+		for _, user := range to {
+			if domain.MemberHasProjectPage(p, user, TodoPages(kind, t.ParentRequirementID != "")...) {
+				eligible = append(eligible, user)
+			}
+		}
+		to = eligible
 		if len(to) == 0 {
 			return
 		}
@@ -150,7 +157,7 @@ type recipients struct {
 func (r recipients) role(role string) []string {
 	out := []string{}
 	for _, m := range r.members {
-		if m.Has(role) && m.UserID != "local-owner" {
+		if m.ResponsibleFor(role) && m.UserID != "local-owner" {
 			out = append(out, m.UserID)
 		}
 	}
@@ -178,4 +185,20 @@ func (r recipients) claimant(role string) []string {
 		return []string{id}
 	}
 	return r.role(role)
+}
+
+// TodoPages maps work to the page that can perform it, independently of the
+// recipient's notification responsibility or role name.
+func TodoPages(kind string, linked bool) []string {
+	switch kind {
+	case "test", "retest", "verify", "acceptance":
+		return []string{"reviews"}
+	case "release":
+		return []string{"reviews", "versions"}
+	case "bug_rejection":
+		if linked {
+			return []string{"tasks", "reviews"}
+		}
+	}
+	return []string{"tasks"}
 }

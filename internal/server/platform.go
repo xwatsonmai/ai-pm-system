@@ -56,14 +56,23 @@ func (s *Server) platformRoutes(mux *http.ServeMux) {
 		respond(w, p)
 	}))
 	mux.HandleFunc("GET /api/platform/projects", s.onlyAdmin(func(w http.ResponseWriter, r *http.Request) {
+		if s.pagedList(w, r, "platform-projects") {
+			return
+		}
 		p, e := s.App.Store.ListProjects(r.Context())
 		if e != nil {
 			fail(w, e)
 			return
 		}
+		for i := range p {
+			p[i] = app.ProjectForActor(s.actor(r), p[i])
+		}
 		respond(w, p)
 	}))
 	mux.HandleFunc("GET /api/platform/admins", s.onlyAdmin(func(w http.ResponseWriter, r *http.Request) {
+		if s.pagedList(w, r, "admins") {
+			return
+		}
 		ids, e := s.App.Store.ListPlatformAdmins(r.Context())
 		if e != nil {
 			fail(w, e)
@@ -128,6 +137,9 @@ func (s *Server) platformRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/projects/{id}/directory", s.projectAccess(http.HandlerFunc(s.directory)))
 	mux.Handle("POST /api/projects/{id}/directory/sync", s.projectAccess(http.HandlerFunc(s.directory)))
 	mux.Handle("GET /api/projects/{id}/members", s.projectAccess(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.pagedList(w, r, "members") {
+			return
+		}
 		p, e := s.App.Store.GetProject(r.Context(), r.PathValue("id"))
 		if e != nil {
 			fail(w, e)
@@ -156,14 +168,16 @@ func (s *Server) platformRoutes(mux *http.ServeMux) {
 					department = v.DepartmentName
 				}
 			}
-			out = append(out, map[string]any{"user": u, "roles": m.Roles, "department_name": department})
+			out = append(out, map[string]any{"user": u, "roles": m.Roles, "responsibilities": m.Responsibilities, "department_name": department})
 		}
-		respond(w, map[string]any{"items": out, "can_manage": app.CanManage(s.actor(r), p)})
+		respond(w, map[string]any{"items": out, "can_manage": app.CanManage(s.actor(r), p), "version": p.AccessVersion})
 	})))
 	member := func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
-			Roles []string `json:"roles"`
-			Role  string   `json:"role"` // single role from older clients
+			Roles            []string `json:"roles"`
+			Responsibilities []string `json:"responsibilities"`
+			Version          int      `json:"version"`
+			Role             string   `json:"role"` // single role from older clients
 		}
 		if r.Method != "DELETE" {
 			if e := read(r, &in); e != nil {
@@ -180,12 +194,12 @@ func (s *Server) platformRoutes(mux *http.ServeMux) {
 		if in.Roles == nil && in.Role != "" {
 			in.Roles = []string{in.Role}
 		}
-		p, e := s.App.SetProjectMember(r.Context(), s.actor(r), r.PathValue("id"), r.PathValue("user"), in.Roles, r.Method == "DELETE")
+		p, e := s.App.SetProjectMemberAccess(r.Context(), s.actor(r), r.PathValue("id"), r.PathValue("user"), in.Roles, in.Responsibilities, r.Method == "DELETE", in.Version)
 		if e != nil {
 			fail(w, e)
 			return
 		}
-		respond(w, p)
+		respond(w, s.repositoryProjectFor(r, p))
 	}
 	mux.Handle("PUT /api/projects/{id}/members/{user}", s.projectAccess(http.HandlerFunc(member)))
 	mux.Handle("DELETE /api/projects/{id}/members/{user}", s.projectAccess(http.HandlerFunc(member)))

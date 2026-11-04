@@ -137,6 +137,34 @@ func (s *Server) channels(w http.ResponseWriter, r *http.Request) {
 
 // todos lists the viewer's to-dos; without sign-in the local owner sees all.
 func (s *Server) todos(w http.ResponseWriter, r *http.Request) {
+	if q, explicit, e := pageQuery(r); explicit {
+		if e != nil {
+			fail(w, e)
+			return
+		}
+		store, e := s.queryStore()
+		if e != nil {
+			fail(w, e)
+			return
+		}
+		projects, e := s.visibleProjects(r)
+		if e != nil {
+			fail(w, e)
+			return
+		}
+		ids := []string{}
+		for _, p := range projects {
+			ids = append(ids, p.ID)
+		}
+		out, e := store.QueryTodos(r.Context(), s.actor(r).ID, r.URL.Query().Get("status") != "closed", q, ids)
+		if e != nil {
+			fail(w, e)
+			return
+		}
+		respond(w, out)
+		return
+	}
+
 	store := s.Notify.Store
 	a := s.actor(r)
 	open := r.URL.Query().Get("status") != "closed"
@@ -156,7 +184,7 @@ func (s *Server) todos(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []notify.Todo{}
 	for _, t := range list {
-		if s.App.CheckProject(r.Context(), a, t.ProjectID, false) == nil {
+		if s.canReadTodo(r.Context(), a, t) {
 			out = append(out, t)
 		}
 	}
@@ -172,7 +200,8 @@ func (s *Server) todo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a := s.actor(r)
-	if e = s.App.CheckProject(r.Context(), a, t.ProjectID, false); e != nil {
+	if !s.canReadTodo(r.Context(), a, t) {
+		e = domain.ErrForbidden
 		fail(w, e)
 		return
 	}
@@ -421,6 +450,9 @@ func (s *Server) IMAct(c context.Context, userID string, todo notify.Todo, reque
 	actor, err := s.userActor(c, users[i])
 	if err != nil {
 		return err
+	}
+	if !s.canReadTodo(c, actor, todo) {
+		return domain.ErrForbidden
 	}
 	t, err := s.App.Store.GetTask(c, todo.TaskID)
 	if err != nil {
