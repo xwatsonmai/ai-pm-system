@@ -243,3 +243,26 @@ func TestPagedTodosMatchLinkedBugPagePolicyBeforeCount(t *testing.T) {
 		t.Fatal("stale standalone Bug recipient bypassed page before count", out, e)
 	}
 }
+
+func TestCollaborationPaginationDoesNotReviveDeletedConversations(t *testing.T) {
+	d := paginationDB(t)
+	c := context.Background()
+	for _, id := range []string{"visible", "deleted"} {
+		run := domain.Run{ID: "run-" + id, ProjectID: "p", ConversationID: "conversation-" + id, Kind: "question", OwnerID: "alice", OwnerKind: "human", Status: "succeeded"}
+		if e := d.PutRun(c, run); e != nil {
+			t.Fatal(e)
+		}
+		collaboration := domain.Collaboration{ID: "collaboration-" + id, ProjectID: "p", OriginRunID: run.ID, ConversationID: run.ConversationID, OwnerID: "alice", OwnerKind: "human", Title: id, Version: 1, Status: "pending"}
+		raw, _ := json.Marshal(collaboration)
+		if _, e := d.db.Exec(`INSERT INTO collaborations(id,project_id,version,claim_hash,payload) VALUES(?,?,1,'',?)`, collaboration.ID, "p", string(raw)); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if e := d.PutConversation(c, domain.Conversation{ID: "conversation-deleted", ProjectID: "p", DeletedAt: 1}); e != nil {
+		t.Fatal(e)
+	}
+	out, e := d.QueryDocuments(c, domain.ListDocumentQuery{Resource: "collaborations", ProjectID: "p", UserID: "alice", ActorKind: "human", PageQuery: domain.PageQuery{PageSize: 1}})
+	if e != nil || out.Total != 1 || len(out.Items) != 1 || strings.Contains(string(out.Items[0]), "deleted") {
+		t.Fatal("deleted conversation's collaboration leaked before count", out, e)
+	}
+}
