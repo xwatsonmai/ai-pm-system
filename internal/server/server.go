@@ -132,7 +132,15 @@ func (s *Server) Handler() http.Handler {
 	})
 	handle("GET /api/projects/{id}/code", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		v, e := s.Git.Read(r.Context(), r.PathValue("id"), gitrepo.Query{Action: q.Get("action"), Ref: q.Get("ref"), Path: q.Get("path"), Query: q.Get("query"), Base: q.Get("base")})
+		paging, explicit, e := pageQuery(r)
+		if e != nil {
+			fail(w, e)
+			return
+		}
+		if !explicit {
+			paging = domain.PageQuery{}
+		}
+		v, e := s.Git.Read(r.Context(), r.PathValue("id"), gitrepo.Query{Page: paging.Page, PageSize: paging.PageSize, Action: q.Get("action"), Ref: q.Get("ref"), Path: q.Get("path"), Query: q.Get("query"), Base: q.Get("base")})
 		if e != nil {
 			fail(w, e)
 			return
