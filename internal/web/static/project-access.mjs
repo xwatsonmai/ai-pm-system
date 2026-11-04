@@ -22,9 +22,9 @@ export function updateSelection(selected, id, checked) {
   return next;
 }
 
-export function mountProjectAccess({api,modal,closeModal,getProject,getAccess,onAccessChange,heading,field,action,escape,toast}) {
+export function mountProjectAccess({api,modal,closeModal,getModalRevision=()=>0,getProject,getAccess,onAccessChange,heading,field,action,escape,toast}) {
   const caches = new Map(), pickers = new WeakMap();
-  let revision = 0, searchTimer;
+  let revision = 0, modalRequest = 0, searchTimer;
   const cache = project => {
     if (!caches.has(project)) caches.set(project,{rolePage:1,memberPage:1,roleSize:20,memberSize:20,roleQuery:'',memberQuery:'',roles:[],members:[]});
     return caches.get(project);
@@ -100,12 +100,14 @@ export function mountProjectAccess({api,modal,closeModal,getProject,getAccess,on
     if(!s.selected.size)throw Error('请至少选择一个角色');
     return memberPayload(form,s.selected,s.version);
   }
-  function roleForm(role,version) {
-    return `<form id="access-role-form" data-id="${escape(role?.id||'')}" data-version="${version}">${field('角色名称',`<input name="name" required maxlength="80" value="${escape(role?.name||'')}">`)}${field('说明',`<textarea name="description" maxlength="1000">${escape(role?.description||'')}</textarea>`)}<fieldset class="page-permissions"><legend>可访问页面</legend>${projectPages.map(p=>`<label><input type="checkbox" name="pages" value="${p.id}" ${role?.pages?.includes(p.id)?'checked':''}>${p.title}</label>`).join('')}</fieldset><p class="hint">页面内沿用现有业务操作规则。待办职责在成员上单独设置。</p><div class="form-error" role="alert"></div><div class="modal-actions">${action('close','取消')}<button type="submit" class="primary">保存角色</button></div></form>`;
+  function roleForm(role,version,project) {
+    return `<form id="access-role-form" data-project="${escape(project)}" data-id="${escape(role?.id||'')}" data-version="${version}">${field('角色名称',`<input name="name" required maxlength="80" value="${escape(role?.name||'')}">`)}${field('说明',`<textarea name="description" maxlength="1000">${escape(role?.description||'')}</textarea>`)}<fieldset class="page-permissions"><legend>可访问页面</legend>${projectPages.map(p=>`<label><input type="checkbox" name="pages" value="${p.id}" ${role?.pages?.includes(p.id)?'checked':''}>${p.title}</label>`).join('')}</fieldset><p class="hint">页面内沿用现有业务操作规则。待办职责在成员上单独设置。</p><div class="form-error" role="alert"></div><div class="modal-actions">${action('close','取消')}<button type="submit" class="primary">保存角色</button></div></form>`;
   }
   async function click(button) {
     const a=button.dataset.action;if(!a?.startsWith('access-'))return false;
     const project=button.dataset.project||getProject()?.id,c=cache(project);
+    const origin=getProject()?.id,modalAtStart=getModalRevision(),sequence=++modalRequest;
+    const stillCurrent=()=>button.isConnected&&sequence===modalRequest&&origin===getProject()?.id&&modalAtStart===getModalRevision();
     if(a==='access-page'){
       if(button.dataset.kind==='roles'){c.rolePage=Number(button.dataset.page);await loadRoles(project);}
       else{c.memberPage=Number(button.dataset.page);await loadMembers(project);}
@@ -114,18 +116,19 @@ export function mountProjectAccess({api,modal,closeModal,getProject,getAccess,on
     }else if(a==='access-unpick-role'){
       const form=button.closest('form'),s=pickers.get(form);s.selected.delete(button.dataset.id);await loadPicker(form);
     }else if(a==='access-create-role'||a==='access-edit-role'){
-      const access=await accessFor(project),role=c.roles.find(r=>r.id===button.dataset.id);
-      modal(role?'编辑角色':'添加角色',roleForm(role,access.version));
+      const access=await accessFor(project);if(!stillCurrent())return true;
+      const role=c.roles.find(r=>r.id===button.dataset.id);if(a==='access-edit-role'&&!role)return true;
+      modal(role?'编辑角色':'添加角色',roleForm(role,access.version,project));
     }else if(a==='access-delete-role'){
-      const access=await accessFor(project),role=c.roles.find(r=>r.id===button.dataset.id);if(!role)return true;
-      modal('删除角色',`<form id="access-delete-role-form" data-id="${escape(role.id)}" data-version="${access.version}"><p>删除「${escape(role.name)}」。已分配该角色的成员需要转为其他角色。</p>${field('替代角色',`<select name="replacement_role_id"><option value="">无成员引用时直接删除</option>${access.roles.filter(r=>r.id!==role.id).map(r=>`<option value="${escape(r.id)}">${escape(r.name)}</option>`).join('')}</select>`)}<div class="form-error" role="alert"></div><div class="modal-actions">${action('close','取消')}<button type="submit" class="danger">删除角色</button></div></form>`);
+      const access=await accessFor(project);if(!stillCurrent())return true;const role=c.roles.find(r=>r.id===button.dataset.id);if(!role)return true;
+      modal('删除角色',`<form id="access-delete-role-form" data-project="${escape(project)}" data-id="${escape(role.id)}" data-version="${access.version}"><p>删除「${escape(role.name)}」。已分配该角色的成员需要转为其他角色。</p>${field('替代角色',`<select name="replacement_role_id"><option value="">无成员引用时直接删除</option>${access.roles.filter(r=>r.id!==role.id).map(r=>`<option value="${escape(r.id)}">${escape(r.name)}</option>`).join('')}</select>`)}<div class="form-error" role="alert"></div><div class="modal-actions">${action('close','取消')}<button type="submit" class="danger">删除角色</button></div></form>`);
     }else if(a==='access-edit-member'){
       const m=c.members.find(m=>m.user.id===button.dataset.user);if(!m)return true;
       modal(`编辑成员 · ${escape(m.user.name)}`,`<form id="access-member-form" data-project="${escape(project)}" data-user="${escape(m.user.id)}">${memberFields()}<div class="form-error" role="alert"></div><div class="modal-actions">${action('close','取消')}<button type="submit" class="primary">保存成员</button></div></form>`);
       await mountMemberForm(document.querySelector('#access-member-form'),project,m.roles||[],m.responsibilities||[]);
     }else if(a==='access-remove-member'){
       const m=c.members.find(m=>m.user.id===button.dataset.user);if(!m)return true;
-      const access=await accessFor(project);
+      const access=await accessFor(project);if(!stillCurrent())return true;
       modal('移除项目成员',`<form id="access-remove-member-form" data-project="${escape(project)}" data-user="${escape(m.user.id)}" data-version="${access.version}"><p>确认移除 ${escape(m.user.name)} 的项目访问权限？</p><div class="form-error" role="alert"></div><div class="modal-actions">${action('close','取消')}<button type="submit" class="danger">移除成员</button></div></form>`);
     }
     return true;

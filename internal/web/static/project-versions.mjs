@@ -131,6 +131,7 @@ export function mountProjectVersions({
   api,
   modal,
   closeModal,
+  getModalRevision=()=>0,
   refresh,
   getContext,
   getProject,
@@ -143,7 +144,12 @@ export function mountProjectVersions({
 }) {
   const formEnd = (label) =>
     `<div class="form-error" role="alert"></div><p class="small muted">输入暂存在本浏览器；请求失败不会清空。</p><div class="modal-actions">${button("refresh-form", "刷新清单并保留输入")}${button("cancel", "取消")}<button type="submit" class="primary">${label}</button></div>`;
-  let detailState=null;
+  let detailState=null,modalRequest=0;
+  const sectionRequests=new WeakMap();
+  const beginSection=root=>{const generation=(sectionRequests.get(root)||0)+1;sectionRequests.set(root,generation);return generation;};
+  const currentSection=(root,generation)=>root.isConnected&&sectionRequests.get(root)===generation;
+  const beginModalRequest=()=>({sequence:++modalRequest,revision:getModalRevision(),project:getProject()?.id});
+  const currentModalRequest=token=>token.sequence===modalRequest&&token.revision===getModalRevision()&&token.project===getProject()?.id&&canAccessPage('versions');
   async function loadPage(){
    const root=document.querySelector('.pv-page');if(!root||root.dataset.project!==getProject()?.id)return;
    const project=getProject().id,epoch=++listState.generation,params=pageQuery(listState.page,listState.size);
@@ -152,22 +158,23 @@ export function mountProjectVersions({
   }
   async function detailPart(kind,page=1,size=20){
    const root=document.querySelector('.pv-detail');if(!root||!detailState||root.dataset.version!==detailState.id)return;
-   const id=detailState.id,params=pageQuery(page,size);if(kind==='scope'&&root.querySelector('[data-version-include-removed]').checked)params.set('include_removed','true');
-   const result=await api(`/project-versions/${encodeURIComponent(id)}/${kind}?${params}`);if(!root.isConnected||detailState?.id!==id)return;
+   const target=root.querySelector(`[data-version-${kind}]`),generation=beginSection(target),id=detailState.id,params=pageQuery(page,size);if(kind==='scope'&&root.querySelector('[data-version-include-removed]').checked)params.set('include_removed','true');
+   const result=await api(`/project-versions/${encodeURIComponent(id)}/${kind}?${params}`);if(!root.isConnected||detailState?.id!==id||!currentSection(target,generation))return;
    detailState[kind]={page,size};let html;
    if(kind==='scope')html=(result.items.map(taskLine).join('')||'<p class="context-note">暂无需求范围。</p>')+pagerHTML(result,'pv-scope');
    if(kind==='releases')html=(result.items.map(r=>`<details class="pv-release" data-key="${esc(r.id)}"><summary>${esc(r.environment)} · ${date(r.at)} · ${r.task_count||0} 项</summary><p class="prewrap">${esc(r.body)}</p>${button('release-tasks','查看上线快照',`data-id="${esc(id)}" data-release="${esc(r.id)}"`)}<div data-release-tasks="${esc(r.id)}"></div><p class="small muted">${esc(r.actor)} · 上线时的范围快照，后续修订不会改写。</p></details>`).join('')||'<p class="context-note">暂无发布记录。</p>')+pagerHTML(result,'pv-releases');
    if(kind==='history')html=historyRows(result);
-   patchKeyedHTML(root.querySelector(`[data-version-${kind}]`),html);
+   patchKeyedHTML(target,html);
   }
   const detail=async id=>{
-   const view=await api(`/project-versions/${encodeURIComponent(id)}?summary=1`);
+   const token=beginModalRequest(),view=await api(`/project-versions/${encodeURIComponent(id)}?summary=1`);
+   if(!currentModalRequest(token))return;
    detailState={id};modal('版本详情',pendingOperations(getProject().id,getUser())+projectVersionDetail(view,canAccessPage),{drawer:true});
    await Promise.all(['scope','releases','history'].map(kind=>detailPart(kind)));
   };
   async function releaseTasks(id,release,page=1,size=20){
    const root=document.querySelector(`[data-release-tasks="${CSS.escape(release)}"]`);if(!root)return;
-   const result=await api(`/project-versions/${encodeURIComponent(id)}/releases/${encodeURIComponent(release)}/tasks?${pageQuery(page,size)}`);if(!root.isConnected)return;
+   const generation=beginSection(root),result=await api(`/project-versions/${encodeURIComponent(id)}/releases/${encodeURIComponent(release)}/tasks?${pageQuery(page,size)}`);if(!currentSection(root,generation))return;
    root.dataset.version=id;root.dataset.release=release;patchKeyedHTML(root,result.items.map(releaseTask).join('')+pagerHTML(result,'pv-release-tasks'));
   }
   function attachDraft(form, kind, entity = "") {
@@ -234,10 +241,12 @@ export function mountProjectVersions({
     }
   }
   const openForm = async (id) => {
+    const token=beginModalRequest();
     const v = id
       ? (await api(`/project-versions/${encodeURIComponent(id)}?summary=1`))
           .project_version
       : {};
+    if(!currentModalRequest(token))return;
     if (v.status === "closed" || v.status === "completed")
       throw Error("里程碑已结束，不能修改计划");
     modal(
@@ -256,13 +265,13 @@ export function mountProjectVersions({
   }
   async function selectionPage(form,page=1,size=20){
    if(!form?.isConnected)return;updateSelection(form);
-   const selected=selectedRefs(form),id=form.dataset.id,params=pageQuery(page,size);let result,items;
+   const generation=beginSection(form),id=form.dataset.id,params=pageQuery(page,size);let result,items;
    if(form.dataset.payload){const refs=JSON.parse(form.dataset.payload).items||[];result={items:refs.slice((page-1)*size,page*size).map(ref=>({task:{id:ref.id,title:ref.id,version:ref.version,revision:ref.revision,submission:{sha:ref.sha}}})),total:refs.length,page,page_size:size};items=result.items.map(i=>i.task)}
    else if(form.id==='pv-publish-form'){params.set('status','pending_release');result=await api(`/project-versions/${encodeURIComponent(id)}/scope?${params}`);items=result.items.map(i=>i.task)}
    else if(form.dataset.fixedIds){const tasks=JSON.parse(form.dataset.fixedTasks);result={items:tasks.slice((page-1)*size,page*size),total:tasks.length,page,page_size:size};items=result.items}
    else {if(form.dataset.origin)params.set('project_version_id',form.dataset.origin);result=await api(`/projects/${getProject().id}/tasks?${params}`);if(Array.isArray(result))result={items:result.slice((page-1)*size,page*size),total:result.length,page,page_size:size};items=result.items.filter(t=>!finished(t)&&t.status!=='review')}
-   if(!form.isConnected)return;
-   const refs=items.map(t=>({id:t.id,version:t.version,revision:t.revision,sha:t.submission?.sha}));form.dataset.items=JSON.stringify(refs);
+   if(!currentSection(form,generation))return;
+   const selected=selectedRefs(form),refs=items.map(t=>({id:t.id,version:t.version,revision:t.revision,sha:t.submission?.sha}));form.dataset.items=JSON.stringify(refs);
    const key=form.id==='pv-publish-form'?'pv-publish':'pv-assign';
    const html=items.map(t=>`<label class="pv-check" data-key="${esc(t.id)}"><input type="checkbox" name="task_ids" value="${esc(t.id)}" ${selected.has(t.id)?'checked':''} ${form.dataset.payload?'disabled':''}><span><strong>${esc(t.title)}</strong><small>${taskStates[t.status]||''} · R${t.revision||1}${form.id==='pv-publish-form'?` · ${esc(t.submission?.sha||'')}`:''}</small></span></label>`).join('')||'<p class="context-note">本页没有可选择的需求。</p>';
    // Paging is an explicit user action; selected IDs live outside these nodes.
@@ -270,7 +279,9 @@ export function mountProjectVersions({
    patchKeyedHTML(form.querySelector('[data-selection-pager]'),pagerHTML(result,key));form.dataset.selectionPage=page;form.dataset.selectionSize=size;
   }
   const assign=async({taskIDs=[],target='',fromVersion=''})=>{
+   const token=beginModalRequest();
    const tasks=taskIDs.length?await Promise.all(taskIDs.map(async id=>(await api(`/tasks/${encodeURIComponent(id)}`)).task)):[];
+   if(!currentModalRequest(token))return;
    const candidates=tasks.filter(t=>!finished(t)&&t.status!=='review');if(taskIDs.length&&!candidates.length)throw Error('没有可以调整的需求；已上线需求继续在原版本验收');
    target=target||getContext().current_milestone?.id||'';
    modal('安排目标版本',`<form id="pv-assign-form" data-origin="${esc(fromVersion)}" ${taskIDs.length?`data-fixed-ids="true" data-fixed-tasks="${esc(JSON.stringify(candidates))}"`:''}><div data-assignment-target></div><p class="hint">关联需求与未结束 Bug 会一起调整版本，保留原发布快照。</p><p class="hint" data-selection-count>已选择 0 项（跨页保留）</p><div class="pv-select-list" data-selection-items></div><div data-selection-pager></div>${field('调整原因','<textarea name="body" required rows="2"></textarea>')}${formEnd('确认安排')}</form>`);
@@ -281,7 +292,9 @@ export function mountProjectVersions({
    await selectionPage(form);updateSelection(form);
   };
   const publish=async id=>{
+   const token=beginModalRequest();
    const view=await api(`/project-versions/${encodeURIComponent(id)}?summary=1`),v=view.project_version;
+   if(!currentModalRequest(token))return;
    if(v.status!=='active')throw Error('版本尚未开始或已结束');
    modal('登记版本已上线',`<form id="pv-publish-form" data-id="${esc(id)}" data-version="${v.version}"><div class="notice info">请在实际发布成功后登记。只推进勾选的需求；本操作不会执行部署。待核对的原请求将原样重试。</div><p><strong>${esc(v.name)}</strong></p><p class="hint" data-selection-count>已选择 0 项（跨页保留）</p><div class="pv-select-list" data-selection-items></div><div data-selection-pager></div>${field('实际上线环境','<input name="environment" required placeholder="例如 生产">')}${field('发布结果与证据','<textarea name="body" required rows="3"></textarea>')}${formEnd('确认所选需求已上线')}</form>`);
    const form=document.querySelector('#pv-publish-form');attachDraft(form,'publish',id);
@@ -289,7 +302,9 @@ export function mountProjectVersions({
    await selectionPage(form);updateSelection(form);
   };
   const actionForm=async(id,operation)=>{
+   const token=beginModalRequest();
    const view=await api(`/project-versions/${encodeURIComponent(id)}?summary=1`),v=view.project_version;
+   if(!currentModalRequest(token))return;
    const labels={start:'开始里程碑',close:'关闭里程碑',reopen:'重新打开里程碑',complete:'结束里程碑',set_default:'设为默认版本'};
    const choose=operation==='close'||(operation==='complete'&&view.summary.is_default);
    modal(labels[operation],`<form id="pv-action-form" data-id="${esc(id)}" data-version="${v.version}" data-default-version="${view.summary.default_version}" data-operation="${esc(operation)}"><p><strong>${esc(v.name)}</strong></p>${operation==='close'?'<div class="notice">选择剩余开发工作的目标版本，或创建后继版本。待验收需求保留原版继续验收；其他版本继续推进。</div>':operation==='set_default'?'<p class="context-note">仅改变未指定归属的新需求去向，已有需求保持原版本。</p>':'<p class="context-note">各版本独立推进，原需求及发布历史保留。</p>'}${choose?'<div data-successor-picker></div>':''}${field('说明 / 原因','<textarea name="body" rows="3" required></textarea>')}${formEnd('确认'+labels[operation])}</form>`);
