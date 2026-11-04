@@ -236,6 +236,8 @@ label {
   flex-direction: column;
   padding: 26px 16px 17px;
   z-index: 20;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .brand {
   display: flex;
