@@ -1,6 +1,7 @@
 package domain
 
 type VersionListQuery struct {
+	NamesOnly bool `json:"-"`
 	PageQuery
 	Status string `json:"status,omitempty"`
 }

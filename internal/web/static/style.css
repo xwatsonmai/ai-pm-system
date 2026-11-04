@@ -2966,3 +2966,11 @@ details.rc-card > summary::-webkit-details-marker { display: none; }
 .channel-setup-row { display: grid; grid-template-columns: 9em 1fr; gap: 8px; padding: 4px 0; font-size: 12px; align-items: baseline; }
 .channel-setup-row code { overflow-wrap: anywhere; user-select: all; }
 @media (max-width: 640px) { .channel-setup-row { grid-template-columns: 1fr; gap: 2px; } }
+
+/* Parallel versions keep the two creation actions usable on narrow screens. */
+.pv-page .page-heading > :first-child { min-width: 0; }
+.pv-page .page-heading > .row { flex-shrink: 0; }
+@media (max-width: 760px) {
+  .pv-page .page-heading { flex-direction: column; }
+  .pv-page .page-heading > .row { width: 100%; justify-content: flex-start; }
+}

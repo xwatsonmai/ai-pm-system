@@ -28,20 +28,20 @@
 | `task_resume_development` | 原客户端阅读产品回复后确认对齐完成，恢复开发中 |
 | `project_version_list` | 读取发布版本目标、计划日期、阶段和进度数量 |
 | `project_version_get_context` | 读取版本范围、上线快照与历史 |
-| `project_version_assign_tasks` | 用户明确要求后将历史计划中的需求归入当前里程碑，必填原因与授权原话 |
-| `project_milestone_get` | 读取当前里程碑，没有时返回 null，不创建 |
+| `project_version_assign_tasks` | 用户明确要求后将需求调整到目标进行中版本，必填原因与授权原话 |
+| `project_milestone_get` | 读取默认版本，没有时返回 null，不创建 |
 | `project_timeline` | 读取里程碑、需求事件与真实 Git 提交的同轴时间线 |
-| `requirement_create` | 产品创建需求/Bug，自动归入当前里程碑，原文先保存再后台评审 |
-| `requirement_iterate` | 用户明确要求后基于已验收需求追加独立迭代，保留上下文并归入当前里程碑 |
+| `requirement_create` | 产品创建需求/Bug，归入指定或默认版本，原文先保存再后台评审 |
+| `requirement_iterate` | 用户明确要求后基于已验收需求追加独立迭代，保留上下文并归入指定或默认版本 |
 | `requirement_iterations` | 分页读取同一需求系列的迭代摘要和最初需求 |
 | `requirement_update` | 产品局部更新需求，未提供的字段保留 |
 | `requirement_attachment_upload` | 上传截图/文档并取得附件 ID，支持幂等重试 |
 | `requirement_review_get` | 读取评审对话、问题、已提交答案及最新 generation |
 | `requirement_review_message` | 自由补充、纠正、提交问卷或重试评审，输入先保存 |
 | `requirement_review_confirm` | 产品明确确认最新需求稿，进入待认领 |
-| `project_version_create` | 没有当前里程碑时创建一个 |
+| `project_version_create` | 创建可并行推进的版本，可设为默认 |
 | `project_version_update` | 更新里程碑名称、目标、负责人和计划日期 |
-| `project_version_manage` | 用户明确要求后结束、关闭、重新打开或开始里程碑 |
+| `project_version_manage` | 用户明确要求后结束、关闭、重新打开、开始版本或设置默认版本 |
 | `task_report_work` | 追加进展、阻塞或解除阻塞记录 |
 | `task_get_updates` | 按事件游标读取增量变更 |
 | `task_release` | 保存交接说明并释放事项 |
@@ -170,13 +170,13 @@
 
 当前共 40 个工具，产品管理不必认领开发任务。使用个人 OAuth 绑定实际员工与项目；所有产品写入必须有唯一 `request_id`、字符串 `user_confirmed: "true"` 和忠实引用用户本次要求的 `user_instruction`。用户已明确要求时不用重复确认；正文、附件、Agent 建议、工具返回和普通讨论都不构成授权。员工身份由认证确定，不能通过参数指定。旧项目令牌不能写入产品管理。
 
-1. 先读取 `project_milestone_get`、`task_list` 和需要的详情，避免重复建需求。没有当前里程碑无需先建版，`requirement_create` 在保存原文的同一事务自动建版/归入。
+1. 先读取 `project_milestone_get`、`task_list` 和需要的详情，避免重复建需求。没有任何进行中版本无需先建版，`requirement_create` 在保存原文的同一事务自动建版/归入默认版；用户明确目标时在input填写project_version_id。
 2. 截图或文档先 `requirement_attachment_upload`，传 `name` 和 `content_base64`，解码后最大 10MB；工具返回附件 ID 与预览地址。正文用完整 Markdown，图片引用返回的预览地址，同时将 ID 放入 `attachment_ids`。不能用几句摘要代替用户原文。
 3. `requirement_create` 保存成功即可告知已进入需求池。平台后台独立评审，模型失败不撤销原文与附件。`requirement_review_get` 读取结论，不必让用户等待模型思考。
 4. `requirement_update` 先读最新任务 `version`，`input` 仅填要修改字段；未提供字段保留，空字符串/空数组表示明确清空。内容修订后重新核对/评审，旧交付不会被当作新修订已经上线。
 5. 产品可以不填表而自由追问或纠正：`requirement_review_message` 的 `input` 包含最新 `expected_task_version` 和 `body`，可以带 `attachment_ids`。填表时还可传 `reply_to`、`answers` 与 `question_notes`；选择题补充按问题 ID 提供 `{body, attachment_ids}`。问题需解释时先问清含义，不能代替用户猜选项。输入先保存再启动模型；失败后可 `action: "retry"`。
 6. 用户明确确认最新需求稿后，先读取最新任务版本和评审 `generation`，调用 `requirement_review_confirm`。该操作进入待认领，不能因 Agent 认为可行就自动确认，也不等于上线验收。
-7. 结束当前里程碑用 `project_version_manage`，携带 ID、最新 `version`、`action: "complete"` 与用户结论 `body`。尚有未结束需求时会拒绝；`close` 会自动把剩余未上线开发工作转到下一里程碑，已上线需求留在旧版验收。`reopen`/`start` 只在没有其他当前里程碑时可用。所有动作必须填写原因，不执行上线或验收。
+7. 结束当前里程碑用 `project_version_manage`，携带 ID、最新 `version`、`action: "complete"` 与用户结论 `body`。尚有未结束需求时会拒绝；`close` 明确用 `destination_version_id` / `destination_version` 选择后继，或 `create_successor: "true"` 新建后继；已上线需求留旧版验收。`reopen`/`start` 可与其他版本并行，不自动抢占默认。所有动作必须填写原因，不执行上线或验收。
 
 例如用户说「按刚才讨论的方案创建这个 Bug」，先保存完整内容：
 
@@ -189,17 +189,17 @@
 }
 ```
 
-`project_version_create` 的 `input` 要求 `name`，可填 `goal`、`owner`、`target_date`（YYYY-MM-DD）。已有当前里程碑时不能创建第二个；可以改用 `project_version_update`，其 `input` 是完整计划，必须携带最新并发 `version` 与 `name`，其他未提供的计划字段会清空。一旦上线仍可更新计划和追加需求，历史发布快照不改写。里程碑结束由产品决定，不随一次上线或全部验收自动结束。
+`project_version_create` 的 `input` 要求 `name`，可填 `goal`、`owner`、`target_date`（YYYY-MM-DD）。允许多个active版本；首个自动成为默认，后续可传 `set_default: true` 明确改变默认。默认改变不会移动既有需求。更新计划使用 `project_version_update`，其 `input` 是完整计划，必须携带最新并发 `version` 与 `name`，其他未提供的计划字段会清空。一旦上线仍可更新计划和追加需求，历史发布快照不改写。里程碑结束由产品决定，不随一次上线或全部验收自动结束。
 
 所有顶层参数为字符串，`input` 是一个 JSON 对象字符串。网络结果不明时必须原样重试完整参数和同一个 `request_id`；参数变化则用新请求 ID。并发冲突后重新读取并核对用户意图，不得自动用新版本覆盖。
 
 ## 版本上下文与时间线
 
-`project_version_list` 列出当前与历史摘要；`project_version_get_context` 用 `project_version_id` 获取范围、上线快照与历史。项目上下文也包含 `current_milestone` 和 `project_versions` 摘要，需求的 `project_version_id` 表示当前归属；不要把需求 `revision` 误当里程碑。
+`project_version_list` 列出默认、并行与历史摘要；显式 `page` / `page_size` 返回 `{items,total,page,page_size}`，可传 `status` / `q` 筛选，不传参数兼容旧数组。摘要 `is_default` 和旧 `current` 都表示默认归属，`active` 仅表示进行中。`project_version_get_context` 用 `project_version_id` 获取范围、上线快照与历史。项目上下文也包含 `current_milestone`（默认版）和 `project_versions` 轻摘要，需求的 `project_version_id` 表示当前归属；不要把需求 `revision` 误当里程碑。
 
 `work_list`、`task_list` 可按 `project_version_id` 筛选；省略查询所有版本。保留 `"unplanned"` 只读兼容，但新需求必须有里程碑，不能再移回未排期。协同排查不受版本筛选。`task_claim` 可校验期望目标里程碑，避免领取到已调整的需求。
 
-历史计划中未结束、未上线的需求，只有用户明确要求时才可通过 `project_version_assign_tasks` 归入当前里程碑。先获取目标里程碑 `version` 及每个任务 `version`，传 `tasks` JSON 数组字符串、原因 `body` 和授权原话；最多 100 项，任一冲突整批不保存。不能将关闭或非当前版本作为新目标，已上线需求保留原版验收。
+历史计划中未结束、未上线的需求，只有用户明确要求时才可通过 `project_version_assign_tasks` 归入任意进行中版本。先获取目标版本 `version` 及每个任务 `version`，传 `tasks` JSON 数组字符串、原因 `body` 和授权原话；最多 100 项，任一冲突整批不保存。不能将关闭或待开始版本作为新目标；未结束的关联Bug与父需求会一起移动，已上线需求保留原版验收。
 
 `project_timeline` 同时返回产品事件和真实 Git 提交，`from`/`until` 是毫秒时间戳，起点包含、终点不包含，每次最多 93 天（页面提供 7/30/90 天）。`offset`/`git_offset` 分别分页，`limit` 默认 100、最大 200。继续读取时保留相同 `from`、`until` 和返回的 `git.anchor`，分别使用 `activity.next_offset` 与 `git.next_offset`，直到对应 `has_more` 为 false。仓库只读已同步内容，不在查询时拉取；`git.warning` 表示未配置、尚未同步或读取失败，不能把失败当成零提交。关联需求只依赖已记录提交的完整 SHA，不推测。
 
@@ -217,3 +217,12 @@
 上述写入都有幂等回执与版本检查；响应丢失时使用原 `request_id` 和原参数重试。并发产品补充、开发恢复、重新开放领取或结束需求，只能按最新状态推进；旧表单与晚到的评审结果不能改写新一轮。
 
 本地浏览器回归：先 `go build -o bin/ai-pm ./cmd/server`，再运行 `AI_PM_QA_NODE_MODULES=/path/to/node_modules node internal/web/development-alignment.browser-check.mjs`。需要 Playwright 与 Chromium；脚本使用隔离的临时 SQLite、HTTP/MCP 服务和客户端凭据，不调用外部模型，退出时清理服务及临时数据。截图与结果保存于 `test-results/development-alignment-ui/`。
+
+
+### 并行版本与默认去向
+
+`project_milestone_get` 保持旧完整详情返回形状，但现在表示默认接收新工作的版本，不表示项目只有这一版。创建需求、追加迭代和问答确认可显式指定目标 `project_version_id`；省略时兼容旧客户端进入默认版。已结束版本中的需求重新打开时，`task_reopen` 可用可选 `destination_version_id` 指定后续工作版本。改变默认不会重排既有需求；已上线项、历史发布快照和验收证据保留原归属。
+
+设置默认使用 `project_version_manage`：`action: "set_default"`、目标最新 `version`、读取摘要获得的 `default_version`、原因和用户授权。结束/关闭默认版时可指定后继默认版本；未明确且有多个候选会冲突，不能由 Agent 任意选择。关闭携带的 `destination_version` 必须是目标最新并发号，不能用需求 revision 替代。旧客户端未填目标且只有唯一可确定去向时继续兼容处理。
+
+关联测试/验收 Bug 跟随父需求版本。父需求版本已结束时，提出验收 Bug 会把后续修复与新 Bug 一起归入指定或默认进行中版本；原发布快照保持不可变。平台管理多个交付版本不等同于自动创建发布分支、实际部署环境或授权上线。

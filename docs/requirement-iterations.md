@@ -6,7 +6,7 @@
 
 1. 在已验收需求详情点击「追加迭代」，填写这次要新增或改进的内容、图文附件与验收条件。
 2. 页面可展开上一轮已验收快照，核对正文、截图、文档、原验收条件、交付和上线结果。第二轮起同时保留最初需求基线，不需要重新复制旧正文。
-3. 保存后关闭编辑窗口，新迭代自动归入当前正在进行的里程碑；没有当前里程碑时自动创建。原需求在已结束版本中，也不会把新工作放回旧版本。
+3. 保存后关闭编辑窗口，新迭代可选择任意进行中版本；未指定时进入项目默认版本，没有任何进行中版本时自动创建。原需求在已结束版本中，也不会把新工作放回旧版本。
 4. 新迭代从需求评审开始，独立确认、开发、登记上线和验收。后台评审失败不撤销已经保存的迭代内容与关联；产品可以继续自由补充和纠正。
 5. 已验收的迭代可以再次作为起点；同一条已验收需求也可以追加多次。不设总轮数上限，每条新需求仍必须选择已验收的起点。详情的「迭代记录」可分页查看同一需求系列，并跳转到原需求或任意一轮。
 
@@ -22,17 +22,17 @@
 
 ## API 和 MCP
 
-- `POST /api/tasks/{id}/iterations`：传入起点最新 `source_version`、`title`、`description`、`kind`、`acceptance`、`attachment_ids`、`priority`、`reviewer` 和唯一 `request_id`。只有标题、起点版本和请求 ID 必填。
+- `POST /api/tasks/{id}/iterations`：传入起点最新 `source_version`、`title`、`description`、`kind`、`acceptance`、`attachment_ids`、`priority`、`reviewer`、可选目标 `project_version_id` 和唯一 `request_id`。只有标题、起点版本和请求 ID 必填。
 - `GET /api/tasks/{id}/iterations?offset=0&limit=10`：返回最初需求摘要、迭代摘要列表、`total`、`has_more` 和 `next_offset`；最多每页 50 条。完整正文与快照通过需求详情读取。
 - MCP `requirement_iterate`：`task_id` 指定已验收起点，`input` 是上述内容的 JSON 对象字符串，顶层携带 `request_id`、字符串 `user_confirmed: "true"` 和用户本次要求的原话 `user_instruction`。
 - MCP `requirement_iterations`：只读查询同一系列的全部迭代，可传字符串 `offset` / `limit`，不需要开发认领。
 
 MCP 创建仅接受个人 OAuth，身份与项目由连接确定，不能由输入冒充。平台后台 Agent 只开放迭代只读工具；不能自行把历史验收当作用户授权创建新一轮。平台问答目前不提供关联创建迭代的写工具，应引导从原需求「追加迭代」，不能用普通建单冒充已关联的迭代。
 
-SQLite schema 12 增加 `requirement_iterations` 关系索引表，不回填或改写旧需求。新需求、关联索引、当前里程碑及范围、两端历史与幂等回执同事务保存；事务内再次校验起点仍为 `done` 且并发版本未变化。失败不会留下孤立的需求或空里程碑，原需求不因创建迭代而增加修订或改变阶段。
+SQLite schema 12 增加 `requirement_iterations` 关系索引表，不回填或改写旧需求。新需求、关联索引、目标版本及范围、两端历史与幂等回执同事务保存；事务内再次校验起点仍为 `done` 且并发版本未变化。失败不会留下孤立的需求或空里程碑，原需求不因创建迭代而增加修订或改变阶段。
 
 ## 验证
 
-应用测试覆盖完成条件、多轮与同源并发创建、当前版本归属、旧版本快照不变、冻结上下文、失败整批回滚、请求重试和分页。真实 MCP SDK 覆盖个人授权、输入先保存、后台失败保留关联与内容。
+应用测试覆盖完成条件、多轮与同源并发创建、指定/默认版本归属、旧版本快照不变、冻结上下文、失败整批回滚、请求重试和分页。真实 MCP SDK 覆盖个人授权、输入先保存、后台失败保留关联与内容。
 
 浏览器检查使用临时 SQLite、本地服务和确定的 Worker 协议 fixture，不调用生产模型：`AI_PM_QA_BIN=bin/ai-pm-iterations-check AI_PM_QA_NODE_MODULES=<Playwright node_modules> node internal/web/requirement-iterations.browser-check.mjs`。

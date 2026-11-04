@@ -63,7 +63,11 @@ func (d *DB) ListProjectVersionsPage(c context.Context, p string, q domain.Versi
 		args = append(args, q.Status)
 	}
 	if q.Query != "" {
-		where += " AND instr(lower(json_extract(v.payload,'$.name') || ' ' || COALESCE(json_extract(v.payload,'$.goal'),'')),lower(?))>0"
+		expression := "json_extract(v.payload,'$.name')"
+		if !q.NamesOnly {
+			expression += " || ' ' || COALESCE(json_extract(v.payload,'$.goal'),'')"
+		}
+		where += " AND instr(lower(" + expression + "),lower(?))>0"
 		args = append(args, strings.TrimSpace(q.Query))
 	}
 	if e = d.db.QueryRowContext(c, "SELECT COUNT(*) FROM project_versions v WHERE "+where, args...).Scan(&out.Total); e != nil {

@@ -91,6 +91,7 @@ func versionChoice(v ProjectVersionSummary) VersionChoice {
 	return VersionChoice{v.ID, v.Name, v.Status, v.Version, v.IsDefault, v.DefaultVersion}
 }
 func (s *Service) ProjectVersionChoices(c context.Context, a domain.Actor, p string, q domain.VersionListQuery) (domain.Page[VersionChoice], error) {
+	q.NamesOnly = true
 	rows, e := s.ProjectVersionsPage(c, a, p, q)
 	if e != nil {
 		return domain.Page[VersionChoice]{}, e

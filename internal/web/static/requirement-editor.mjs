@@ -229,7 +229,7 @@ export function mountRequirementEditor(form, { task = {}, projectID, userID, onD
       saveDraft();
       return {...payload,request_id:request.id};
     },
-    setSubmitting(value) { submitting = value; editor.setEditable(!value, false); for (const field of form.querySelectorAll('input[name],textarea[name],select[name]')) field.disabled = value; updateBusy(); },
+    setSubmitting(value) { submitting = value; editor.setEditable(!value, false); for (const field of form.querySelectorAll('input[name],textarea[name],select[name],[data-version-options],[data-version-search]')) field.disabled = value; updateBusy(); },
     complete() { completed = true; submitting = false; clearTimeout(timer); try { localStorage.removeItem(key); } catch {} },
     destroy() { clearTimeout(timer); saveDraft(); disposed = true; window.removeEventListener('beforeunload',beforeUnload); editor.destroy(); },
   };

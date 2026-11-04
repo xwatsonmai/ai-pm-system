@@ -151,9 +151,16 @@ func (s *Service) taskMilestoneBatch(c context.Context, a domain.Actor, t *domai
 	}
 	if !needed {
 		if len(targets) > 0 && targets[0] != "" && targets[0] != t.ProjectVersionID {
-			return nil, errors.New("进行中需求请通过安排目标版本调整归属")
+			prior, err := s.Store.GetTask(c, t.ID)
+			if err != nil {
+				return nil, err
+			}
+			if !domain.TaskFinished(prior.Status) && prior.Status != "review" {
+				return nil, errors.New("进行中需求请通过安排目标版本调整归属")
+			}
+		} else {
+			return nil, nil
 		}
-		return nil, nil
 	}
 	p, e := s.newVersionPlan(c, a, t.ProjectID)
 	if e != nil {
