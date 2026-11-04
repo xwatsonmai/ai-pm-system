@@ -40,6 +40,7 @@ export function mountRequirementEditor(form, { task = {}, projectID, userID, onD
   let files = [...(draft?.attachments || task.attachments || [])];
   let disposed = false, completed = false, submitting = false, pending = 0, timer, request = draft?.request, descriptionChanged = false;
   const initial = draft || task;
+  form.dataset.projectVersionId=initial.project_version_id||'';
   form.elements.title.value = initial.title || '';
   form.elements.kind.value = initial.kind || 'requirement';
   form.elements.priority.value = initial.priority || 'next';
@@ -74,7 +75,7 @@ export function mountRequirementEditor(form, { task = {}, projectID, userID, onD
     onTransaction: ({transaction}) => { for (const position of positions) position.pos = transaction.mapping.map(position.pos); },
   });
   function snapshot() {
-    return {title:form.elements.title.value, kind:form.elements.kind.value, priority:form.elements.priority.value, reviewer:form.elements.reviewer.value, acceptance:form.elements.acceptance.value.split('\n'), description:descriptionChanged ? savedLinks(editor.getMarkdown()) : (initial.description || ''), attachments:files, version:Number(form.dataset.version), ...(sourceVersion != null ? {source_version:draft?.source_version ?? sourceVersion} : {}), ...(parentRequirement ? {parent_requirement_id:parentRequirement.id,parent_version:draft?.parent_version ?? parentRequirement.version} : {})};
+    return {...(form.elements.project_version_id?.value ? {project_version_id:form.elements.project_version_id.value} : {}),title:form.elements.title.value, kind:form.elements.kind.value, priority:form.elements.priority.value, reviewer:form.elements.reviewer.value, acceptance:form.elements.acceptance.value.split('\n'), description:descriptionChanged ? savedLinks(editor.getMarkdown()) : (initial.description || ''), attachments:files, version:Number(form.dataset.version), ...(sourceVersion != null ? {source_version:draft?.source_version ?? sourceVersion} : {}), ...(parentRequirement ? {parent_requirement_id:parentRequirement.id,parent_version:draft?.parent_version ?? parentRequirement.version} : {})};
   }
   function saveDraft() {
     if (disposed || completed) return;

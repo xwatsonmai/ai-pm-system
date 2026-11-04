@@ -8,6 +8,12 @@ import (
 )
 
 type Store interface {
+	ProjectVersionHistoryPage(context.Context, string, domain.PageQuery) (domain.Page[domain.VersionHistoryEntry], error)
+	ListProjectVersionsPage(context.Context, string, domain.VersionListQuery) (domain.Page[domain.ProjectVersion], error)
+	GetProjectVersionListing(context.Context, string) (domain.ProjectVersion, error)
+	ProjectVersionScopePage(context.Context, string, domain.VersionScopeQuery) (domain.Page[domain.VersionScopeItem], error)
+	ProjectVersionReleasesPage(context.Context, string, domain.PageQuery) (domain.Page[domain.VersionRelease], error)
+	ProjectVersionReleaseTasksPage(context.Context, string, string, domain.PageQuery) (domain.Page[domain.Task], error)
 	ListRequirementIterations(context.Context, string, string, int, int) ([]domain.Task, int, error)
 	ProjectTimelineEvents(context.Context, string, int64, int64, int, int) ([]domain.Event, int, error)
 	GetCurrentMilestone(context.Context, string) (domain.CurrentMilestone, error)

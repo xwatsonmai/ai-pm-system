@@ -20,6 +20,16 @@ func (d *DB) GetCurrentMilestone(c context.Context, p string) (domain.CurrentMil
 }
 func writeMilestoneBatches(c context.Context, tx *sql.Tx, batches []domain.MilestoneBatch) error {
 	for _, b := range batches {
+		if b.CheckState != nil {
+			var version int
+			e := tx.QueryRowContext(c, "SELECT version FROM current_milestones WHERE project_id=? AND version_id=?", b.CheckState.ProjectID, b.CheckState.VersionID).Scan(&version)
+			if errors.Is(e, sql.ErrNoRows) || version != b.CheckState.Version {
+				return domain.ErrConflict
+			}
+			if e != nil {
+				return e
+			}
+		}
 		if b.State != nil {
 			s := b.State
 			if s.Version != b.Expected+1 {

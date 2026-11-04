@@ -16,6 +16,7 @@ import {mountProjectAccess} from './project-access.mjs';
 const busyIntakes = new Set();
 let requirementEditor = null;
 let requirementReview = null;
+import {mountVersionPicker} from "./version-picker.mjs";
 import { streamRun, waitForPoll } from "./run-stream.mjs";
 
 const $ = (s, root = document) => root.querySelector(s);
@@ -148,7 +149,7 @@ let state = {
 };
 const drafts = new Map();
 const accessUI = mountProjectAccess({api,modal,closeModal,getProject:()=>state.project,getAccess:()=>state.project_access,onAccessChange:refreshProjectAccess,heading,field,action,escape,toast});
-const projectVersionUI=mountProjectVersions({api,modal,closeModal,getContext:()=>state.context,getProject:()=>state.project,getUser:()=>state.auth?.user?.id||'local-owner',refresh:async()=>{await refresh();render();},onTask:openTask,onCreate:()=>taskForm(),onPool:async filter=>{await navigate('tasks');state.versionFilter=filter;renderPage();},toast});
+const projectVersionUI=mountProjectVersions({api,modal,closeModal,getContext:()=>state.context,getProject:()=>state.project,getUser:()=>state.auth?.user?.id||'local-owner',refresh:async()=>{await refresh();render();},onTask:openTask,onCreate:versionID=>taskForm(null,null,null,versionID),onPool:async filter=>{await navigate('tasks');state.versionFilter=filter;setListPage('tasks',1);await loadBusinessPage();},toast});
 const timelineUI = mountProjectTimeline({
   api, getProject: () => state.project, onTask: openTask,
   onVersion: id => projectVersionUI.open(id),
@@ -539,6 +540,7 @@ function renderPage() {
   }[state.page];
   $("#page").innerHTML = renderer();
   if(state.page==='timeline')timelineUI.load();
+  if(state.page==='versions')projectVersionUI.loadPage();
   if (state.page === "chat") {
     updateComposer();
     const feed = $(".chat-feed");
@@ -1291,7 +1293,7 @@ async function taskResolutionForm(taskID, operation) {
   reason.addEventListener('input',()=>{try {localStorage.setItem(draftKey,JSON.stringify({body:reason.value}));}catch{}});
 
 }
-async function taskForm(taskID, iterationSourceID, bugParentID) {
+async function taskForm(taskID, iterationSourceID, bugParentID,targetVersionID = null) {
   const projectID = state.project.id;
   const source = iterationSourceID ? (await api(`/tasks/${iterationSourceID}?compact=true`)).task : null;
   if (state.project.id !== projectID) return;
@@ -1304,7 +1306,7 @@ async function taskForm(taskID, iterationSourceID, bugParentID) {
     task: t, projectID, userID: state.auth?.user?.id || "local-owner",
     draftScope: parent ? 'testing-bug:' + parent.id : source ? 'iteration:' + source.id : undefined,
     sourceVersion: source?.version, parentRequirement:parent,
-    onDiscard: () => { closeModal(); taskForm(taskID,iterationSourceID,bugParentID); },
+    onDiscard: () => { closeModal(); taskForm(taskID,iterationSourceID,bugParentID,targetVersionID); },
     onUnauthorized: () => { toast("登录已过期，请保存草稿后重新登录"); },
   });
   const form=$('#task-form'), current=state.context.current_milestone;
@@ -1328,8 +1330,17 @@ async function taskForm(taskID, iterationSourceID, bugParentID) {
   if (!source && t.iteration) $('.requirement-document',form).insertAdjacentHTML('afterbegin',iterationContextHTML(t.iteration));
   const associated=taskID ? (state.context.project_versions||[]).find(v=>v.id===t.project_version_id) : current;
   const holder=document.createElement('div');holder.className='field milestone-association';
-  holder.innerHTML=`<span>所属里程碑</span><strong>${escape(associated?.name||'保存时自动创建里程碑')}</strong><small class="hint">${source?'新迭代自动归入当前里程碑。上一轮所属版本和交付记录保留。':taskID?'已结束里程碑产生的后续工作会自动归入当前里程碑。':'新需求自动归入当前里程碑，没有时随需求一起保存并创建。'}</small>`;
   $('.requirement-properties',form).prepend(holder);
+  let parentVersion=parent ? (state.context.project_versions||[]).find(v=>v.id===parent.project_version_id) : null;
+  if(parent&&!parentVersion&&parent.project_version_id)parentVersion=await api(`/projects/${encodeURIComponent(projectID)}/version-options/${encodeURIComponent(parent.project_version_id)}`);
+  if(taskID || (parent&&parentVersion?.status==='active')) {
+    const linked=parent?parentVersion:associated;
+    holder.innerHTML=`<span>所属版本</span><strong>${escape(linked?.name||'历史版本')}</strong>${parent?`<input type="hidden" name="project_version_id" value="${escape(parent.project_version_id)}">`:''}<small class="hint">${parent?'关联 Bug 跟随所属需求版本。':'请通过安排目标版本调整需求归属。已结束版本的后续工作进入指定或默认版本。'}</small>`;
+  } else {
+    const selected=form.dataset.projectVersionId||targetVersionID||(state.context.project_versions||[]).find(v=>v.id===state.versionFilter&&v.status==='active')?.id||current?.id||'';
+    await mountVersionPicker(holder,{api,projectID,selected,label:'所属版本',emptyLabel:'使用项目默认版本（没有时自动创建）'});
+    if(parent)holder.insertAdjacentHTML('beforeend','<small class="hint">原版本已结束：需求及本次 Bug 的后续修复将一起进入所选版本，原上线快照保留。</small>');
+  }
 }
 async function submitForm(taskID) {
   const t = (await api(`/tasks/${taskID}?compact=true`)).task;
@@ -2143,7 +2154,7 @@ document.addEventListener("submit", async (event) => {
       );
       requirementEditor.complete();
       afterTask = form.dataset.id ? result.task.id : "";
-      toast(form.dataset.iterationSource ? "迭代需求已保存到当前里程碑，Agent 将在后台评审" : form.dataset.id ? "需求已保存，历史交付记录保留" : "需求已保存到当前里程碑，Agent 将在后台评审，有结论后会标记待确认");
+      toast(form.dataset.iterationSource ? "迭代需求已保存到目标版本，Agent 将在后台评审" : form.dataset.id ? "需求已保存，历史交付记录保留" : "需求已保存到目标版本，Agent 将在后台评审，有结论后会标记待确认");
     } else if (form.id === "requirement-change-form") {
       const payload=JSON.parse(form.dataset.payload ||= JSON.stringify({action:'request_change',request_id:id(),expected_task_version:Number(form.dataset.version),body:data.body,source_bug_id:form.dataset.source,source_bug_version:Number(form.dataset.sourceVersion)}));
       try{localStorage.setItem(form.dataset.draftKey,JSON.stringify({body:data.body,payload}))}catch{}

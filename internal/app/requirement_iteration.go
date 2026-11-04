@@ -131,7 +131,7 @@ func (s *Service) createRequirementIteration(c context.Context, a domain.Actor, 
 			return out, e
 		}
 		candidate := task
-		if e = plan.bindTask(&candidate); e != nil {
+		if e = plan.bindTask(&candidate, in.ProjectVersionID); e != nil {
 			if errors.Is(e, domain.ErrConflict) {
 				continue
 			}
