@@ -21,3 +21,8 @@ type PagedQueries interface {
 type TaskTreeQueries interface {
 	QueryTaskTree(context.Context, string, domain.TaskTreeQuery) (domain.TaskTreePage, error)
 }
+
+type LineageQueries interface {
+	LineageVersions(context.Context, string, domain.PageQuery) (domain.Page[domain.LineageVersion], error)
+	QueryLineage(context.Context, string, string, domain.LineageQuery) (domain.LineagePage, error)
+}

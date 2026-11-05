@@ -83,6 +83,7 @@ func (s *Server) Handler() http.Handler {
 	s.repositoryRoutes(mux)
 	s.collaborationRoutes(mux)
 	s.projectVersionRoutes(handle)
+	s.lineageRoutes(handle)
 	s.paginationRoutes(handle)
 	handle("POST /api/projects/{id}/attachments", s.uploadAttachment)
 	handle("GET /api/projects/{id}/attachments/{attachment}", s.downloadAttachment)

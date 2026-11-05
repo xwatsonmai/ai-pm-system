@@ -19,9 +19,9 @@ const taskTreeCTE = `WITH RECURSIVE
 nodes AS (
  SELECT t.id,COALESCE(parent.id,'') parent_id,
  COALESCE(json_extract(t.payload,'$.updated_at'),0) updated_at,
- CASE WHEN parent.id IS NULL THEN '' WHEN COALESCE(json_extract(t.payload,'$.parent_requirement_id'),'')<>'' THEN 'bug' ELSE 'iteration' END relation
+ CASE WHEN parent.id IS NULL THEN '' WHEN COALESCE(json_extract(t.payload,'$.parent_requirement_id'),'')<>'' THEN 'bug' WHEN COALESCE(json_extract(t.payload,'$.parent_task_id'),'')<>'' THEN 'subrequirement' ELSE 'iteration' END relation
  FROM tasks t LEFT JOIN tasks parent ON parent.project_id=t.project_id AND parent.id=
- COALESCE(NULLIF(json_extract(t.payload,'$.parent_requirement_id'),''),json_extract(t.payload,'$.iteration.parent_task_id'))
+ COALESCE(NULLIF(json_extract(t.payload,'$.parent_requirement_id'),''),NULLIF(json_extract(t.payload,'$.parent_task_id'),''),json_extract(t.payload,'$.iteration.parent_task_id'))
  WHERE t.project_id=?
 ), ancestors(child_id,ancestor_id) AS (
  SELECT id,id FROM nodes UNION

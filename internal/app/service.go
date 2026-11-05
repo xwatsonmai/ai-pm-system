@@ -150,6 +150,7 @@ func (s *Service) SaveProfile(c context.Context, p domain.Profile, key string) (
 }
 
 type TaskInput struct {
+	ParentTaskID        string   `json:"parent_task_id,omitempty"`
 	ProjectVersionID    string   `json:"project_version_id,omitempty"`
 	ParentRequirementID string   `json:"parent_requirement_id,omitempty"`
 	ParentVersion       int      `json:"parent_version,omitempty"`
@@ -326,6 +327,31 @@ func (s *Service) createTask(c context.Context, a domain.Actor, p string, v Task
 		return domain.Mutation{}, e
 	}
 	t := domain.Task{ID: domain.ID("tsk_"), ProjectID: p, ProjectVersionID: v.ProjectVersionID, Title: v.Title, Kind: v.Kind, Description: v.Description, Attachments: attachments, Acceptance: v.Acceptance, Priority: v.Priority, Reviewer: v.Reviewer, Status: "clarify", Revision: 1, CreatedAt: domain.Now()}
+	if v.ParentTaskID != "" {
+		if v.Kind != "requirement" || v.ParentRequirementID != "" {
+			return domain.Mutation{}, errors.New("子需求只能关联一个上级需求")
+		}
+		if e = s.RequirePages(c, a, p, "tasks", "reviews", "versions"); e != nil {
+			return domain.Mutation{}, e
+		}
+		parent, err := s.Store.GetTask(c, v.ParentTaskID)
+		if err != nil {
+			return domain.Mutation{}, err
+		}
+		if parent.ProjectID != p || parent.Kind != "requirement" {
+			return domain.Mutation{}, domain.ErrForbidden
+		}
+		t.ParentTaskID = parent.ID
+		if t.ProjectVersionID == "" && parent.ProjectVersionID != "" {
+			pv, err := s.Store.GetProjectVersionListing(c, parent.ProjectVersionID)
+			if err != nil {
+				return domain.Mutation{}, err
+			}
+			if pv.Status == "active" {
+				t.ProjectVersionID = pv.ID
+			}
+		}
+	}
 	creator := reviewActor(a, authorization)
 	t.Creator = &creator
 	if v.ParentRequirementID != "" {
@@ -404,6 +430,12 @@ func (s *Service) editTask(c context.Context, a domain.Actor, id string, v TaskI
 	}
 	if v.ProjectVersionID != "" && v.ProjectVersionID != t.ProjectVersionID {
 		return domain.Mutation{}, errors.New("请通过安排目标版本调整归属，不能在编辑内容时更换版本")
+	}
+	if v.ParentTaskID != "" && v.ParentTaskID != t.ParentTaskID {
+		return domain.Mutation{}, errors.New("不能通过编辑内容更换上级需求")
+	}
+	if t.ParentTaskID != "" && v.Kind != "requirement" {
+		return domain.Mutation{}, errors.New("子需求不能转换为 Bug")
 	}
 	if domain.TaskTerminated(t.Status) {
 		return domain.Mutation{}, fmt.Errorf("%w: 需求已结束，请先重新打开再编辑；原内容仍保留", domain.ErrConflict)

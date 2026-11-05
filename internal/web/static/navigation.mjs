@@ -3,6 +3,7 @@ export const projectPages = [
   {id: 'tasks', title: '需求池', icon: 'list'},
   {id: 'reviews', title: '验收与交付', icon: 'check'},
   {id: 'versions', title: '项目版本', icon: 'grid'},
+  {id: 'lineage', title: '版本谱系', icon: 'lineage'},
   {id: 'timeline', title: '项目时间线', icon: 'code'},
   {id: 'chat', title: '项目问答', icon: 'spark'},
   {id: 'code', title: '代码与变更', icon: 'code'},
@@ -12,7 +13,7 @@ export const projectPages = [
 ];
 export const pageTitles = Object.fromEntries([...projectPages, {id:'mcp',title:'我的 MCP'}, {id:'platform',title:'平台设置'}].map(p => [p.id, p.title]));
 export const navigationGroups = [
-  {id:'requirements', title:'项目需求', icon:'list', pages:['tasks','reviews','versions','timeline']},
+  {id:'requirements', title:'项目需求', icon:'list', pages:['tasks','reviews','versions','lineage','timeline']},
   {id:'management', title:'项目管理', icon:'settings', pages:['settings','git','access']},
 ];
 

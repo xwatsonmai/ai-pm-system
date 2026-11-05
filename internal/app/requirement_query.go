@@ -11,6 +11,7 @@ import (
 
 // RequirementSummary deliberately omits documents, claims and conversation data.
 type RequirementSummary struct {
+	ParentTaskID        string                          `json:"parent_task_id,omitempty"`
 	ParentRequirementID string                          `json:"parent_requirement_id,omitempty"`
 	ScopeSummary        string                          `json:"scope_summary"`
 	ReviewStatus        string                          `json:"review_status,omitempty"`
@@ -29,6 +30,7 @@ type RequirementSummary struct {
 
 func requirementSummary(t domain.Task) RequirementSummary {
 	out := RequirementSummary{ParentRequirementID: t.ParentRequirementID, ProjectVersionID: t.ProjectVersionID, ID: t.ID, Title: t.Title, Kind: t.Kind, Status: t.Status, Owner: t.Owner, Claimant: t.Claimant, Blocker: t.Blocker, Revision: t.Revision, UpdatedAt: t.UpdatedAt}
+	out.ParentTaskID = t.ParentTaskID
 
 	if t.Iteration != nil {
 		out.Iteration = &domain.RequirementIterationRef{ParentTaskID: t.Iteration.ParentTaskID, RootTaskID: t.Iteration.RootTaskID}

@@ -44,7 +44,7 @@ export function requirementPoolHTML({result,tasks,hierarchy,groupByVersion,versi
   const {node:t,depth=0,expanded=false}=item,hasChildren=hierarchy&&t.children_count>0,context=hierarchy&&t.matches_filter===false;
   const relation=hierarchy&&depth>0?t.tree_relation:'';
   const kind=relation==='iteration'||(!hierarchy&&t.iteration)?'iteration':t.kind==='bug'?'bug':'requirement';
-  const label=relation==='bug'?'关联 Bug':kind==='iteration'?'追加迭代':t.kind==='bug'?(t.parent_requirement_id?'需求测试 Bug':'平台 Bug'):'需求';
+  const label=relation==='bug'?'关联 Bug':relation==='subrequirement'?'子需求':kind==='iteration'?'追加迭代':t.kind==='bug'?(t.parent_requirement_id?'需求测试 Bug':'平台 Bug'):'需求';
   const showVersion=!grouped||Boolean(depth>0&&t.project_version_id!==parentVersion);
   const meta=[`<span class="pool-kind pool-kind--${kind}">${icon(kind)}${label}</span>`,`<span class="pool-task-code">${esc(short(t.id))}</span>`,`<span>R${t.revision}</span>`];
   if(showVersion)meta.push(`<span class="pool-task-version">${esc(versionLabel(t.project_version_id))}</span>`);

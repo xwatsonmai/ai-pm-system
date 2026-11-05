@@ -6,6 +6,7 @@ import { mountVersionPicker } from "./version-picker.mjs";
 import { pagerHTML, pageQuery, patchKeyedHTML } from "./pagination.mjs";
 import { createTaskHierarchy } from "./task-hierarchy.mjs";
 import { requirementPoolHTML } from "./requirement-pool.mjs";
+import {mountVersionLineage} from './version-lineage.mjs';
 const taskTree = createTaskHierarchy();
 import { patchHTML, mergeRunRefresh } from "./dom-update.mjs";
 import { requirementFormHTML, mountRequirementEditor } from "./requirement-editor.mjs";
@@ -102,8 +103,9 @@ const icons = {
   trash: '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/>',
   copy: '<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',
 };
-const icon = (name) =>
-  `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.list}</svg>`;
+const icon = (name) => name==='lineage'
+  ? `<span class="icon ln-icon ln-icon--git-branch" aria-hidden="true"></span>`
+  : `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.list}</svg>`;
 const reviewInfo = task => reviewAttention(task, state.context?.requirement_reviews?.find(v => v.task_id === task.id));
 const needsAttention = task => !taskFinished(task) && (task.blocker || ["testing", "retest", "verifying", "pending_release", "review"].includes(task.status) || reviewInfo(task)?.attention);
 const pendingConfirmations = () => state.context?.stats?.review_pending ?? (state.context?.tasks || []).filter(t => ["待确认","待对齐","驳回待确认"].includes(reviewInfo(t)?.label)).length;
@@ -166,6 +168,7 @@ let state = {
 const drafts = new Map();
 const accessUI = mountProjectAccess({api,modal,closeModal,getModalRevision:()=>modalRevision,getProject:()=>state.project,getAccess:()=>state.project_access,onAccessChange:refreshProjectAccess,heading,field,action,escape,toast});
 const projectVersionUI=mountProjectVersions({api,modal,closeModal,getModalRevision:()=>modalRevision,getContext:()=>state.context,getProject:()=>state.project,getUser:()=>state.auth?.user?.id||'local-owner',canAccessPage:page=>allowedPage(page,state.project_access,isPlatformAdmin()),canCreateRequirement:()=>canAction('requirement.create'),refresh:async()=>{await refresh();render();},onTask:openTask,onCreate:versionID=>taskForm(null,null,null,versionID),onPool:async filter=>{await navigate('tasks');state.versionFilter=filter;setListPage('tasks',1);await loadBusinessPage();},toast});
+const lineageUI=mountVersionLineage({api,getProject:()=>state.project,getDefaultVersion:()=>state.context?.current_milestone?.id,canReadTask:canReadTasks,onTask:openTask,modal});
 const timelineUI = mountProjectTimeline({
   api, getProject: () => state.project, onTask: openTask,
   onVersion: id => projectVersionUI.open(id),
@@ -420,6 +423,7 @@ async function loadBusinessPage() {
  if(applyWorkspace(snapshot))await updateBusinessPage();
 }
 function updateBusinessPage() {
+ if(state.page==='lineage')return lineageUI.refresh();
  if(state.page==='chat'){updateChat();return;}
  if(state.page==='timeline'){timelineUI.refreshIfNeeded();return;}
  if(state.page==='versions')return projectVersionUI.loadPage();
@@ -585,10 +589,12 @@ function renderPage() {
     return;
   }
   if(state.page==='timeline'&&$('.tl-page')){timelineUI.refreshIfNeeded();return;}
+  if(state.page==='lineage'&&$('.lineage-page')?.dataset.project===state.project.id){lineageUI.refresh();return;}
   const renderer = {
     overview: overview,
     tasks: tasksPage,
     timeline:()=>timelineUI.page(),
+    lineage:()=>lineageUI.page(),
     versions:()=>projectVersionsPage(state.context,state.auth?.user?.id||'local-owner',page=>allowedPage(page,state.project_access,isPlatformAdmin()),canAction('requirement.create')),
     chat: chatPage,
     reviews: reviewsPage,
@@ -600,6 +606,7 @@ function renderPage() {
   $("#page").innerHTML = renderer();
   if(state.page==='timeline')timelineUI.load();
   if(state.page==='versions')projectVersionUI.loadPage();
+  if(state.page==='lineage')lineageUI.load();
   if(state.page==='tasks')mountTaskVersionFilter();
   if (state.page === "chat") {
     updateComposer();
@@ -1249,6 +1256,7 @@ async function openTask(taskID) {
   businessLists.set(listScope(runKey),runPage);
   const runs=runPage.items;
   let buttons = "";
+  if(t.kind==='requirement'&&canAction('requirement.create')&&canReadTasks())buttons+=action('new-subrequirement','创建子需求','',`data-id="${t.id}"`);
   if (t.status === "done") buttons += action("iterate-task", "追加迭代", "primary", `data-id="${t.id}"`);
   if (t.status === "clarify")
     buttons += action("requirement-review", "继续需求评审", "primary", `data-id="${t.id}"`);
@@ -1355,11 +1363,14 @@ async function taskResolutionForm(taskID, operation) {
   reason.addEventListener('input',()=>{try {localStorage.setItem(draftKey,JSON.stringify({body:reason.value}));}catch{}});
 
 }
-async function taskForm(taskID, iterationSourceID, bugParentID,targetVersionID = null) {
+async function taskForm(taskID, iterationSourceID, bugParentID,targetVersionID = null,subParentID = null) {
   let kinds=taskID?['requirement','bug']:bugParentID?(canFileLinkedBug()?['bug']:[]):iterationSourceID?(canIterate()?['requirement']:[]):creationKinds(state.project_access);
   if(!kinds.length)throw Error('当前不能发起此操作');
   const projectID = state.project.id,modalAtStart=modalRevision;
   const source = iterationSourceID ? (await api(`/tasks/${iterationSourceID}?compact=true`)).task : null;
+  const subParent = subParentID ? (await api(`/tasks/${subParentID}?compact=true`)).task : null;
+  if(subParent&&(subParent.kind!=='requirement'||!canAction('requirement.create')))throw Error('当前不能创建子需求');
+  const subParentVersion = subParent?.project_version_id ? await api(`/projects/${encodeURIComponent(projectID)}/version-options/${encodeURIComponent(subParent.project_version_id)}`) : null;
   if (state.project.id !== projectID || modalAtStart!==modalRevision) return;
   if (source && source.status !== 'done') throw Error('只有已验收的需求才能追加迭代');
   const parent = bugParentID ? (await api(`/tasks/${bugParentID}?compact=true`)).task : null;
@@ -1367,15 +1378,16 @@ async function taskForm(taskID, iterationSourceID, bugParentID,targetVersionID =
   if (state.project.id !== projectID || modalAtStart!==modalRevision) return;
   kinds=taskID?[...new Set([t.kind||'requirement',...creationKinds(state.project_access)])]:bugParentID?(canFileLinkedBug()?['bug']:[]):iterationSourceID?(canIterate()?['requirement']:[]):creationKinds(state.project_access);
   if(!kinds.length)return;
-  modal(parent ? (parent.status === "review" ? "提起验收 Bug" : "提起测试 Bug") : source ? "追加迭代" : taskID ? "编辑需求" : creationLabel(state.project_access), requirementFormHTML(t,kinds), {document: true});
+  modal(subParent ? '创建子需求' : parent ? (parent.status === "review" ? "提起验收 Bug" : "提起测试 Bug") : source ? "追加迭代" : taskID ? "编辑需求" : creationLabel(state.project_access), requirementFormHTML(t,kinds), {document: true});
   requirementEditor = mountRequirementEditor($("#task-form"), {
     task: t, projectID, allowedKinds:kinds, userID: state.auth?.user?.id || "local-owner",
-    draftScope: parent ? 'testing-bug:' + parent.id : source ? 'iteration:' + source.id : undefined,
+    draftScope: subParent?'subrequirement:'+subParent.id:parent ? 'testing-bug:' + parent.id : source ? 'iteration:' + source.id : undefined,
     sourceVersion: source?.version, parentRequirement:parent,
-    onDiscard: () => { closeModal(); taskForm(taskID,iterationSourceID,bugParentID,targetVersionID); },
+    onDiscard: () => { closeModal(); taskForm(taskID,iterationSourceID,bugParentID,targetVersionID,subParentID); },
     onUnauthorized: () => { toast("登录已过期，请保存草稿后重新登录"); },
   });
   const form=$('#task-form'), current=state.context.current_milestone;form.dataset.originalKind=t.kind||'requirement';
+  if(subParent){form.dataset.subParent=subParent.id;form.elements.kind.value='requirement';$('.requirement-kind',form).hidden=true;$('.requirement-document',form).insertAdjacentHTML('afterbegin',`<p class="notice info">上级需求：${escape(subParent.title)} · 子需求独立评审和交付。</p>`);$('.requirement-state-note',form).textContent='保存后建立子需求关系，独立评审、开发与验收。';form.querySelector('button[type=submit]').textContent='保存子需求';}
   if(!taskID&&kinds.length===1){form.elements.kind.value=kinds[0];if(kinds[0]==='bug'){form.querySelector('button[type=submit]').textContent='提起 Bug';$('.requirement-state-note',form).textContent='Bug 与附件保存后交给开发跟进。';}}
   if (parent) {
     form.dataset.bugParent = parent.id; form.dataset.parentVersion = parent.version;
@@ -1406,7 +1418,7 @@ async function taskForm(taskID, iterationSourceID, bugParentID,targetVersionID =
   } else {
     // A recovered draft keeps the exact original destination, including an
     // empty automatic default, so a lost-response retry retains its request ID.
-    const selected=form.dataset.hasRequirementDraft==='true' ? form.dataset.projectVersionId : targetVersionID||(state.context.project_versions||[]).find(v=>v.id===state.versionFilter&&v.status==='active')?.id||current?.id||'';
+    const selected=form.dataset.hasRequirementDraft==='true' ? form.dataset.projectVersionId : targetVersionID||(subParentVersion?.status==='active'?subParent.project_version_id:'')||(state.context.project_versions||[]).find(v=>v.id===state.versionFilter&&v.status==='active')?.id||current?.id||'';
     await mountVersionPicker(holder,{api,projectID,selected,label:'所属版本',emptyLabel:'使用项目默认版本（没有时自动创建）'});
     if(parent)holder.insertAdjacentHTML('beforeend','<small class="hint">原版本已结束：需求及本次 Bug 的后续修复将一起进入所选版本，原上线快照保留。</small>');
   }
@@ -1638,6 +1650,7 @@ document.addEventListener("click", async (event) => {
     if(a==='task-tree-retry'){await loadBusinessPage();return;}
     if(a==='toggle-version-group'){state.versionGrouping=!state.versionGrouping;renderPage();return;}
     if(a==='iterate-task'){await taskForm(null,button.dataset.id);return;}
+    if(a==='new-subrequirement'){await taskForm(null,null,null,null,button.dataset.id);return;}
     if(a==='iteration-more'){
       const section=button.closest('.iteration-history'),projectID=state.project.id;
       button.disabled=true;
@@ -2239,6 +2252,7 @@ document.addEventListener("submit", async (event) => {
       toast(p.syncing ? "项目已保存，正在同步代码仓库" : p.sync_error ? "项目已保存，仓库同步失败，可重试" : "项目已保存");
     } else if (form.id === "task-form") {
       const payload = requirementEditor.payload(id);
+      if(form.dataset.subParent){payload.parent_task_id=form.dataset.subParent;payload.kind='requirement';}
       if (form.dataset.bugParent) payload.kind="bug";
       if((!form.dataset.id||payload.kind!==form.dataset.originalKind)&&!(payload.kind==='bug'?(form.dataset.bugParent?canFileLinkedBug():canAction('bug.create')):canAction('requirement.create')))throw Error('操作权限已变化，请重新打开表单');
       requirementEditor.setSubmitting(true);
@@ -2409,6 +2423,7 @@ async function loadDetailPage(key,page,size){
 }
 function testingDetails(t,tasks=[]) {
  let html = '';
+ if(t.parent_task_id)html+=`<section class="detail-section"><h3>上级需求</h3>${action('open-task',escape(tasks.find(v=>v.id===t.parent_task_id)?.title||short(t.parent_task_id)),'',`data-id="${escape(t.parent_task_id)}"`)}<p class="hint">子需求独立评审、开发与验收，关系可在版本谱系中查看。</p></section>`;
  if (t.parent_requirement_id) html += `<section class="detail-section"><h3>需求测试 Bug</h3>${action('open-task',escape(tasks.find(v=>v.id===t.parent_requirement_id)?.title || t.parent_requirement_id),'',`data-id="${escape(t.parent_requirement_id)}"`)}<p class="mono small">${escape(t.bug_context?.branch)} · ${escape(t.bug_context?.sha)}</p><p class="hint">评审基于提起时的需求 R${t.bug_context?.revision} 与提测版本；修复需合回所属需求的开发分支。</p></section>`;
  else if (t.kind === 'bug') html += '<p class="hint">平台 Bug · 不关联某个需求</p>';
  const bugs = tasks.filter(b=>b.parent_requirement_id === t.id),related=listResult(`detail-bugs:${t.id}`);

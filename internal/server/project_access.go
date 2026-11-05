@@ -278,6 +278,8 @@ func (s *Server) authorizeProjectRoute(r *http.Request, id string, manage bool, 
 			pages = []string{"versions"}
 		case "timeline":
 			pages = []string{"timeline"}
+		case "lineage":
+			pages = []string{"lineage"}
 		case "runs", "conversations", "collaborations":
 			if path[3] == "runs" && r.Method != "GET" {
 				return nil // the handler/manager authorize the submitted run kind
