@@ -158,6 +158,20 @@ func TestTestingBugReviewRepairAndRetest(t *testing.T) {
 		t.Fatal(err)
 	}
 	parent, _ = s.Store.GetTask(c, parent.ID)
+	s.ResolveTestingCode = func(_ context.Context, project, branch string, fixes []string) (string, error) {
+		if project != parent.ProjectID || branch != parent.Branch || len(fixes) != 1 || fixes[0] != strings.Repeat("b", 40) {
+			t.Fatal("candidate ignored verified fixes", project, branch, fixes)
+		}
+		return strings.Repeat("c", 40), nil
+	}
+	candidate, err := s.RetestCandidate(c, app.Human(), parent.ID)
+	if err != nil || candidate.SHA != strings.Repeat("c", 40) || candidate.Version != parent.Version {
+		t.Fatal(candidate, err)
+	}
+	unchanged, err := s.Store.GetTask(c, parent.ID)
+	if err != nil || unchanged.Submission.SHA != parent.Submission.SHA || unchanged.Status != "retest" || unchanged.Version != parent.Version {
+		t.Fatal("candidate mutated original submission", unchanged, err)
+	}
 	checked := false
 	s.ValidateTestingCode = func(_ context.Context, project, branch, sha string, fixes []string) error {
 		checked = true

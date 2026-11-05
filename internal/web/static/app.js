@@ -1,3 +1,4 @@
+import { retestVersion, testingRequest } from "./testing-version.mjs";
 import { createID as id } from "./id.mjs";
 import { BASE, appURL } from "./base.mjs";
 import { chatConversations, conversationID } from "./conversations.mjs";
@@ -2314,7 +2315,7 @@ document.addEventListener("submit", async (event) => {
       afterTask = form.dataset.id;
       toast("开发结果已保存，等待测试验证");
     } else if (form.id === "testing-form") {
-      const payload = JSON.parse(form.dataset.payload ||= JSON.stringify({action:form.dataset.operation,request_id:id(),version:Number(form.dataset.version),body:data.note,test_verification:{revision:Number(form.dataset.revision),sha:data.sha,environment:data.environment,note:data.note}}));
+      const payload = testingRequest(form, data, id);
       await api(`/tasks/${form.dataset.id}/actions`,payload);
       afterTask = form.dataset.id;
       toast("测试记录已保存");
@@ -2433,8 +2434,10 @@ function testingDetails(t,tasks=[]) {
 }
 async function testingForm(taskID,operation) {
  const t=(await api(`/tasks/${taskID}?compact=true`)).task;
+ const candidate=operation==='start_retest'?await retestVersion(t,api):null;
+ if(candidate){t.version=candidate.version;t.revision=candidate.revision;}
  const title=({test_pass:'确认测试通过',start_retest:'开始复测',verify_bug:'确认修复有效',return_bug:'修复无效，退回 Bug'})[operation];
- modal(title,`<form id="testing-form" data-id="${escape(t.id)}" data-version="${t.version}" data-revision="${t.revision}" data-operation="${operation}"><p>${escape(t.title)}</p>${operation==='start_retest'?'<p class="hint">填写已合入全部 Bug 修复的需求分支提交 SHA，平台将校验版本包含关系。</p>':''}${operation==='return_bug'?'':field('实际测试版本',`<input name="sha" required value="${escape(t.submission?.sha)}" ${operation==='start_retest'?'':'readonly'}>`)+field('测试环境',`<input name="environment" required value="${escape(t.submission?.environment || '')}">`)}${field(operation==='return_bug'?'退回原因':'测试说明与证据',`<textarea name="note" required rows="4" placeholder="说明验证过程、结果和证据链接"></textarea>`)}<div class="form-error" role="alert"></div><div class="modal-actions">${action('close','取消')}<button class="primary" type="submit">${title}</button></div></form>`);
+ modal(title,`<form id="testing-form" data-id="${escape(t.id)}" data-version="${t.version}" data-revision="${t.revision}" data-operation="${operation}"><p>${escape(t.title)}</p>${candidate?`<p class="hint">${escape(candidate.hint)}</p>`:''}${operation==='return_bug'?'':field('实际测试版本',`<input name="sha" required value="${escape(candidate?candidate.sha:t.submission?.sha)}" ${operation==='start_retest'?'':'readonly'}>`)+field('测试环境',`<input name="environment" required value="${escape(t.submission?.environment || '')}">`)}${field(operation==='return_bug'?'退回原因':'测试说明与证据',`<textarea name="note" required rows="4" placeholder="说明验证过程、结果和证据链接"></textarea>`)}<div class="form-error" role="alert"></div><div class="modal-actions">${action('close','取消')}<button class="primary" type="submit">${title}</button></div></form>`);
 }
 
 function testingQueueHTML() {

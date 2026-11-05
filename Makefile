@@ -26,6 +26,7 @@ test:
 	node --check internal/web/static/project-timeline.mjs
 	node --check internal/web/static/requirement-iterations.mjs
 	node --check internal/web/static/todo.mjs
+	node --check internal/web/static/testing-version.mjs
 	node --check internal/web/static/navigation.mjs
 	node --check internal/web/static/project-access.mjs
 	node --check internal/web/static/pagination.mjs

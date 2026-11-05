@@ -16,6 +16,7 @@ import (
 
 type Service struct {
 	ValidateTestingCode func(context.Context, string, string, string, []string) error
+	ResolveTestingCode  func(context.Context, string, string, []string) (string, error)
 	Store               storage.Store
 	mu                  sync.Mutex
 	OnChange            func(string, string, string)
