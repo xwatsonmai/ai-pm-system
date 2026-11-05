@@ -69,13 +69,26 @@ func Derive(t domain.Task, review *domain.RequirementReview, p domain.Project) [
 	r := recipients{t: t, members: domain.ProjectMembers(p)}
 	out := []Todo{}
 	add := func(kind, key string, to []string, action string, fields ...Field) {
-		eligible := []string{}
-		for _, user := range to {
-			if domain.MemberHasProjectPage(p, user, TodoPages(kind, t.ParentRequirementID != "")...) {
-				eligible = append(eligible, user)
+		eligible := func(users []string) []string {
+			out := []string{}
+			for _, user := range users {
+				if domain.MemberHasProjectPage(p, user, TodoPages(kind, t.ParentRequirementID != "")...) {
+					out = append(out, user)
+				}
+			}
+			return out
+		}
+		to = eligible(to)
+		if len(to) == 0 {
+			// A creator/claimant or designated tester may still be a member but
+			// lack the workflow page. Keep the duty fallback after filtering too.
+			switch kind {
+			case "review_reply", "review_confirm", "bug_rejection", "alignment_reply", "acceptance", "test", "retest", "verify":
+				to = eligible(r.duty("product"))
+			case "release":
+				to = eligible(r.duty("developer"))
 			}
 		}
-		to = eligible
 		if len(to) == 0 {
 			return
 		}
@@ -117,19 +130,19 @@ func Derive(t domain.Task, review *domain.RequirementReview, p domain.Project) [
 	switch t.Status {
 	case "ready":
 		if t.Claimant == "" {
-			add("claim", strconv.Itoa(t.Revision), r.role("developer"), "", kind)
+			add("claim", strconv.Itoa(t.Revision), r.duty("developer"), "", kind)
 		}
 	case "testing":
 		if sub != nil {
 			key := strconv.Itoa(t.Revision) + ":" + sub.SHA + ":" + sub.Environment
-			add("test", key, r.role("tester"), map[bool]string{true: "test_pass"}[t.ParentRequirementID == ""], kind, Field{"版本", short(sub.SHA)}, Field{"环境", sub.Environment})
+			add("test", key, r.duty("tester"), map[bool]string{true: "test_pass"}[t.ParentRequirementID == ""], kind, Field{"版本", short(sub.SHA)}, Field{"环境", sub.Environment})
 		}
 	case "retest":
-		add("retest", strconv.Itoa(t.Revision), r.role("tester"), "", kind)
+		add("retest", strconv.Itoa(t.Revision), r.duty("tester"), "", kind)
 	case "verifying":
 		if sub != nil {
 			key := strconv.Itoa(t.Revision) + ":" + sub.SHA + ":" + sub.Environment
-			add("verify", key, r.role("tester"), map[bool]string{true: "verify_bug"}[t.ParentRequirementID != ""], kind, Field{"版本", short(sub.SHA)}, Field{"环境", sub.Environment})
+			add("verify", key, r.duty("tester"), map[bool]string{true: "verify_bug"}[t.ParentRequirementID != ""], kind, Field{"版本", short(sub.SHA)}, Field{"环境", sub.Environment})
 		}
 	case "pending_release":
 		if sub != nil {
@@ -152,17 +165,17 @@ type recipients struct {
 	members []domain.ProjectMember
 }
 
-// role lists members with a role. Testing falls back to product, who tested
-// before the tester role existed and still do in teams without testers.
-func (r recipients) role(role string) []string {
+// duty lists members with an explicit notification responsibility. Testing
+// falls back to product for teams without designated testers.
+func (r recipients) duty(duty string) []string {
 	out := []string{}
 	for _, m := range r.members {
-		if m.ResponsibleFor(role) && m.UserID != "local-owner" {
+		if m.ResponsibleFor(duty) && m.UserID != "local-owner" {
 			out = append(out, m.UserID)
 		}
 	}
-	if len(out) == 0 && role == "tester" {
-		return r.role("product")
+	if len(out) == 0 && duty == "tester" {
+		return r.duty("product")
 	}
 	return out
 }
@@ -171,20 +184,20 @@ func (r recipients) member(id string) bool {
 	return id != "" && id != "local-owner" && slices.ContainsFunc(r.members, func(m domain.ProjectMember) bool { return m.UserID == id })
 }
 
-// owner prefers whoever raised the task, then everyone with the role.
-func (r recipients) owner(role string) []string {
+// owner prefers whoever raised the task, then everyone with the duty.
+func (r recipients) owner(duty string) []string {
 	if c := r.t.Creator; c != nil && r.member(c.ID) {
 		return []string{c.ID}
 	}
-	return r.role(role)
+	return r.duty(duty)
 }
 
 // claimant prefers the person whose personal MCP client claimed the task.
-func (r recipients) claimant(role string) []string {
+func (r recipients) claimant(duty string) []string {
 	if id := strings.TrimSpace(r.t.Claimant); r.member(id) {
 		return []string{id}
 	}
-	return r.role(role)
+	return r.duty(duty)
 }
 
 // TodoPages maps work to the page that can perform it, independently of the
