@@ -2,6 +2,10 @@
 
 需求池默认按已有关系折叠展示，保留「平铺展示」切换。层级与版本分组互相独立：可以按版本分组查看层级，也可以取消版本分组。
 
+列表以需求标题为主要阅读入口。有子项的主需求形成独立分组，展开后，关联事项放在组内的浅色区域，通过连续树线连接；追加迭代的子项继续嵌套在该迭代下。独立需求保持简洁的列表行，避免所有内容看起来都属于同一层。
+
+关系只标记一次「关联 Bug」或「追加迭代」，状态、负责人和更新时间退到次要列。跨版本子项保留自己的版本名称。手机上内容纵向排布，标题、状态和负责人无需通过横向滚动才能阅读。展开与收起支持键盘操作；减少动态效果偏好会关闭转动与显露动画，未变化的轮询不会重新播放动画。
+
 - 需求的关联测试、验收 Bug 挂在 `parent_requirement_id` 指向的需求下，标记「关联 Bug」。
 - 追加迭代挂在 `iteration.parent_task_id` 指向的上一轮需求下，标记「追加迭代」。迭代自己的关联 Bug 可以继续展开。
 - 没有上述关系的需求、独立 Bug 各自作为顶层条目。不会根据标题、描述或 Agent 推断关系；本次不增加手工父子关系编辑。
@@ -46,8 +50,13 @@ make test
 go build -o bin/ai-pm-hierarchy-check ./cmd/server
 AI_PM_QA_NODE_MODULES=<含Playwright的node_modules目录> \
 node internal/web/task-hierarchy.browser-check.mjs
+AI_PM_QA_BIN=bin/ai-pm-hierarchy-check \
+AI_PM_QA_NODE_MODULES=<含Playwright的node_modules目录> \
+node internal/web/requirement-pool.browser-check.mjs
 ```
 
 专项检查启动临时 SQLite 和 loopback 服务，覆盖 73 项、26 个顶层组、46 个直接子项的三页遍历、嵌套关系、筛选路径、折叠与跨子页选择、批量安排的选中 ID、无变化轮询零 DOM 改动、变化行保留身份、过期响应隔离、键盘展开和 390px 布局。截图、报告写入忽略的 `test-results/task-hierarchy/`，不访问生产、模型或真实推送渠道。
 
 同时运行原有 `pagination.browser-check.mjs`、`project-versions.browser-check.mjs`、`requirement-iterations.browser-check.mjs` 验证平铺兼容、版本调整、追加迭代、历史分页和图文评审。
+
+界面专项使用两个带关联事项的主需求、一层追加迭代和独立条目，检查子项确实位于对应父级容器、树线可见、跨版本名称保留、标题占据主要宽度、键盘与勾选不会误开详情，以及 1600px、1024px、390px 下的布局。折叠、展开和平铺截图写入 `test-results/requirement-pool/`，视觉检查应同时查看完整桌面页和手机页，不能用接口测试代替。

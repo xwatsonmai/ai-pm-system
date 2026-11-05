@@ -19,7 +19,7 @@ const browser=await chromium.launch({headless:true}),page=await browser.newPage(
 const errors=[],requests=[];page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>requests.push(r.url()));
 async function api(path,body){const r=await fetch(base+'/api'+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const v=await r.json();assert(r.ok,JSON.stringify(v));return v;}
 const sql=(code,...args)=>execFileSync('python3',['-c',`import sqlite3,json,sys,time\ndb=sqlite3.connect(sys.argv[1])\n${code}\ndb.commit()`,join(data,'ai-pm.db'),...args]);
-const rows=()=>page.locator('.task-table tr[data-action=open-task]');
+const rows=()=>page.locator('[data-task-row][data-action=open-task]');
 try{
  for(let i=0;i<100;i++){try{if((await fetch(base+'/api/health')).ok)break;}catch{}await new Promise(done=>setTimeout(done,50));}
  const project=await api('/projects',{name:'层级需求验证',branch:'main'});
@@ -38,40 +38,40 @@ add('tree-grandchild','支付金额校验问题',kind='bug',parent_requirement_i
 for i in range(25):add('tree-other-%02d'%i,'独立需求 %02d'%i)
 `,JSON.stringify(root));
  const first=await api(`/projects/${project.id}/tasks?view=tree`);assert.equal(first.total,26);assert.equal(first.matching_total,73);assert.equal(first.items[0].children_count,46);assert.equal(first.items[0].description,'');
- await page.goto(base);await page.getByRole('button',{name:'需求池',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.task-table tr[data-action=open-task]').length===20);
+ await page.goto(base);await page.getByRole('button',{name:'需求池',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('[data-task-row][data-action=open-task]').length===20);
  assert.equal(await page.locator('[data-action=task-tree-toggle][aria-expanded=false]').count(),1);
  assert(!requests.some(url=>url.includes('tree_parent_id=')),'collapsed branches requested children');
  await page.screenshot({path:join(output,'collapsed-desktop.png')});
  const rootToggle=()=>page.locator(`[data-action=task-tree-toggle][data-id="${root.id}"]`);
- await rootToggle().focus();await page.keyboard.press('Enter');await page.locator('tr[data-id=tree-iteration]').waitFor();assert.equal(await page.locator('dialog').count(),0,'toggle opened detail');
+ await rootToggle().focus();await page.keyboard.press('Enter');await page.locator('[data-task-row][data-id=tree-iteration]').waitFor();assert.equal(await page.locator('dialog').count(),0,'toggle opened detail');
  assert.equal(await rows().count(),40);assert.equal(await page.locator('[aria-label=子项分页]').count(),1);
  const iterationToggle=page.locator('[data-action=task-tree-toggle][data-id=tree-iteration]');
- await iterationToggle.click();await page.locator('tr[data-id=tree-grandchild]').waitFor();assert.equal(await rows().count(),41);
- assert.match(await page.locator('tr[data-id=tree-iteration]').innerText(),/追加迭代/);assert.match(await page.locator('tr[data-id=tree-grandchild]').innerText(),/关联 Bug/);
+ await iterationToggle.click();await page.locator('[data-task-row][data-id=tree-grandchild]').waitFor();assert.equal(await rows().count(),41);
+ assert.match(await page.locator('[data-task-row][data-id=tree-iteration]').innerText(),/追加迭代/);assert.match(await page.locator('[data-task-row][data-id=tree-grandchild]').innerText(),/关联 Bug/);
  await page.screenshot({path:join(output,'expanded-desktop.png')});
- await page.locator('tr[data-id=tree-bug-44] input').check();
+ await page.locator('[data-task-row][data-id=tree-bug-44] input').check();
  await rootToggle().click();assert.equal(await rows().count(),20);assert.match(await page.locator('.task-selection').innerText(),/已选择 1 项/);
  await page.getByRole('button',{name:'安排目标版本',exact:true}).click();await page.locator('#pv-assign-form [data-selection-items] .pv-check').waitFor();
  assert.match(await page.locator('[data-selection-count]').innerText(),/已选择 1 项/);assert.match(await page.locator('[data-selection-items]').innerText(),/订单关联 Bug 44/);
  await page.getByRole('button',{name:'关闭',exact:true}).click();
- await rootToggle().click();await page.locator('tr[data-id=tree-bug-44]').waitFor();assert(await page.locator('tr[data-id=tree-bug-44] input').isChecked());
+ await rootToggle().click();await page.locator('[data-task-row][data-id=tree-bug-44]').waitFor();assert(await page.locator('[data-task-row][data-id=tree-bug-44] input').isChecked());
  await page.locator('#task-search').focus();
- await page.evaluate(id=>{window.oldShell=document.querySelector('.layout');window.oldSearch=document.querySelector('#task-search');window.oldRoot=document.querySelector(`tr[data-id="${id}"]`);window.oldChild=document.querySelector('tr[data-id=tree-bug-44]');window.mutations=0;window.observer=new MutationObserver(changes=>window.mutations+=changes.length);window.observer.observe(document.querySelector('#task-table'),{subtree:true,childList:true,attributes:true,characterData:true});},root.id);
+ await page.evaluate(id=>{window.oldShell=document.querySelector('.layout');window.oldSearch=document.querySelector('#task-search');window.oldRoot=document.querySelector(`[data-task-row][data-id="${id}"]`);window.oldChild=document.querySelector('[data-task-row][data-id=tree-bug-44]');window.mutations=0;window.observer=new MutationObserver(changes=>window.mutations+=changes.length);window.observer.observe(document.querySelector('#task-table'),{subtree:true,childList:true,attributes:true,characterData:true});},root.id);
  await page.waitForResponse(r=>r.url().includes('tree_parent_id=tree-iteration')&&r.ok(),{timeout:15000});
  assert.equal(await page.evaluate(()=>window.mutations),0,'unchanged poll mutated the task table');
  sql(`
 t=json.loads(db.execute("SELECT payload FROM tasks WHERE id='tree-bug-44'").fetchone()[0]);t['title']='订单关联 Bug 44 已更新';t['version']+=1
 db.execute('UPDATE tasks SET payload=?,version=? WHERE id=?',(json.dumps(t),t['version'],t['id']))
 `);
- await page.waitForFunction(()=>document.querySelector('tr[data-id=tree-bug-44]')?.textContent.includes('已更新'),{timeout:18000});
- assert(await page.evaluate(()=>window.oldShell===document.querySelector('.layout')&&window.oldSearch===document.activeElement&&window.oldRoot.isConnected&&window.oldChild===document.querySelector('tr[data-id=tree-bug-44]')&&window.oldChild.querySelector('input').checked));
+ await page.waitForFunction(()=>document.querySelector('[data-task-row][data-id=tree-bug-44]')?.textContent.includes('已更新'),{timeout:18000});
+ assert(await page.evaluate(()=>window.oldShell===document.querySelector('.layout')&&window.oldSearch===document.activeElement&&window.oldRoot.isConnected&&window.oldChild===document.querySelector('[data-task-row][data-id=tree-bug-44]')&&window.oldChild.querySelector('input').checked));
  await page.evaluate(()=>window.observer.disconnect());
  await page.locator('[data-action=task-tree-page][data-page="2"]').click();await page.waitForFunction(()=>document.querySelector('[aria-label=子项分页]')?.textContent.includes('第 2'));
  assert.match(await page.locator('.task-selection').innerText(),/已选择 1 项/);
  await page.locator('[data-action=task-tree-page][data-page="3"]').click();await page.waitForFunction(()=>document.querySelector('[aria-label=子项分页]')?.textContent.includes('第 3'));assert.equal(await rows().count(),26);
  await page.locator('[data-action=task-selection-clear]').click();assert.equal(await page.locator('.task-selection').count(),0);
- await page.locator('#task-search').fill('支付金额校验问题');await page.locator('tr[data-id=tree-grandchild]').waitFor();
- assert.equal(await rows().count(),3);assert.equal(await page.locator('.task-tree-context').count(),2);assert(await page.locator(`tr[data-id="${root.id}"] input`).isDisabled());assert.match(await page.locator('.queue-footer').innerText(),/1 项匹配/);
+ await page.locator('#task-search').fill('支付金额校验问题');await page.locator('[data-task-row][data-id=tree-grandchild]').waitFor();
+ assert.equal(await rows().count(),3);assert.equal(await page.locator('.task-tree-context').count(),2);assert(await page.locator(`[data-task-row][data-id="${root.id}"] input`).isDisabled());assert.match(await page.locator('.queue-footer').innerText(),/1 项匹配/);
  // A delayed old-filter child response must never replace the next flat view.
  let release,started,complete,held=false;const intercepted=new Promise(done=>started=done),completed=new Promise(done=>complete=done);
  await page.route('**/api/projects/*/tasks?*',async route=>{if(!held&&route.request().url().includes('tree_parent_id=')&&new URL(route.request().url()).searchParams.get('q')==='支付金额校验问题'){held=true;const response=await route.fetch();await new Promise(done=>{release=done;started();});await route.fulfill({response});complete();}else await route.continue();});
@@ -79,7 +79,7 @@ db.execute('UPDATE tasks SET payload=?,version=? WHERE id=?',(json.dumps(t),t['v
  // Trigger a reload with the same filter, then switch while the branch is pending.
  await rootToggle().click();await rootToggle().click();await intercepted;
  await page.getByRole('button',{name:'平铺展示',exact:true}).click();release();await completed;await page.unroute('**/api/projects/*/tasks?*');
- await page.waitForFunction(()=>document.querySelectorAll('.task-table tr[data-action=open-task]').length===1);
+ await page.waitForFunction(()=>document.querySelectorAll('[data-task-row][data-action=open-task]').length===1);
  assert.equal(await page.locator('.task-tree-context').count(),0);assert.equal(await page.locator('[data-action=task-tree-toggle]').count(),0);
  await page.locator('#task-search').fill('');await page.waitForFunction(()=>document.querySelector('[data-pager=tasks]')?.textContent.includes('73'));
  // A view-switch request finishing after navigation must not rebuild the new

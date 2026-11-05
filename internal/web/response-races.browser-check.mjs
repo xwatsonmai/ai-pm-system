@@ -29,17 +29,17 @@ try{
  const b=(await api(`/projects/${project.id}/tasks`,{title:'Requirement B',description:'B',request_id:'b'})).task;
  for(let i=0;i<45;i++)await api(`/tasks/${a.id}/actions`,{action:'report',report_kind:'progress',body:`ONLY_A_EVENT_${i}`,request_id:`hist-a-${i}`});
  const tasksURL=`${base}/?project=${project.id}&page=tasks`;
- await page.goto(tasksURL);await page.locator(`tr[data-id="${a.id}"]`).click();await page.locator('.detail-title').waitFor();
+ await page.goto(tasksURL);await page.locator(`[data-task-row][data-id="${a.id}"]`).click();await page.locator('.detail-title').waitFor();
  let held=await holdResponse(u=>u.pathname.endsWith('/events')&&u.searchParams.get('task_id')===a.id&&u.searchParams.get('page')==='2');
  await page.locator(`[data-list="detail-events:${a.id}"][data-page="2"]`).click();await held.begun;
- await page.getByRole('button',{name:'关闭',exact:true}).click();await page.locator(`tr[data-id="${b.id}"]`).click();await page.locator('.detail-title').waitFor();
+ await page.getByRole('button',{name:'关闭',exact:true}).click();await page.locator(`[data-task-row][data-id="${b.id}"]`).click();await page.locator('.detail-title').waitFor();
  const bEvents=await page.locator('#task-detail-events').innerText();await held.release();
  assert.equal(await page.locator('.detail-title').innerText(),'Requirement B');assert.equal(await page.locator('#task-detail-events').innerText(),bEvents,'A events overwrote B');
  // The original task opener must not replace a newer task modal either.
  await page.getByRole('button',{name:'关闭',exact:true}).click();
  held=await holdResponse(u=>u.pathname===`/api/tasks/${a.id}`&&u.searchParams.get('compact')==='true');
- await page.locator(`tr[data-id="${a.id}"]`).click();await held.begun;await page.locator(`tr[data-id="${b.id}"]`).click();await page.locator('.detail-title').waitFor();await held.release();assert.equal(await page.locator('.detail-title').innerText(),'Requirement B');
- await page.getByRole('button',{name:'关闭',exact:true}).click();await page.locator(`tr[data-id="${a.id}"]`).click();await page.locator('.detail-title').waitFor();
+ await page.locator(`[data-task-row][data-id="${a.id}"]`).click();await held.begun;await page.locator(`[data-task-row][data-id="${b.id}"]`).click();await page.locator('.detail-title').waitFor();await held.release();assert.equal(await page.locator('.detail-title').innerText(),'Requirement B');
+ await page.getByRole('button',{name:'关闭',exact:true}).click();await page.locator(`[data-task-row][data-id="${a.id}"]`).click();await page.locator('.detail-title').waitFor();
  await page.locator(`[data-list="detail-events:${a.id}"][data-page="2"]`).click();await page.waitForFunction(()=>document.querySelector('#task-detail-events [data-pager]')?.textContent.includes('第 2'));
  held=await holdResponse(u=>u.pathname.endsWith('/events')&&u.searchParams.get('task_id')===a.id&&u.searchParams.get('page')==='1');
  await page.locator(`[data-list="detail-events:${a.id}"][data-page="1"]`).click();await held.begun;

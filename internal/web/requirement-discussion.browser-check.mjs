@@ -77,7 +77,7 @@ try{
  const token=(await api(`/projects/${project.id}/tokens`,{name:'本地开发'})).secret;
  const r=await fetch(base+'/mcp',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',Accept:'application/json, text/event-stream','MCP-Protocol-Version':'2025-11-25'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'task_claim',arguments:{task_id:created.id,branch:'feature/location',request_id:'claim'}}})});const claimed=await r.json();assert(!claimed.error&&!claimed.result.isError,JSON.stringify(claimed));
  let task=(await api(`/tasks/${created.id}`)).task;
- await page.goto(base);await page.getByRole('button',{name:'需求池',exact:true}).click();await page.locator('.task-table tr').filter({hasText:task.title}).click();
+ await page.goto(base);await page.getByRole('button',{name:'需求池',exact:true}).click();await page.locator('[data-task-row]').filter({hasText:task.title}).click();
  await page.getByRole('button',{name:'问 Agent',exact:true}).click();
  await page.locator('.rc-event').filter({hasText:'认领了开发'}).waitFor();
  await api(`/tasks/${task.id}/actions`,{action:'submit',revision:task.revision,request_id:'submit',submission:{summary:'完成国家级定位',sha:baseline,environment:'本地隔离环境',tests:'定向自测'}});

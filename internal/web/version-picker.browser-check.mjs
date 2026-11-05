@@ -40,9 +40,9 @@ try{
  const {project,versions}=projects.at(-1),second=(await api(`/projects/${project.id}/version-options?page=2&page_size=20`)).items[0];
  for(let n=0;n<43;n++)await api(`/projects/${project.id}/tasks`,{title:`Task ${n}`,description:'picker fixture',request_id:crypto.randomUUID()});
  await tasks(project);await page.locator('[data-list=tasks][data-page="2"]').click();await page.waitForFunction(()=>document.querySelector('[data-pager=tasks]')?.textContent.includes('第 2'));
- const before=await page.locator('.task-table tbody tr').evaluateAll(nodes=>nodes.map(node=>node.dataset.id));await open(filter());
+ const before=await page.locator('[data-task-row]').evaluateAll(nodes=>nodes.map(node=>node.dataset.id));await open(filter());
  await filter().locator('[data-version-page="2"]').click();await filter().locator(`[data-version-options] option[value="${second.id}"]`).waitFor({state:'attached'});
- assert.deepEqual(await page.locator('.task-table tbody tr').evaluateAll(nodes=>nodes.map(node=>node.dataset.id)),before,'option paging changed task rows');assert((await page.locator('[data-pager=tasks]').innerText()).includes('第 2'));
+ assert.deepEqual(await page.locator('[data-task-row]').evaluateAll(nodes=>nodes.map(node=>node.dataset.id)),before,'option paging changed task rows');assert((await page.locator('[data-pager=tasks]').innerText()).includes('第 2'));
  await filter().locator('[data-version-options]').selectOption(second.id);assert.equal(await filter().locator('[name=task_version_filter]').inputValue(),second.id);
  await open(filter());await filter().locator('[data-version-page="1"]').click();await page.waitForFunction(()=>document.querySelector('[data-task-version-picker] .version-picker-pages span')?.textContent==='1 / 2');
  assert.equal(await filter().locator('[data-version-options]').inputValue(),second.id,'selected option was lost on another option page');

@@ -30,11 +30,11 @@ try {
  await api(path+'/actions',{action:'ready',request_id:'ready'});
  const current=async()=> (await api(path)).task;
  await page.goto(base);await page.getByRole('button',{name:'需求池',exact:true}).click();
- await page.locator('.task-table tbody tr').click();await page.locator('.detail-title').waitFor();
+ await page.locator('[data-task-row]').click();await page.locator('.detail-title').waitFor();
  assert.equal(await page.getByRole('button',{name:'开始处理',exact:true}).count(),0,'web must not offer claiming');
  const developer=await api(`/projects/${project.id}/tokens`,{name:'开发客户端'});
  await claim(developer.secret,{task_id:task.id,request_id:'claim'});
- await page.goto(base);await page.getByRole('button',{name:'需求池',exact:true}).click();await page.locator('.task-table tbody tr').click();
+ await page.goto(base);await page.getByRole('button',{name:'需求池',exact:true}).click();await page.locator('[data-task-row]').click();
  const submit=async version=>{
   await page.getByRole('button',{name:'提交开发结果',exact:true}).click();
   await page.locator('#submit-form [name=branch]').fill('feature/release');
@@ -52,7 +52,7 @@ try {
  assert.equal(await page.locator('#overlays').getByRole('button',{name:'开始验收',exact:true}).count(),0);
  await page.screenshot({path:join(output,'pending-desktop.png')});
  await page.getByRole('button',{name:'关闭',exact:true}).click();
- await page.locator('#task-filter').selectOption('pending_release');assert.equal(await page.locator('.task-table tbody tr').count(),1);
+ await page.locator('#task-filter').selectOption('pending_release');assert.equal(await page.locator('[data-task-row]').count(),1);
  await page.getByRole('button',{name:'验收与交付',exact:true}).click();
  assert.equal(await page.locator('#overlays').getByRole('button',{name:'开始验收',exact:true}).count(),0);
  await page.locator('#page').getByRole('button',{name:'确认已上线',exact:true}).click();
@@ -90,7 +90,7 @@ try {
  await page.locator('.detail-meta .badge.done').waitFor();task=await current();assert.equal(task.status,'done');assert.equal(task.deployment.sha,'release-v2');
  ctx=await api(path);assert.equal(ctx.events.filter(e=>e.kind==='mark_deployed').length,2);assert(ctx.events.some(e=>e.kind==='rework'));
  await page.reload();
- await page.getByRole('button',{name:'打开导航',exact:true}).click();await page.getByRole('button',{name:'需求池',exact:true}).click();await page.locator('#task-filter').selectOption('done');await page.locator('.task-table tbody tr').click();
+ await page.getByRole('button',{name:'打开导航',exact:true}).click();await page.getByRole('button',{name:'需求池',exact:true}).click();await page.locator('#task-filter').selectOption('done');await page.locator('[data-task-row]').click();
  await page.getByRole('heading',{name:'最近一次上线 · R1',exact:true}).waitFor();
  assert.match(await page.locator('.drawer').innerText(),/build-43/);
  await page.getByRole('button',{name:'关闭',exact:true}).click();

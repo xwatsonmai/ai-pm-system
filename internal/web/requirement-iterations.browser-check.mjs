@@ -202,7 +202,7 @@ try {
   await page.locator("#task-form [name=title]").fill("普通新建需求的草稿");
   await page.locator(".requirement-prose").fill("普通草稿不可覆盖迭代草稿");
   await page.getByRole("button", { name: "暂存并关闭", exact: true }).click();
-  await page.locator(`tr[data-id="${source.id}"]`).click();
+  await page.locator(`[data-task-row][data-id="${source.id}"]`).click();
   await page.getByRole("button", { name: "追加迭代", exact: true }).click();
   assert.equal(await page.locator("#task-form [name=title]").inputValue(), "");
   await page.locator('.milestone-association [data-version-trigger]').waitFor();
@@ -229,7 +229,7 @@ try {
     .locator(".nav")
     .getByRole("button", { name: "需求池", exact: true })
     .click();
-  await page.locator(`tr[data-id="${source.id}"]`).click();
+  await page.locator(`[data-task-row][data-id="${source.id}"]`).click();
   await page.getByRole("button", { name: "追加迭代", exact: true }).click();
   assert.equal(
     await page.locator("#task-form [name=title]").inputValue(),
@@ -260,7 +260,7 @@ try {
     .locator(".nav")
     .getByRole("button", { name: "需求池", exact: true })
     .click();
-  await page.locator(`tr[data-id="${source.id}"]`).click();
+  await page.locator(`[data-task-row][data-id="${source.id}"]`).click();
   await page.getByRole("button", { name: "追加迭代", exact: true }).click();
   await page.locator("#task-form button[type=submit]").click();
   await page.locator("#task-form").waitFor({ state: "detached" });
@@ -299,7 +299,7 @@ try {
     .click();
   const parentToggle=page.locator(`[data-action="task-tree-toggle"][data-id="${source.id}"]`);
   if(await parentToggle.getAttribute("aria-expanded")==="false")await parentToggle.click();
-  await page.locator(`tr[data-id="${child.id}"]`).click();
+  await page.locator(`[data-task-row][data-id="${child.id}"]`).click();
   assert.equal(
     await page.getByRole("button", { name: "追加迭代", exact: true }).count(),
     0,
@@ -319,7 +319,7 @@ try {
     .locator(".nav")
     .getByRole("button", { name: "需求池", exact: true })
     .click();
-  await page.locator(`tr[data-id="${child.id}"]`).click();
+  await page.locator(`[data-task-row][data-id="${child.id}"]`).click();
   await page.getByRole("button", { name: "追加迭代", exact: true }).click();
   await page.locator("#task-form").waitFor();
   assert.equal(await page.locator(".iteration-snapshot").count(), 2);
@@ -357,7 +357,7 @@ try {
     .locator(".nav")
     .getByRole("button", { name: "需求池", exact: true })
     .click();
-  await page.locator(`tr[data-id="${source.id}"]`).click();
+  await page.locator(`[data-task-row][data-id="${source.id}"]`).click();
   await page.locator(".iteration-history").waitFor();
   assert.equal(await page.locator(".iteration-history-row").count(), 11);
   await page.getByRole("button", { name: "加载更多迭代", exact: true }).click();

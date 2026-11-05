@@ -52,7 +52,7 @@ try{
  let task=(await api(`/projects/${project.id}/context`)).tasks.find(t=>t.title==='子路径下的图文需求');
  assert.match(task.description,/\]\(\/api\/projects\//);assert.doesNotMatch(task.description,/\/zhiqu\/api/);
  await page.getByRole('button',{name:'需求池',exact:true}).click();
- await page.locator('.task-table tbody tr').filter({hasText:'子路径下的图文需求'}).click();await page.locator('.detail-title').waitFor();
+ await page.locator('[data-task-row]').filter({hasText:'子路径下的图文需求'}).click();await page.locator('.detail-title').waitFor();
  const shown=page.locator('dialog .markdown-content img').first();
  assert.match(await shown.getAttribute('src'),/^\/zhiqu\/api\/projects\//);assert(await imageLoaded(shown),'saved image does not load in the detail');
  await page.screenshot({path:join(output,'detail.png')});

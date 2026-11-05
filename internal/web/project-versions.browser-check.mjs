@@ -368,7 +368,7 @@ try {
   await nav("需求池");
   await page.locator('[data-task-version-picker] [data-version-trigger]').click();
   await page.locator('[data-task-version-picker] [data-version-options]').selectOption(versionID);
-  await page.locator(`tr[data-id="${ready.id}"]`).click();
+  await page.locator(`[data-task-row][data-id="${ready.id}"]`).click();
   await page.getByRole("button", { name: "开始验收", exact: true }).waitFor();
   assert(
     await page.evaluate(

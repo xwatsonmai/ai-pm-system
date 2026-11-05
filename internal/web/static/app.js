@@ -5,6 +5,7 @@ import { renderMarkdown } from "./markdown.mjs";
 import { mountVersionPicker } from "./version-picker.mjs";
 import { pagerHTML, pageQuery, patchKeyedHTML } from "./pagination.mjs";
 import { createTaskHierarchy } from "./task-hierarchy.mjs";
+import { requirementPoolHTML } from "./requirement-pool.mjs";
 const taskTree = createTaskHierarchy();
 import { patchHTML, mergeRunRefresh } from "./dom-update.mjs";
 import { requirementFormHTML, mountRequirementEditor } from "./requirement-editor.mjs";
@@ -652,37 +653,14 @@ function overview() {
 function filteredTasks() { return state.context?.tasks || []; }
 function tasksPagerHTML(){return pagerHTML(listResult('tasks'),'tasks',{unit:state.taskHierarchy?'组':'项'});}
 function tasksTable() {
- const result=listResult('tasks'),tasks=state.taskHierarchy?result.items:filteredTasks();
- if(!tasks.length)return empty("没有符合条件的需求","调整筛选，或创建一个新需求。");
- const row=({node:t,depth=0,expanded=false})=>{
-  const context=state.taskHierarchy&&t.matches_filter===false;
-  const toggle=state.taskHierarchy?(t.children_count?`<button type="button" class="task-tree-toggle" data-action="task-tree-toggle" data-id="${escape(t.id)}" data-depth="${depth}" aria-expanded="${expanded}" aria-label="${expanded?'收起':'展开'} ${escape(t.title)} 的子项">${icon('chevron')}</button>`:'<span class="task-tree-spacer" aria-hidden="true"></span>'):'';
-  const relation=state.taskHierarchy&&t.tree_parent_id?`<span class="task-relation">${t.tree_relation==='bug'?'关联 Bug':'追加迭代'}</span>`:'';
-  return `<tr data-key="${escape(t.id)}" tabindex="0" data-action="open-task" data-id="${escape(t.id)}" class="${context?'task-tree-context':''}"><td><input type="checkbox" data-plan-task value="${escape(t.id)}" aria-label="选择需求 ${escape(t.title)}" ${taskFinished(t)||t.status==='review'||context?'disabled':''} ${taskTree.isSelected(t.id)?'checked':''}></td><td>${status(t)}</td><td class="task-title"><div class="task-tree-title" style="--task-depth:${Math.min(depth,6)}">${toggle}<div class="task-tree-content"><div>${relation}<span class="badge ${t.kind==='bug'?'bug':''}">${t.kind==='bug'?(t.parent_requirement_id?'需求测试 Bug':'平台 Bug'):'迭代需求'}</span> ${escape(t.title)}${t.blocker?' <span class="badge blocked">阻塞</span>':''}${context?' <span class="task-context-label">父级上下文</span>':''}</div><div class="task-id">${short(t.id)}${t.iteration?` · 迭代自 ${short(t.iteration.parent_task_id)}`:''} · R${t.revision} · ${escape(versionName(state.context.project_versions||[],t.project_version_id))}${state.taskHierarchy&&t.children_count?` <span class="task-child-count">${t.children_count} 个直接子项${!expanded&&t.pending_count?` · 含待确认 ${t.pending_count} 项`:''}</span>`:''}</div></div></div></td><td><span class="priority-mark ${t.priority}">${t.priority==='now'?'▰▰▰':t.priority==='next'?'▰▰▱':'▰▱▱'}</span> ${priorities[t.priority]}</td><td>${escape(t.owner||'未认领')}</td><td class="muted small">${date(t.updated_at)}</td></tr>`;
- };
- const treeRow=r=>{
-  if(r.kind==='task')return row(r);
-  let content=r.kind==='error'?`${escape(r.text)} ${action('task-tree-retry','重试','ghost')}`:'正在加载子项…';
-  if(r.kind==='page'){const v=r.result,pages=Math.ceil(v.total/v.page_size);content=`<span>子项 ${v.total} 项 · 第 ${v.page} / ${pages} 页</span><button type="button" data-action="task-tree-page" data-id="${escape(r.parent)}" data-page="${v.page-1}" ${v.page<=1?'disabled':''}>上一页</button><button type="button" data-action="task-tree-page" data-id="${escape(r.parent)}" data-page="${v.page+1}" ${v.page>=pages?'disabled':''}>下一页</button>`;}
-  return `<tr class="task-tree-extra" data-key="${r.kind}:${escape(r.parent)}"><td></td><td colspan="5"><div class="task-child-pager" style="--task-depth:${Math.min(r.depth,6)}" ${r.kind==='page'?'role="group" aria-label="子项分页"':'role="status"'}>${content}</div></td></tr>`;
- };
- const table=items=>`<div class="table-scroll"><table class="task-table"><thead><tr><th class="task-checkbox">选择</th><th>状态</th><th>需求</th><th>优先级</th><th>负责人</th><th>更新</th></tr></thead><tbody>${state.taskHierarchy?taskTree.rows(items).map(treeRow).join(''):items.map(node=>row({node})).join('')}</tbody></table></div>`;
- const selected=taskTree.selectedIDs().length;
- const selection=selected?`<div class="task-selection" data-key="task-selection">已选择 ${selected} 项（含折叠或子项其他页中的选择）${action('task-selection-clear','清空选择','ghost')}</div>`:'';
- let content;
- if(!state.versionGrouping||state.versionFilter)content=table(tasks);
- else{
-  const groups=[...new Set(tasks.map(t=>t.project_version_id||''))].map(id=>({id,name:versionName(state.context.project_versions||[],id)}));
-  content=groups.map(g=>{const items=tasks.filter(t=>(t.project_version_id||'')===g.id);return `<section class="pv-pool-group" data-key="version:${escape(g.id)}"><div class="pv-pool-heading"><h2>${escape(g.name)} <span class="muted small">本页 ${items.length} ${state.taskHierarchy?'组':'项'}</span></h2>${g.id&&allowedPage('versions',state.project_access)?action('pv-open','查看版本','ghost',`data-id="${escape(g.id)}"`):''}</div>${table(items)}</section>`;}).join('');
- }
- return selection+content+`<div class="queue-footer">${state.taskHierarchy?`${result.matching_total} 项匹配 · ${result.total} 组主需求 · 按主需求分页，子项展开后分页`:`${result.total} 个需求`}</div>`;
+ return requirementPoolHTML({result:listResult('tasks'),tasks:filteredTasks(),hierarchy:state.taskHierarchy,groupByVersion:state.versionGrouping,versionFilter:state.versionFilter,treeRows:items=>taskTree.rows(items),isSelected:id=>taskTree.isSelected(id),selectedCount:taskTree.selectedIDs().length,statusHTML:status,versionLabel:id=>versionName(state.context.project_versions||[],id),canViewVersion:allowedPage('versions',state.project_access),date});
 }
 function mountTaskVersionFilter(){
  const host=$('[data-task-version-picker]');if(!host)return;
  mountVersionPicker(host,{api,projectID:state.project.id,selected:state.versionFilter,name:'task_version_filter',label:'筛选目标版本',status:'',emptyLabel:'所有版本',compact:true,onChange:value=>{state.versionFilter=value;setListPage('tasks');void loadBusinessPage().catch(e=>toast(e.message));}});
 }
 function tasksPage() {
-  return `<div class="page">${heading("需求池", "集中管理迭代需求与 Bug 修复。评审在后台进行，有结论后标记待确认。", action("new-task", icon("plus") + " 创建需求", "primary"))}<div class="toolbar"><input id="task-search" placeholder="搜索标题、描述或负责人…" aria-label="搜索需求" value="${escape(state.search)}"><select id="task-filter" aria-label="筛选状态"><option value="">所有状态</option><option value="attention" ${state.filter === "attention" ? "selected" : ""}>需要我处理</option><option value="review_pending" ${state.filter === "review_pending" ? "selected" : ""}>待确认${pendingConfirmations() ? `（${pendingConfirmations()}）` : ""}</option>${Object.entries(
+  return `<div class="page requirement-pool-page">${heading("需求池", "管理需求、Bug 与追加迭代。", action("new-task", icon("plus") + " 创建需求", "primary"))}<div class="toolbar"><input id="task-search" placeholder="搜索标题、描述或负责人…" aria-label="搜索需求" value="${escape(state.search)}"><select id="task-filter" aria-label="筛选状态"><option value="">所有状态</option><option value="attention" ${state.filter === "attention" ? "selected" : ""}>需要我处理</option><option value="review_pending" ${state.filter === "review_pending" ? "selected" : ""}>待确认${pendingConfirmations() ? `（${pendingConfirmations()}）` : ""}</option>${Object.entries(
     states,
   )
     .map(
@@ -691,7 +669,7 @@ function tasksPage() {
     )
     .join(
       "",
-    )}</select><select id="kind-filter" aria-label="筛选类型"><option value="">所有类型</option><option value="requirement" ${state.kind === "requirement" ? "selected" : ""}>迭代需求</option><option value="bug" ${state.kind === "bug" ? "selected" : ""}>Bug 修复</option></select><div data-task-version-picker></div></div><div class="pv-pool-tools">${allowedPage("versions",state.project_access)?action("pv-assign-selected","安排目标版本"):""}${action("toggle-version-group",state.versionGrouping?"取消版本分组":"按版本分组","ghost")}<div class="task-view-switch" role="group" aria-label="需求展示方式">${["tree","flat"].map(view=>`<button type="button" data-action="task-list-view" data-view="${view}" aria-pressed="${state.taskHierarchy===(view==='tree')}">${view==='tree'?'层级展示':'平铺展示'}</button>`).join('')}</div></div><div id="task-table">${tasksTable()}</div>${tasksPagerHTML()}</div>`;
+    )}</select><select id="kind-filter" aria-label="筛选类型"><option value="">所有类型</option><option value="requirement" ${state.kind === "requirement" ? "selected" : ""}>迭代需求</option><option value="bug" ${state.kind === "bug" ? "selected" : ""}>Bug 修复</option></select><div data-task-version-picker></div></div><div class="pv-pool-tools">${allowedPage("versions",state.project_access)?action("pv-assign-selected","安排目标版本"):""}${action("toggle-version-group","版本分组","ghost",`aria-pressed="${state.versionGrouping}"`)}<div class="task-view-switch" role="group" aria-label="需求展示方式">${["tree","flat"].map(view=>`<button type="button" data-action="task-list-view" data-view="${view}" aria-pressed="${state.taskHierarchy===(view==='tree')}">${view==='tree'?'层级展示':'平铺展示'}</button>`).join('')}</div></div><div id="task-table">${tasksTable()}</div>${tasksPagerHTML()}</div>`;
 }
 function reviewsPage() {
   const tasks = state.context.tasks.filter((t) => t.status === "review");
@@ -1624,7 +1602,7 @@ async function navigate(page, {historyMode='push'}={}) {
   pollActiveRuns();
 }
 document.addEventListener("click", async (event) => {
-  if(event.target.matches('input[type=checkbox][data-plan-task]'))return;
+  if(event.target.matches('input[type=checkbox][data-plan-task]')||event.target.closest('.pool-select-hit'))return;
   if (!event.target.closest(".project-picker")) closeProjectMenu();
   const button = event.target.closest("[data-action]");
   if (!button) return;

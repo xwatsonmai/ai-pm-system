@@ -68,7 +68,7 @@ try{
   report.permissions='角色创建/改名、成员角色与职责独立保存、限制菜单/直达/API，普通用户使用独立会话验证';
   report.revocation='已有详情和菜单在撤权后清除，后端立即拒绝；删除已分配角色时迁移成员并保留职责';
 
-  await nav(admin,'tasks');await admin.locator('.task-table tbody tr').first().waitFor();assert.equal(await admin.locator('.task-table tbody tr').count(),20);
+  await nav(admin,'tasks');await admin.locator('[data-task-row]').first().waitFor();assert.equal(await admin.locator('[data-task-row]').count(),20);
   const response=await api(admin,`/projects/${project.id}/tasks?page=2&page_size=20`);assert.equal(response.items.length,20);assert.equal(response.total,43);assert(response.items.every(t=>!t.description),'page query must not return full task documents');
   report.pagination='43条真实需求，列表首屏20条，第二页20条，响应为当前页摘要';
 

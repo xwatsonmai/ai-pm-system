@@ -25,7 +25,7 @@ try{
  for(let n=0;n<100;n++){try{if((await fetch(base+'/api/health')).ok)break}catch{}await new Promise(done=>setTimeout(done,50))}
  const project=await api('/projects',{name:'需求结束分支验证',branch:'main'});
  async function make(stage,title){let {task}=await api(`/projects/${project.id}/tasks`,{title,description:'原始内容必须保留',acceptance:['验证条件'],request_id:`create-${++seq}`});if(stage==='clarify')return task;task=(await action(task,'ready')).task;if(stage==='ready')return task;task=(await mcpClaim(task)).task;if(stage==='doing')return task;task=(await action(task,'submit',{revision:task.revision,submission:{summary:'本地测试开发结果',sha:'fixture-v1',tests:'fixture passed'}})).task;task=(await action(task,'test_pass',{version:task.version,test_verification:{revision:task.revision,sha:task.submission.sha,environment:'isolated-fixture',note:'产品验证通过'}})).task;if(stage==='pending_release')return task;return (await action(task,'mark_deployed',{deployment:{revision:task.revision,sha:'fixture-v1',environment:'isolated-fixture',body:'仅模拟上线记录'}})).task;}
- async function openTask(task){await page.goto(base);await page.getByRole('button',{name:'需求池',exact:true}).click();await page.locator('.task-table tbody tr').filter({hasText:task.title}).click();await page.locator('.detail-title').waitFor()}
+ async function openTask(task){await page.goto(base);await page.getByRole('button',{name:'需求池',exact:true}).click();await page.locator('[data-task-row]').filter({hasText:task.title}).click();await page.locator('.detail-title').waitFor()}
  let savedForReopen;
  for(const stage of stages)for(const operation of ['close','decline']){
   const task=await make(stage,`${stage}-${operation}`),label=operation==='close'?'关闭需求':'拒绝需求',status=operation==='close'?'closed':'rejected';
