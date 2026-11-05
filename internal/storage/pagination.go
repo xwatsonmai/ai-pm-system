@@ -16,3 +16,8 @@ type PagedQueries interface {
 	QueryTodos(context.Context, string, bool, domain.PageQuery, []string) (domain.Page[json.RawMessage], error)
 	QueryReviewSummaries(context.Context, []string) ([]domain.RequirementReviewSummary, error)
 }
+
+// TaskTreeQueries keeps the hierarchy extension optional for other adapters.
+type TaskTreeQueries interface {
+	QueryTaskTree(context.Context, string, domain.TaskTreeQuery) (domain.TaskTreePage, error)
+}

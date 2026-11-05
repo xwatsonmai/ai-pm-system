@@ -61,13 +61,7 @@ func queryJSONPage(c context.Context, d *DB, selectSQL, from, where, order strin
 	}
 	return out, tx.Commit()
 }
-func (d *DB) QueryTasks(c context.Context, p string, q domain.TaskListQuery) (domain.Page[domain.Task], error) {
-	var out domain.Page[domain.Task]
-	normalized, e := q.PageQuery.Normalized()
-	if e != nil {
-		return out, e
-	}
-	q.PageQuery = normalized
+func taskListWhere(p string, q domain.TaskListQuery) (string, []any, error) {
 	where := "t.project_id=?"
 	args := []any{p}
 	switch q.Status {
@@ -83,7 +77,7 @@ func (d *DB) QueryTasks(c context.Context, p string, q domain.TaskListQuery) (do
 	default:
 		for _, status := range strings.Split(q.Status, ",") {
 			if !strings.Contains(",clarify,ready,doing,aligning,testing,fixing,retest,verifying,resolved,pending_release,review,done,closed,rejected,canceled,", ","+status+",") {
-				return out, errors.New("无效的状态筛选")
+				return "", nil, errors.New("无效的状态筛选")
 			}
 		}
 		marks := []string{}
@@ -95,7 +89,7 @@ func (d *DB) QueryTasks(c context.Context, p string, q domain.TaskListQuery) (do
 	}
 	if q.Kind != "" {
 		if q.Kind != "bug" && q.Kind != "requirement" {
-			return out, errors.New("无效的类型筛选")
+			return "", nil, errors.New("无效的类型筛选")
 		}
 		where += " AND json_extract(t.payload,'$.kind')=?"
 		args = append(args, q.Kind)
@@ -115,6 +109,19 @@ func (d *DB) QueryTasks(c context.Context, p string, q domain.TaskListQuery) (do
 	if q.Query != "" {
 		where += " AND instr(lower(COALESCE(json_extract(t.payload,'$.title'),'')||' '||COALESCE(json_extract(t.payload,'$.description'),'')||' '||COALESCE(json_extract(t.payload,'$.owner'),'')||' '||t.id),lower(?))>0"
 		args = append(args, q.Query)
+	}
+	return where, args, nil
+}
+func (d *DB) QueryTasks(c context.Context, p string, q domain.TaskListQuery) (domain.Page[domain.Task], error) {
+	var out domain.Page[domain.Task]
+	normalized, e := q.PageQuery.Normalized()
+	if e != nil {
+		return out, e
+	}
+	q.PageQuery = normalized
+	where, args, e := taskListWhere(p, q)
+	if e != nil {
+		return out, e
 	}
 	raw, e := queryJSONPage(c, d, taskListProjection, taskJoin, where, "COALESCE(json_extract(t.payload,'$.updated_at'),0) DESC,t.id DESC", args, q.PageQuery)
 	if e != nil {
