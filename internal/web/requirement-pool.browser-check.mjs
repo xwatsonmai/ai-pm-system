@@ -50,6 +50,15 @@ db.execute("INSERT INTO requirement_reviews(task_id,version,payload) VALUES('ite
  await page.setViewportSize({width:1600,height:1180});await page.goto(base);await page.getByRole('button',{name:'需求池',exact:true}).click();
  await page.locator(`[data-task-row][data-id="${root.id}"]`).waitFor();
  assert.equal(await page.locator('.pool-family.pool-has-children').count(),2);assert.equal(await page.locator('.pool-branch').count(),0);
+ const weight=await page.evaluate(parentID=>{
+  const measure=id=>{
+   const row=document.querySelector(`[data-task-row][data-id="${id}"]`),title=getComputedStyle(row.querySelector('.pool-title')),rs=getComputedStyle(row),family=getComputedStyle(row.parentElement);
+   return {font:title.fontSize,weight:title.fontWeight,lineHeight:title.lineHeight,color:title.color,padding:rs.padding,background:rs.backgroundColor,height:row.getBoundingClientRect().height,familyBorder:family.borderLeftWidth,familyRadius:family.borderRadius,familyBackground:family.backgroundColor,familyMargin:family.margin};
+  };
+  return {withChildren:measure(parentID),independent:measure('item-access')};
+ },root.id);
+ assert.deepEqual(weight.withChildren,weight.independent,'relationships must not give a requirement more visual weight');
+
  await page.evaluate(async()=>{await Promise.all([...document.querySelectorAll('.pool-branch')].flatMap(el=>el.getAnimations()).map(animation=>animation.finished.catch(()=>{})));document.activeElement?.blur();scrollTo(0,0);});await page.screenshot({path:join(output,'desktop-collapsed.png'),fullPage:true});
  const toggle=id=>page.locator(`[data-action=task-tree-toggle][data-id="${id}"]`);
  await toggle(root.id).focus();await page.keyboard.press('Enter');await page.locator('[data-task-row][data-id=bug-payment]').waitFor();
@@ -95,6 +104,6 @@ v=json.loads(db.execute('SELECT payload FROM project_versions WHERE id=?',(sys.a
  await page.setViewportSize({width:1024,height:900});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  await page.setViewportSize({width:1600,height:1180});await page.getByRole('button',{name:'层级展示',exact:true}).click();await page.locator('[data-task-row][data-id=bug-service]').waitFor();
  assert.deepEqual(errors,[]);assert(!requests.some(url=>url.endsWith('/context')));
- const report={passed:true,hierarchy_containment:true,visible_connectors:line,desktop_title_geometry:geometry,mobile_no_horizontal_scroll:true,long_titles_and_versions_fit:true,selection_label_and_keyboard:true,cross_version_visible:true,errors,preview:keepPreview?base+`/?page=tasks&project=${project.id}`:null};
+ const report={passed:true,equal_top_level_weight:weight,hierarchy_containment:true,visible_connectors:line,desktop_title_geometry:geometry,mobile_no_horizontal_scroll:true,long_titles_and_versions_fit:true,selection_label_and_keyboard:true,cross_version_visible:true,errors,preview:keepPreview?base+`/?page=tasks&project=${project.id}`:null};
  await writeFile(join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));passed=true;
 }catch(error){console.error('BROWSER',errors,log,await page.locator('body').innerText());throw error;}finally{await browser.close();if(keepPreview&&passed){server.unref();console.log('Preview retained at '+base);}else{server.kill('SIGTERM');await stopped;await rm(data,{recursive:true,force:true});}}
