@@ -61,7 +61,7 @@ try{
  await page.route(`**/api/projects/${project.id}/tasks`,async route=>{if(route.request().method()==='POST'&&!dropped){dropped=true;await route.fetch();await route.abort('failed');}else await route.continue();});
  await page.locator('#task-form button[type=submit]').click();await page.locator('#task-form .form-error').filter({hasText:/fetch|请求|网络|Failed/i}).waitFor();
  await page.getByRole('button',{name:'暂存并关闭',exact:true}).click();await page.reload();await page.locator('.topbar [data-action=new-task]').click();await prose.waitFor();
- await page.locator('#task-form button[type=submit]').click();await page.locator('#task-form').waitFor({state:'detached'});assert.equal(await page.locator('dialog').count(),0);await page.getByRole('button',{name:'需求池',exact:true}).click();await page.locator('.task-table tbody tr').filter({hasText:'订单退款：补全部分退款流程'}).click();await page.locator('.detail-title').waitFor();
+ await page.locator('#task-form button[type=submit]').click();await page.locator('#task-form').waitFor({state:'detached'});assert.equal(await page.locator('dialog').count(),0);await page.getByRole('button',{name:'需求池',exact:true}).click();await page.locator('[data-task-row]').filter({hasText:'订单退款：补全部分退款流程'}).click();await page.locator('.detail-title').waitFor();
  let context=await api(`/projects/${project.id}/context`);const tasks=context.tasks.filter(t=>t.title==='订单退款：补全部分退款流程');assert.equal(tasks.length,1);let task=tasks[0];
  assert.equal(task.attachments.length,2);assert.match(task.description,/!\[错误截图\.png\]/);assert.match(task.description,/\|/);assert.equal(task.acceptance.length,2);
  assert.equal(await page.locator('.requirement-description img').count(),1);assert.equal(await page.locator('.requirement-description table').count(),1);
@@ -74,8 +74,8 @@ try{
  task=(await api(`/tasks/${task.id}`)).task;assert.equal(task.kind,'bug');assert.equal(task.attachments.length,1);assert.equal(task.revision,2);assert(!task.description.includes('错误截图.png'));
  await page.getByRole('button',{name:'关闭',exact:true}).click();
  await page.getByRole('button',{name:'需求池',exact:true}).click();
- await page.locator('#kind-filter').selectOption('bug');await page.waitForFunction(()=>document.querySelectorAll('.task-table tbody tr').length===1);assert.equal(await page.locator('.task-table tbody tr').count(),1);
- await page.locator('#kind-filter').selectOption('requirement');await page.locator('.task-table tbody tr').filter({hasText:'原有纯文本需求'}).waitFor();assert.equal(await page.locator('.task-table tbody tr').count(),1);
+ await page.locator('#kind-filter').selectOption('bug');await page.waitForFunction(()=>document.querySelectorAll('[data-task-row]').length===1);assert.equal(await page.locator('[data-task-row]').count(),1);
+ await page.locator('#kind-filter').selectOption('requirement');await page.locator('[data-task-row]').filter({hasText:'原有纯文本需求'}).waitFor();assert.equal(await page.locator('[data-task-row]').count(),1);
  report.revision='remove inline image, switch to Bug fix, revision increment and type filters passed';
  await page.locator('#page [data-action=new-task]').click();await prose.waitFor();
  await page.locator('label:has(input[value=bug])').click();await page.getByRole('button',{name:'插入填写模板',exact:true}).click();assert.equal(await prose.locator('h2').count(),4);
@@ -96,7 +96,7 @@ try{
  report.mobile='390px width, document and properties scroll, footer actions visible';
  await page.getByRole('button',{name:'暂存并关闭',exact:true}).click();
  await page.setViewportSize({width:1440,height:1050});
- await page.locator('.task-table tbody tr').filter({hasText:'原有纯文本需求'}).click();
+ await page.locator('[data-task-row]').filter({hasText:'原有纯文本需求'}).click();
  await page.getByRole('button',{name:'编辑',exact:true}).click();await prose.waitFor();
  await page.locator('#task-form button[type=submit]').click();await page.locator('.detail-title').waitFor();
  const unchanged=(await api(`/tasks/${legacy.task.id}`)).task;

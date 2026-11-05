@@ -30,4 +30,5 @@ test:
 	node --check internal/web/static/project-access.mjs
 	node --check internal/web/static/pagination.mjs
 	node --check internal/web/static/task-hierarchy.mjs
+	node --check internal/web/static/requirement-pool.mjs
 	node --check internal/web/static/version-picker.mjs

@@ -54,7 +54,7 @@ let mcpSeq=0;
 async function claim(token,args){const r=await fetch(base+'/mcp',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',Accept:'application/json, text/event-stream','MCP-Protocol-Version':'2025-11-25'},body:JSON.stringify({jsonrpc:'2.0',id:++mcpSeq,method:'tools/call',params:{name:'task_claim',arguments:args}})});const v=await r.json();assert(r.ok&&!v.error&&!v.result.isError,JSON.stringify(v));return JSON.parse(v.result.content[0].text);}
 const task=id=>api(`/tasks/${id}`).then(v=>v.task);
 async function waitTask(id,status){for(let n=0;n<160;n++){const t=await task(id);if(t.status===status)return t;await new Promise(r=>setTimeout(r,75));}const review=await api(`/tasks/${id}/requirement-review`);assert.fail(`task never reached ${status}; review=${review.status}: ${review.error}; source=${JSON.stringify(review.source?.bug_context)}`)}
-async function open(id){await page.goto(base);await page.getByRole('button',{name:'需求池',exact:true}).click();await page.locator(`.task-table tr[data-id="${id}"]`).click();await page.locator('.detail-title').waitFor();}
+async function open(id){await page.goto(base);await page.getByRole('button',{name:'需求池',exact:true}).click();await page.locator(`[data-task-row][data-id="${id}"]`).click();await page.locator('.detail-title').waitFor();}
 async function close(){await page.getByRole('button',{name:'关闭',exact:true}).click();}
 const report={};
 try{

@@ -57,7 +57,7 @@ const base=`http://127.0.0.1:${port}`;
 const server=spawn(resolve(process.env.AI_PM_QA_BIN||'bin/ai-pm-requirements-check'),['-addr',`127.0.0.1:${port}`,'-data',data,'-pi-worker',worker,'-sync-interval','0'],{stdio:['ignore','ignore','pipe']});const serverExit=once(server,'exit');server.stderr.resume();
 const browser=await chromium.launch({headless:true});const page=await browser.newPage({viewport:{width:1440,height:1050},reducedMotion:'reduce'});const errors=[];page.on('pageerror',e=>errors.push(e.message));
 async function api(path,body,method){const r=await fetch(base+'/api'+path,{method:method||(body?'POST':'GET'),headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});const result=await r.json();assert(r.ok,JSON.stringify(result));return result;}
-const openReview=async(title,button='继续需求评审')=>{await page.reload();await page.getByRole('button',{name:'需求池',exact:true}).click();await page.locator('.task-table tbody tr').filter({hasText:title}).click();await page.getByRole('button',{name:button,exact:true}).click();await page.locator('.requirement-review').waitFor();};
+const openReview=async(title,button='继续需求评审')=>{await page.reload();await page.getByRole('button',{name:'需求池',exact:true}).click();await page.locator('[data-task-row]').filter({hasText:title}).click();await page.getByRole('button',{name:button,exact:true}).click();await page.locator('.requirement-review').waitFor();};
 const closeDialog=()=>page.getByRole('button',{name:'关闭',exact:true}).click();
 const report={};
 try{
@@ -69,14 +69,14 @@ try{
  await page.locator('[name=title]').fill('订单退款范围与权限');await page.locator('.requirement-prose').fill('用户可以按订单申请退款。需求包含较长说明与原始附件，需要完整保存。');
  await page.locator('#task-form button[type=submit]').click();await page.locator('#task-form').waitFor({state:'detached'});
  assert.equal(await page.locator('dialog').count(),0);
- await page.locator('.task-table tbody tr').filter({hasText:'后台评审中'}).waitFor();
+ await page.locator('[data-task-row]').filter({hasText:'后台评审中'}).waitFor();
  // Completion is discovered by pool polling even though no task fields changed.
- await page.locator('.task-table .review-attention.pending').waitFor({timeout:20000});
+ await page.locator('.requirement-pool .review-attention.pending').waitFor({timeout:20000});
  assert.equal(await page.locator('dialog').count(),0);
  assert.equal(await page.locator('.requirement-nav-badge .nav-count').innerText(),'1');
  await page.locator('#task-filter').selectOption('review_pending');
- assert.equal(await page.locator('.task-table tbody tr').count(),1);
- await page.locator('.task-table .review-attention.pending').click();await page.locator('.rc-ask').waitFor();
+ assert.equal(await page.locator('[data-task-row]').count(),1);
+ await page.locator('.requirement-pool .review-attention.pending').click();await page.locator('.rc-ask').waitFor();
  report.background='创建后后台评审、待确认标志/导航数量/筛选、标志直达评审通过';
  const tasks=await api(`/projects/${project.id}/tasks`);const task=tasks.find(x=>x.title==='订单退款范围与权限');assert(task);const endpoint=`/tasks/${task.id}/requirement-review`;
 

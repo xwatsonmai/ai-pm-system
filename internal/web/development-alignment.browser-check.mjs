@@ -46,13 +46,13 @@ try {
   async function ask(){const {task}=await api(`/tasks/${made.task.id}`);return mcp(original.secret,'task_request_alignment',{task_id:task.id,request_id:`ask-${++sequence}`,claim_id:credential,version:String(task.version),revision:String(task.revision),body:'开发时发现需要确认订单范围和展示入口。',questions:JSON.stringify(questions)});}
   await ask();
   await page.goto(base);await page.getByRole('button',{name:'需求池',exact:true}).click();
-  await page.locator('.task-table .review-attention').filter({hasText:'待对齐'}).click();
+  await page.locator('.requirement-pool .review-attention').filter({hasText:'待对齐'}).click();
   let form=page.locator('.review-question-form').last();await form.waitFor();
   assert.equal(await form.locator('fieldset').count(),5);assert.equal(await form.locator('input:checked').count(),0);
   await form.getByRole('radio',{name:'线上订单'}).check();
   await page.locator('#review-input').fill('你理解有偏差：只需要展示售后记录，暂不修改退款。');
   await page.getByRole('button',{name:'关闭',exact:true}).click();
-  await page.locator('.task-table .review-attention').filter({hasText:'待对齐'}).click();
+  await page.locator('.requirement-pool .review-attention').filter({hasText:'待对齐'}).click();
   await page.locator('.review-question-form').waitFor();
   assert(await page.getByRole('radio',{name:'线上订单'}).isChecked());
   assert.match(await page.locator('#review-input').inputValue(),/理解有偏差/);

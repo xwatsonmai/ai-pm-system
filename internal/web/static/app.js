@@ -5,6 +5,7 @@ import { renderMarkdown } from "./markdown.mjs";
 import { mountVersionPicker } from "./version-picker.mjs";
 import { pagerHTML, pageQuery, patchKeyedHTML } from "./pagination.mjs";
 import { createTaskHierarchy } from "./task-hierarchy.mjs";
+import { requirementPoolHTML } from "./requirement-pool.mjs";
 const taskTree = createTaskHierarchy();
 import { patchHTML, mergeRunRefresh } from "./dom-update.mjs";
 import { requirementFormHTML, mountRequirementEditor } from "./requirement-editor.mjs";
@@ -164,7 +165,7 @@ let state = {
 };
 const drafts = new Map();
 const accessUI = mountProjectAccess({api,modal,closeModal,getModalRevision:()=>modalRevision,getProject:()=>state.project,getAccess:()=>state.project_access,onAccessChange:refreshProjectAccess,heading,field,action,escape,toast});
-const projectVersionUI=mountProjectVersions({getSelectedTaskIDs:()=>taskTree.selectedIDs(),api,modal,closeModal,getModalRevision:()=>modalRevision,getContext:()=>state.context,getProject:()=>state.project,getUser:()=>state.auth?.user?.id||'local-owner',canAccessPage:page=>allowedPage(page,state.project_access,isPlatformAdmin()),canCreateRequirement:()=>canAction('requirement.create'),refresh:async()=>{await refresh();render();},onTask:openTask,onCreate:versionID=>taskForm(null,null,null,versionID),onPool:async filter=>{await navigate('tasks');state.versionFilter=filter;setListPage('tasks',1);await loadBusinessPage();},toast});
+const projectVersionUI=mountProjectVersions({api,modal,closeModal,getModalRevision:()=>modalRevision,getContext:()=>state.context,getProject:()=>state.project,getUser:()=>state.auth?.user?.id||'local-owner',canAccessPage:page=>allowedPage(page,state.project_access,isPlatformAdmin()),canCreateRequirement:()=>canAction('requirement.create'),refresh:async()=>{await refresh();render();},onTask:openTask,onCreate:versionID=>taskForm(null,null,null,versionID),onPool:async filter=>{await navigate('tasks');state.versionFilter=filter;setListPage('tasks',1);await loadBusinessPage();},toast});
 const timelineUI = mountProjectTimeline({
   api, getProject: () => state.project, onTask: openTask,
   onVersion: id => projectVersionUI.open(id),
@@ -406,7 +407,7 @@ async function readWorkspace(projectID,page=state.page) {
 }
 function applyWorkspace(snapshot) {
  if(snapshot.revision!==workspaceRevision||!snapshot.current())return false;
- if(snapshot.tree)taskTree.commit(snapshot.tree);else if(snapshot.page==='tasks')taskTree.syncSelection(snapshot.context.tasks||[]);
+ if(snapshot.tree)taskTree.commit(snapshot.tree);
  state.context=snapshot.context;state.project=snapshot.context.project;state.project_access=snapshot.access;
  for(const [key,value] of snapshot.lists)businessLists.set(`${snapshot.projectID}:${key}`,value);
  state.runs=mergeRunRefresh(snapshot.runs,state.runs,snapshot.runsAtStart).filter(r=>!deletedConversations.has(conversationKey(snapshot.projectID,conversationID(r))));
@@ -426,7 +427,6 @@ function updateBusinessPage() {
  if(renderer){
   if(state.page==='tasks'){
    patchKeyedHTML($('#task-table'),tasksTable());
-   $$('#task-table [data-plan-task]').forEach(input=>{input.checked=taskTree.isSelected(input.value);});
    const pager=$('[data-pager="tasks"]');if(pager){const holder=document.createElement('div');holder.innerHTML=tasksPagerHTML();patchKeyedHTML(pager,holder.firstElementChild.innerHTML);}
   }else {
     const profileSelect=state.page==='platform'?$('#platform-form [name=profile_id]'):null,selectedProfile=profileSelect?.value,selectedLabel=profileSelect?.selectedOptions[0]?.textContent;
@@ -652,37 +652,14 @@ function overview() {
 function filteredTasks() { return state.context?.tasks || []; }
 function tasksPagerHTML(){return pagerHTML(listResult('tasks'),'tasks',{unit:state.taskHierarchy?'组':'项'});}
 function tasksTable() {
- const result=listResult('tasks'),tasks=state.taskHierarchy?result.items:filteredTasks();
- if(!tasks.length)return empty("没有符合条件的需求","调整筛选，或创建一个新需求。");
- const row=({node:t,depth=0,expanded=false})=>{
-  const context=state.taskHierarchy&&t.matches_filter===false;
-  const toggle=state.taskHierarchy?(t.children_count?`<button type="button" class="task-tree-toggle" data-action="task-tree-toggle" data-id="${escape(t.id)}" data-depth="${depth}" aria-expanded="${expanded}" aria-label="${expanded?'收起':'展开'} ${escape(t.title)} 的子项">${icon('chevron')}</button>`:'<span class="task-tree-spacer" aria-hidden="true"></span>'):'';
-  const relation=state.taskHierarchy&&t.tree_parent_id?`<span class="task-relation">${t.tree_relation==='bug'?'关联 Bug':'追加迭代'}</span>`:'';
-  return `<tr data-key="${escape(t.id)}" tabindex="0" data-action="open-task" data-id="${escape(t.id)}" class="${context?'task-tree-context':''}"><td><input type="checkbox" data-plan-task value="${escape(t.id)}" aria-label="选择需求 ${escape(t.title)}" ${taskFinished(t)||t.status==='review'||context?'disabled':''} ${taskTree.isSelected(t.id)?'checked':''}></td><td>${status(t)}</td><td class="task-title"><div class="task-tree-title" style="--task-depth:${Math.min(depth,6)}">${toggle}<div class="task-tree-content"><div>${relation}<span class="badge ${t.kind==='bug'?'bug':''}">${t.kind==='bug'?(t.parent_requirement_id?'需求测试 Bug':'平台 Bug'):'迭代需求'}</span> ${escape(t.title)}${t.blocker?' <span class="badge blocked">阻塞</span>':''}${context?' <span class="task-context-label">父级上下文</span>':''}</div><div class="task-id">${short(t.id)}${t.iteration?` · 迭代自 ${short(t.iteration.parent_task_id)}`:''} · R${t.revision} · ${escape(versionName(state.context.project_versions||[],t.project_version_id))}${state.taskHierarchy&&t.children_count?` <span class="task-child-count">${t.children_count} 个直接子项${!expanded&&t.pending_count?` · 含待确认 ${t.pending_count} 项`:''}</span>`:''}</div></div></div></td><td><span class="priority-mark ${t.priority}">${t.priority==='now'?'▰▰▰':t.priority==='next'?'▰▰▱':'▰▱▱'}</span> ${priorities[t.priority]}</td><td>${escape(t.owner||'未认领')}</td><td class="muted small">${date(t.updated_at)}</td></tr>`;
- };
- const treeRow=r=>{
-  if(r.kind==='task')return row(r);
-  let content=r.kind==='error'?`${escape(r.text)} ${action('task-tree-retry','重试','ghost')}`:'正在加载子项…';
-  if(r.kind==='page'){const v=r.result,pages=Math.ceil(v.total/v.page_size);content=`<span>子项 ${v.total} 项 · 第 ${v.page} / ${pages} 页</span><button type="button" data-action="task-tree-page" data-id="${escape(r.parent)}" data-page="${v.page-1}" ${v.page<=1?'disabled':''}>上一页</button><button type="button" data-action="task-tree-page" data-id="${escape(r.parent)}" data-page="${v.page+1}" ${v.page>=pages?'disabled':''}>下一页</button>`;}
-  return `<tr class="task-tree-extra" data-key="${r.kind}:${escape(r.parent)}"><td></td><td colspan="5"><div class="task-child-pager" style="--task-depth:${Math.min(r.depth,6)}" ${r.kind==='page'?'role="group" aria-label="子项分页"':'role="status"'}>${content}</div></td></tr>`;
- };
- const table=items=>`<div class="table-scroll"><table class="task-table"><thead><tr><th class="task-checkbox">选择</th><th>状态</th><th>需求</th><th>优先级</th><th>负责人</th><th>更新</th></tr></thead><tbody>${state.taskHierarchy?taskTree.rows(items).map(treeRow).join(''):items.map(node=>row({node})).join('')}</tbody></table></div>`;
- const selected=taskTree.selectedIDs().length;
- const selection=selected?`<div class="task-selection" data-key="task-selection">已选择 ${selected} 项（含折叠或子项其他页中的选择）${action('task-selection-clear','清空选择','ghost')}</div>`:'';
- let content;
- if(!state.versionGrouping||state.versionFilter)content=table(tasks);
- else{
-  const groups=[...new Set(tasks.map(t=>t.project_version_id||''))].map(id=>({id,name:versionName(state.context.project_versions||[],id)}));
-  content=groups.map(g=>{const items=tasks.filter(t=>(t.project_version_id||'')===g.id);return `<section class="pv-pool-group" data-key="version:${escape(g.id)}"><div class="pv-pool-heading"><h2>${escape(g.name)} <span class="muted small">本页 ${items.length} ${state.taskHierarchy?'组':'项'}</span></h2>${g.id&&allowedPage('versions',state.project_access)?action('pv-open','查看版本','ghost',`data-id="${escape(g.id)}"`):''}</div>${table(items)}</section>`;}).join('');
- }
- return selection+content+`<div class="queue-footer">${state.taskHierarchy?`${result.matching_total} 项匹配 · ${result.total} 组主需求 · 按主需求分页，子项展开后分页`:`${result.total} 个需求`}</div>`;
+ return requirementPoolHTML({result:listResult('tasks'),tasks:filteredTasks(),hierarchy:state.taskHierarchy,groupByVersion:state.versionGrouping,versionFilter:state.versionFilter,treeRows:items=>taskTree.rows(items),statusHTML:status,versionLabel:id=>versionName(state.context.project_versions||[],id),canViewVersion:allowedPage('versions',state.project_access),date});
 }
 function mountTaskVersionFilter(){
  const host=$('[data-task-version-picker]');if(!host)return;
  mountVersionPicker(host,{api,projectID:state.project.id,selected:state.versionFilter,name:'task_version_filter',label:'筛选目标版本',status:'',emptyLabel:'所有版本',compact:true,onChange:value=>{state.versionFilter=value;setListPage('tasks');void loadBusinessPage().catch(e=>toast(e.message));}});
 }
 function tasksPage() {
-  return `<div class="page">${heading("需求池", "集中管理迭代需求与 Bug 修复。评审在后台进行，有结论后标记待确认。", action("new-task", icon("plus") + " 创建需求", "primary"))}<div class="toolbar"><input id="task-search" placeholder="搜索标题、描述或负责人…" aria-label="搜索需求" value="${escape(state.search)}"><select id="task-filter" aria-label="筛选状态"><option value="">所有状态</option><option value="attention" ${state.filter === "attention" ? "selected" : ""}>需要我处理</option><option value="review_pending" ${state.filter === "review_pending" ? "selected" : ""}>待确认${pendingConfirmations() ? `（${pendingConfirmations()}）` : ""}</option>${Object.entries(
+  return `<div class="page requirement-pool-page">${heading("需求池", "管理需求、Bug 与追加迭代。", action("new-task", icon("plus") + " 创建需求", "primary"))}<div class="toolbar"><input id="task-search" placeholder="搜索标题、描述或负责人…" aria-label="搜索需求" value="${escape(state.search)}"><select id="task-filter" aria-label="筛选状态"><option value="">所有状态</option><option value="attention" ${state.filter === "attention" ? "selected" : ""}>需要我处理</option><option value="review_pending" ${state.filter === "review_pending" ? "selected" : ""}>待确认${pendingConfirmations() ? `（${pendingConfirmations()}）` : ""}</option>${Object.entries(
     states,
   )
     .map(
@@ -691,7 +668,7 @@ function tasksPage() {
     )
     .join(
       "",
-    )}</select><select id="kind-filter" aria-label="筛选类型"><option value="">所有类型</option><option value="requirement" ${state.kind === "requirement" ? "selected" : ""}>迭代需求</option><option value="bug" ${state.kind === "bug" ? "selected" : ""}>Bug 修复</option></select><div data-task-version-picker></div></div><div class="pv-pool-tools">${allowedPage("versions",state.project_access)?action("pv-assign-selected","安排目标版本"):""}${action("toggle-version-group",state.versionGrouping?"取消版本分组":"按版本分组","ghost")}<div class="task-view-switch" role="group" aria-label="需求展示方式">${["tree","flat"].map(view=>`<button type="button" data-action="task-list-view" data-view="${view}" aria-pressed="${state.taskHierarchy===(view==='tree')}">${view==='tree'?'层级展示':'平铺展示'}</button>`).join('')}</div></div><div id="task-table">${tasksTable()}</div>${tasksPagerHTML()}</div>`;
+    )}</select><select id="kind-filter" aria-label="筛选类型"><option value="">所有类型</option><option value="requirement" ${state.kind === "requirement" ? "selected" : ""}>迭代需求</option><option value="bug" ${state.kind === "bug" ? "selected" : ""}>Bug 修复</option></select><div data-task-version-picker></div></div><div class="pv-pool-tools">${allowedPage("versions",state.project_access)?action("pv-plan","安排目标版本"):""}${action("toggle-version-group","版本分组","ghost",`aria-pressed="${state.versionGrouping}"`)}<div class="task-view-switch" role="group" aria-label="需求展示方式">${["tree","flat"].map(view=>`<button type="button" data-action="task-list-view" data-view="${view}" aria-pressed="${state.taskHierarchy===(view==='tree')}">${view==='tree'?'层级展示':'平铺展示'}</button>`).join('')}</div></div><div id="task-table">${tasksTable()}</div>${tasksPagerHTML()}</div>`;
 }
 function reviewsPage() {
   const tasks = state.context.tasks.filter((t) => t.status === "review");
@@ -1624,7 +1601,6 @@ async function navigate(page, {historyMode='push'}={}) {
   pollActiveRuns();
 }
 document.addEventListener("click", async (event) => {
-  if(event.target.matches('input[type=checkbox][data-plan-task]'))return;
   if (!event.target.closest(".project-picker")) closeProjectMenu();
   const button = event.target.closest("[data-action]");
   if (!button) return;
@@ -1660,7 +1636,6 @@ document.addEventListener("click", async (event) => {
     if(a==='task-tree-toggle'){taskTree.toggle(button.dataset.id,Number(button.dataset.depth));updateBusinessPage();await loadBusinessPage();return;}
     if(a==='task-tree-page'){taskTree.setPage(button.dataset.id,Number(button.dataset.page));updateBusinessPage();await loadBusinessPage();return;}
     if(a==='task-tree-retry'){await loadBusinessPage();return;}
-    if(a==='task-selection-clear'){taskTree.clearSelection();updateBusinessPage();return;}
     if(a==='toggle-version-group'){state.versionGrouping=!state.versionGrouping;renderPage();return;}
     if(a==='iterate-task'){await taskForm(null,button.dataset.id);return;}
     if(a==='iteration-more'){
@@ -2119,7 +2094,6 @@ document.addEventListener("drop", (event) => {
   addChatFiles([...(event.dataTransfer?.files || [])]);
 });
 document.addEventListener("change", async (event) => {
- if(event.target.matches('[data-plan-task]')){taskTree.choose(event.target.value,event.target.checked);updateBusinessPage();return;}
  if(event.target.matches('[data-page-size]')){const key=event.target.dataset.pageSize;if(key==='files'){setListPage(key,1,Number(event.target.value));void loadFiles();return;}if(key==='code-results'){void loadCodeResults(1,Number(event.target.value)).catch(e=>toast(e.message));return;}if(key.startsWith('detail-')){void loadDetailPage(key,1,Number(event.target.value)).catch(e=>toast(e.message));return;}setListPage(key,1,Number(event.target.value));if(['profiles','projects','platform-projects','admins','accounts'].includes(key)){void refresh().then(updateBusinessPage).catch(e=>toast(e.message));}else if(key==='mcp-grants'){void loadMCP();}else void loadBusinessPage().catch(e=>toast(e.message));return;}
 
  if(['tl-end','tl-days','tl-grain'].includes(event.target.id)){await timelineUI.change(event.target);return;}
