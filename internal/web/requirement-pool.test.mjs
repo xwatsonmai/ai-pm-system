@@ -21,7 +21,7 @@ test('nested rows keep grandchildren and child-page feedback under their real pa
 
 const root={id:'root',title:'Main',status:'ready',kind:'requirement',revision:2,project_version_id:'v1',children_count:1,matches_filter:true};
 const child={...root,id:'child',title:'Child',kind:'bug',parent_requirement_id:'root',tree_relation:'bug',children_count:0,project_version_id:'v2'};
-const base={result:{items:[root],total:1,matching_total:2},tasks:[root,child],hierarchy:true,groupByVersion:true,versionFilter:'',treeRows:()=>[{kind:'task',node:root,depth:0,expanded:true},{kind:'task',node:child,depth:1}],isSelected:()=>false,selectedCount:0,statusHTML:()=>'<span>Ready</span>',versionLabel:id=>id==='v1'?'Current':'Next',canViewVersion:true,date:()=>''};
+const base={result:{items:[root],total:1,matching_total:2},tasks:[root,child],hierarchy:true,groupByVersion:true,versionFilter:'',treeRows:()=>[{kind:'task',node:root,depth:0,expanded:true},{kind:'task',node:child,depth:1}],statusHTML:()=>'<span>Ready</span>',versionLabel:id=>id==='v1'?'Current':'Next',canViewVersion:true,date:()=>''};
 
 test('hierarchy gets a semantic branch with one relation label and cross-version context',()=>{
  const html=requirementPoolHTML(base);
@@ -39,9 +39,9 @@ test('flat mode removes grouping affordances but keeps the linked Bug identity',
  assert.equal((html.match(/data-task-row /g)||[]).length,2);
 });
 
-test('user content is escaped and context-only ancestors cannot be selected',()=>{
+test('user content is escaped and the browsing list has no selection controls',()=>{
  const bad='<img src=x onerror=alert(1)>',node={...root,title:bad,owner:bad,matches_filter:false,children_count:0};
  const html=requirementPoolHTML({...base,result:{items:[node],total:1,matching_total:1},treeRows:()=>[{kind:'task',node,depth:0}],versionLabel:()=>bad});
  assert.doesNotMatch(html,/<img/);assert.match(html,/&lt;img/);
- assert.match(html,/data-plan-task[^>]+disabled/);assert.match(html,/父级上下文/);
+ assert.doesNotMatch(html,/type="checkbox"|data-plan-task/);assert.match(html,/父级上下文/);
 });

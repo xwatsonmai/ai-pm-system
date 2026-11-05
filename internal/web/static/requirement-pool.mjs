@@ -1,5 +1,3 @@
-import {taskFinished} from './requirement-review-state.mjs';
-
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const short=value=>String(value||'').replace(/^\w+_/,'').slice(0,6).toUpperCase();
 const priorityNames={now:'现在做',next:'接下来做',later:'暂存'};
@@ -25,7 +23,7 @@ export function nestPoolRows(rows){
  return roots;
 }
 
-export function requirementPoolHTML({result,tasks,hierarchy,groupByVersion,versionFilter,treeRows,isSelected,selectedCount,statusHTML,versionLabel,canViewVersion,date}){
+export function requirementPoolHTML({result,tasks,hierarchy,groupByVersion,versionFilter,treeRows,statusHTML,versionLabel,canViewVersion,date}){
  const roots=hierarchy?result.items:tasks;
  if(!roots.length)return '<div class="empty"><h3>没有符合条件的需求</h3><p>调整筛选，或创建一个新需求。</p></div>';
  const grouped=groupByVersion&&!versionFilter;
@@ -56,7 +54,7 @@ export function requirementPoolHTML({result,tasks,hierarchy,groupByVersion,versi
   if(context)meta.push('<span class="pool-context-label">父级上下文</span>');
   const toggle=hasChildren?`<button type="button" class="pool-toggle" data-action="task-tree-toggle" data-id="${esc(t.id)}" data-depth="${depth}" aria-expanded="${expanded}" aria-controls="pool-children-${esc(t.id)}" aria-label="${expanded?'收起':'展开'} ${esc(t.title)} 的子项">${icon('chevron')}</button>`:'<span class="pool-leaf-mark" aria-hidden="true"></span>';
   const owner=t.owner||'未认领';
-  const row=`<div class="pool-row" data-task-row data-action="open-task" data-id="${esc(t.id)}" data-key="row:${esc(t.id)}"><label class="pool-select-hit"><input class="pool-select" type="checkbox" data-plan-task value="${esc(t.id)}" aria-label="选择需求 ${esc(t.title)}" ${taskFinished(t)||t.status==='review'||context?'disabled':''} ${isSelected(t.id)?'checked':''}></label>${toggle}<div class="pool-main"><button type="button" class="pool-title" data-action="open-task" data-id="${esc(t.id)}">${esc(t.title)}${t.blocker?' <span class="pool-blocked">阻塞</span>':''}</button><div class="pool-meta">${meta.join('')}</div></div><div class="pool-status">${statusHTML(t)}</div><div class="pool-owner ${t.owner?'':'is-unassigned'}" title="${esc(owner)}">${t.owner?`<span class="pool-avatar" aria-hidden="true">${esc([...owner][0])}</span>`:''}<span>${esc(owner)}</span></div><time class="pool-updated" title="${esc(date(t.updated_at))}">${esc(date(t.updated_at))}</time></div>`;
+  const row=`<div class="pool-row" data-task-row data-action="open-task" data-id="${esc(t.id)}" data-key="row:${esc(t.id)}">${toggle}<div class="pool-main"><button type="button" class="pool-title" data-action="open-task" data-id="${esc(t.id)}">${esc(t.title)}${t.blocker?' <span class="pool-blocked">阻塞</span>':''}</button><div class="pool-meta">${meta.join('')}</div></div><div class="pool-status">${statusHTML(t)}</div><div class="pool-owner ${t.owner?'':'is-unassigned'}" title="${esc(owner)}">${t.owner?`<span class="pool-avatar" aria-hidden="true">${esc([...owner][0])}</span>`:''}<span>${esc(owner)}</span></div><time class="pool-updated" title="${esc(date(t.updated_at))}">${esc(date(t.updated_at))}</time></div>`;
   const branch=hasChildren&&expanded?`<div class="pool-branch" data-key="branch:${esc(t.id)}"><ul class="pool-children" id="pool-children-${esc(t.id)}" aria-label="${esc(t.title)}的关联事项">${item.children.map(child=>itemHTML(child,t.project_version_id)).join('')}</ul></div>`:hasChildren?`<ul id="pool-children-${esc(t.id)}" data-key="branch:${esc(t.id)}" aria-label="${esc(t.title)}的关联事项" hidden></ul>`:'';
   return `<li class="${depth?'pool-child':'pool-family'} ${hasChildren?'pool-has-children':''} ${expanded?'is-open':''} ${context?'task-tree-context':''} ${depth>=3?'pool-deep':''}" data-key="task:${esc(t.id)}">${row}${branch}</li>`;
  }
@@ -71,7 +69,6 @@ export function requirementPoolHTML({result,tasks,hierarchy,groupByVersion,versi
   const items=roots.filter(t=>(t.project_version_id||'')===id);
   return `<section class="pool-version-group" data-key="version:${esc(id)}"><div class="pool-version-heading"><h2>${icon('folder')}<span class="pool-version-name">${esc(versionLabel(id))}</span><span class="pool-version-count">本页 ${items.length} ${hierarchy?'组':'项'}</span></h2>${id&&canViewVersion?`<button type="button" class="ghost" data-action="pv-open" data-id="${esc(id)}">查看版本 <span aria-hidden="true">↗</span></button>`:''}</div>${list(items)}</section>`;
  }).join('');
- const selection=selectedCount?`<div class="task-selection" data-key="task-selection"><strong title="包含折叠或子项其他页中的选择">已选择 ${selectedCount} 项</strong><button type="button" class="ghost" data-action="task-selection-clear">清空选择</button></div>`:'';
  const total=hierarchy?`${result.matching_total} 项匹配 · ${result.total} 个需求组`:`${result.total} 个需求`;
- return `${selection}<div class="requirement-pool ${hierarchy?'is-hierarchy':'is-flat'}">${content}</div><div class="queue-footer">${total}</div>`;
+ return `<div class="requirement-pool ${hierarchy?'is-hierarchy':'is-flat'}">${content}</div><div class="queue-footer">${total}</div>`;
 }

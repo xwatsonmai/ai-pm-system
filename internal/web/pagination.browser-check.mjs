@@ -29,15 +29,15 @@ try{
  await page.locator('[data-list=tasks][data-page="3"]').click();await page.waitForFunction(()=>document.querySelectorAll('[data-task-row]').length===3);
  await page.locator('#task-search').fill('分页需求 00');await page.waitForFunction(()=>document.querySelectorAll('[data-task-row]').length===1);
  await page.locator('#task-search').fill('');await page.waitForFunction(()=>document.querySelectorAll('[data-task-row]').length===20);
- // Observe the original shell, focused search and selected row across polling.
+ // Observe the original shell, focused search and row across polling.
  const id=await page.locator('[data-task-row]').nth(1).getAttribute('data-id');
- await page.locator(`[data-task-row][data-id="${id}"] input`).check();
- await page.evaluate(id=>{window.savedShell=document.querySelector('.layout');window.savedRow=document.querySelector(`[data-task-row][data-id="${id}"]`);window.savedSearch=document.querySelector('#task-search');window.savedCheckbox=window.savedRow.querySelector('input');},id);
+ assert.equal(await page.locator('#task-table input[type=checkbox]').count(),0);await page.locator('#task-search').focus();
+ await page.evaluate(id=>{window.savedShell=document.querySelector('.layout');window.savedRow=document.querySelector(`[data-task-row][data-id="${id}"]`);window.savedSearch=document.querySelector('#task-search');window.savedTitle=window.savedRow.querySelector('.pool-title');},id);
  const changing=list.items.find(t=>t.id!==id);const full=(await api(`/tasks/${changing.id}?compact=true`)).task;
  await api(`/tasks/${full.id}`,{title:full.title+' 已更新',description:full.description,kind:full.kind,priority:full.priority,version:full.version,request_id:'edit-poll'},'PUT');
  await page.waitForFunction(()=>document.querySelector('#task-table')?.textContent.includes('已更新'),{timeout:18000});
- assert(await page.evaluate(()=>window.savedShell===document.querySelector('.layout')&&window.savedSearch===document.querySelector('#task-search')&&window.savedRow.isConnected&&window.savedCheckbox.checked));
- await page.locator(`[data-task-row][data-id="${id}"] input`).uncheck();await page.locator(`[data-task-row][data-id="${id}"]`).click();await page.locator('.detail-title').waitFor();assert(await page.locator('#task-detail-events [data-pager]').count());
+ assert(await page.evaluate(()=>window.savedShell===document.querySelector('.layout')&&window.savedSearch===document.querySelector('#task-search')&&window.savedRow.isConnected&&window.savedTitle.isConnected&&document.activeElement===window.savedSearch));
+ await page.locator(`[data-task-row][data-id="${id}"]`).click();await page.locator('.detail-title').waitFor();assert(await page.locator('#task-detail-events [data-pager]').count());
  await page.getByRole('button',{name:'关闭',exact:true}).click();
  // A long requirement room starts with a bounded window; older windows retain
  // the actual input node, draft and current workflow state.

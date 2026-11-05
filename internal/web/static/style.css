@@ -3052,11 +3052,11 @@ details.rc-card > summary::-webkit-details-marker { display: none; }
 .pool-version-heading > button { color: #797181; font-size: 12px; }
 .pool-version-heading > button span { margin-left: 3px; }
 .pool-column-labels { display: grid; grid-template-columns: minmax(0,1fr) 116px 128px 94px; gap: 12px; padding: 10px 18px 11px; border-bottom: 1px solid #eae6ef; color: #918999; font-size: 11px; }
-.pool-column-labels > :first-child { padding-left: 76px; }
+.pool-column-labels > :first-child { padding-left: 40px; }
 .pool-column-labels > :last-child { text-align: right; }
 .pool-families, .pool-children { list-style: none; margin: 0; padding: 0; }
 .pool-family { border-bottom: 1px solid #efecf3; }
-.pool-row { display: grid; grid-template-columns: 24px 28px minmax(0,1fr) 116px 128px 94px; align-items: center; gap: 12px; padding: 14px 18px; min-width: 0; transition: background-color .12s; }
+.pool-row { display: grid; grid-template-columns: 28px minmax(0,1fr) 116px 128px 94px; align-items: center; gap: 12px; padding: 14px 18px; min-width: 0; transition: background-color .12s; }
 .pool-row:hover { background-color: #faf9fc; }
 .pool-main { min-width: 0; }
 button.pool-title { display: block; width: auto; max-width: 100%; border: 0; padding: 0; background: transparent; color: #34303b; font-size: 14px; font-weight: 530; line-height: 1.65; text-align: left; white-space: normal; overflow-wrap: anywhere; }
@@ -3078,9 +3078,6 @@ button.pool-title:focus-visible { outline: 2px solid #a294ce; outline-offset: 4p
 .pool-priority--now > i { background: #c9954a; }
 .pool-priority--later > i { background: #d0c8d8; }
 .pool-blocked { margin-left: 6px; color: #aa695e; font-size: 11px; font-weight: 500; }
-.pool-select-hit { display: flex; justify-content: center; align-items: center; width: 24px; min-height: 32px; margin: 0; cursor: pointer; }
-.pool-select-hit input { width: 16px; height: 16px; min-height: 0; padding: 0; margin: 0; accent-color: #8270b8; cursor: pointer; }
-.pool-select-hit:has(input:disabled), .pool-select-hit input:disabled { cursor: default; }
 .pool-toggle { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; color: #99919f; background: transparent; border: 0; border-radius: 4px; }
 .pool-toggle:hover { background: #f2eff7; color: #75628e; }
 .pool-toggle svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; transition: transform .16s ease; }
@@ -3114,14 +3111,11 @@ button.pool-title:focus-visible { outline: 2px solid #a294ce; outline-offset: 4p
 .pool-branch-feedback { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px; min-height: 48px; padding: 10px 18px; color: #918299; font-size: 11px; }
 .pool-branch-feedback > div { display: flex; gap: 6px; }
 .pool-branch-feedback button { padding: 5px 9px; background: #fff; border-color: #e4dceb; font-size: 11px; }
-.task-selection { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; padding: 7px 14px; border-radius: 7px; color: #7c66a7; background: #f4f0fa; font-size: 12px; }
-.task-selection strong { font-weight: 550; }
-.task-selection button { font-size: 12px; color: inherit; }
 .requirement-pool-page .queue-footer { margin-top: 18px; color: #a297ad; }
 .pool-loading-dot { width: 5px; height: 5px; border-radius: 50%; background: #9b83bd; animation: pool-loading 1s ease-in-out infinite; }
 @keyframes pool-loading { 50% { opacity: .25; } }
 @media(max-width:1100px) and (min-width:761px) {
- .pool-row { grid-template-columns: 24px 28px minmax(0,1fr) 104px 100px; gap: 10px; }
+ .pool-row { grid-template-columns: 28px minmax(0,1fr) 104px 100px; gap: 10px; }
  .pool-column-labels { grid-template-columns: minmax(0,1fr) 104px 100px; gap: 10px; }
  .pool-updated, .pool-column-labels > :last-child { display: none; }
 }
@@ -3133,16 +3127,15 @@ button.pool-title:focus-visible { outline: 2px solid #a294ce; outline-offset: 4p
  .pool-version-heading h2 { font-size: 15px; gap: 6px; }
  .pool-version-heading > button { padding-right: 0; font-size: 11px; }
  .pool-column-labels { display: none; }
- .pool-row { grid-template-columns: 24px 24px minmax(0,1fr); gap: 7px; padding: 14px 10px; }
- .pool-select-hit { grid-column: 1; grid-row: 1 / span 2; align-self: start; }
- .pool-toggle, .pool-leaf-mark { grid-column: 2; grid-row: 1; align-self: start; margin-top: 1px; }
+ .pool-row { grid-template-columns: 24px minmax(0,1fr); gap: 7px; padding: 14px 10px; }
+ .pool-toggle, .pool-leaf-mark { grid-column: 1; grid-row: 1; align-self: start; margin-top: 1px; }
  .pool-toggle { width: 24px; height: 28px; }
  .pool-leaf-mark { width: 24px; height: 28px; margin: 0; }
- .pool-main { grid-column: 3; grid-row: 1; }
- .pool-status { grid-column: 3; grid-row: 2; justify-self: start; }
- .pool-owner { grid-column: 3; grid-row: 2; justify-self: end; max-width: calc(100% - 95px); font-size: 11px; gap: 5px; }
+ .pool-main { grid-column: 2; grid-row: 1; }
+ .pool-status { grid-column: 2; grid-row: 2; justify-self: start; }
+ .pool-owner { grid-column: 2; grid-row: 2; justify-self: end; max-width: calc(100% - 95px); font-size: 11px; gap: 5px; }
  .pool-avatar { width: 19px; height: 19px; flex-basis: 19px; font-size: 9px; }
- .pool-updated { grid-column: 3; grid-row: 3; justify-self: start; display: block; margin-top: -2px; color: #ac9fb6; font-size: 10px; }
+ .pool-updated { grid-column: 2; grid-row: 3; justify-self: start; display: block; margin-top: -2px; color: #ac9fb6; font-size: 10px; }
  button.pool-title { font-size: 14px; line-height: 1.6; }
  .pool-meta { margin-top: 5px; font-size: 10px; row-gap: 3px; }
  .pool-meta > span + span::before { margin: 0 5px; }
@@ -3156,7 +3149,6 @@ button.pool-title:focus-visible { outline: 2px solid #a294ce; outline-offset: 4p
  .pool-child .pool-priority { display: none; }
  .pool-branch-feedback { padding: 10px 12px; gap: 10px; font-size: 10px; }
  .pool-branch-feedback button { min-height: 32px; }
- .task-selection { padding: 6px 10px; }
 }
 @media(prefers-reduced-motion:reduce) {
  .pool-toggle svg, .pool-row { transition: none; }

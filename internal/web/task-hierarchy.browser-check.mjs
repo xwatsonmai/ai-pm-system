@@ -49,12 +49,16 @@ for i in range(25):add('tree-other-%02d'%i,'独立需求 %02d'%i)
  await iterationToggle.click();await page.locator('[data-task-row][data-id=tree-grandchild]').waitFor();assert.equal(await rows().count(),41);
  assert.match(await page.locator('[data-task-row][data-id=tree-iteration]').innerText(),/追加迭代/);assert.match(await page.locator('[data-task-row][data-id=tree-grandchild]').innerText(),/关联 Bug/);
  await page.screenshot({path:join(output,'expanded-desktop.png')});
- await page.locator('[data-task-row][data-id=tree-bug-44] input').check();
- await rootToggle().click();assert.equal(await rows().count(),20);assert.match(await page.locator('.task-selection').innerText(),/已选择 1 项/);
- await page.getByRole('button',{name:'安排目标版本',exact:true}).click();await page.locator('#pv-assign-form [data-selection-items] .pv-check').waitFor();
- assert.match(await page.locator('[data-selection-count]').innerText(),/已选择 1 项/);assert.match(await page.locator('[data-selection-items]').innerText(),/订单关联 Bug 44/);
- await page.getByRole('button',{name:'关闭',exact:true}).click();
- await rootToggle().click();await page.locator('[data-task-row][data-id=tree-bug-44]').waitFor();assert(await page.locator('[data-task-row][data-id=tree-bug-44] input').isChecked());
+ assert.equal(await page.locator('#task-table input[type=checkbox]').count(),0,'browsing exposes batch-selection controls');
+ await rootToggle().click();assert.equal(await rows().count(),20);
+ await page.getByRole('button',{name:'安排目标版本',exact:true}).click();await page.locator('#pv-assign-form [data-selection-items] .pv-check').first().waitFor();
+ const choice=page.locator('#pv-assign-form input[name=task_ids][value=tree-bug-44]');await choice.check();
+ assert.match(await page.locator('[data-selection-count]').innerText(),/已选择 1 项/);
+ await page.locator('#pv-assign-form [data-list=pv-assign][data-page="2"]').click();await page.waitForFunction(()=>document.querySelector('#pv-assign-form')?.dataset.selectionPage==='2');
+ await page.locator('#pv-assign-form input[name=task_ids]').first().check();assert.match(await page.locator('[data-selection-count]').innerText(),/已选择 2 项/);
+ await page.locator('#pv-assign-form [data-list=pv-assign][data-page="1"]').click();await page.waitForFunction(()=>document.querySelector('#pv-assign-form')?.dataset.selectionPage==='1');assert(await choice.isChecked());
+ await page.getByRole('button',{name:'取消',exact:true}).click();assert.equal(await page.locator('#task-table input[type=checkbox]').count(),0);
+ await rootToggle().click();await page.locator('[data-task-row][data-id=tree-bug-44]').waitFor();
  await page.locator('#task-search').focus();
  await page.evaluate(id=>{window.oldShell=document.querySelector('.layout');window.oldSearch=document.querySelector('#task-search');window.oldRoot=document.querySelector(`[data-task-row][data-id="${id}"]`);window.oldChild=document.querySelector('[data-task-row][data-id=tree-bug-44]');window.mutations=0;window.observer=new MutationObserver(changes=>window.mutations+=changes.length);window.observer.observe(document.querySelector('#task-table'),{subtree:true,childList:true,attributes:true,characterData:true});},root.id);
  await page.waitForResponse(r=>r.url().includes('tree_parent_id=tree-iteration')&&r.ok(),{timeout:15000});
@@ -64,14 +68,13 @@ t=json.loads(db.execute("SELECT payload FROM tasks WHERE id='tree-bug-44'").fetc
 db.execute('UPDATE tasks SET payload=?,version=? WHERE id=?',(json.dumps(t),t['version'],t['id']))
 `);
  await page.waitForFunction(()=>document.querySelector('[data-task-row][data-id=tree-bug-44]')?.textContent.includes('已更新'),{timeout:18000});
- assert(await page.evaluate(()=>window.oldShell===document.querySelector('.layout')&&window.oldSearch===document.activeElement&&window.oldRoot.isConnected&&window.oldChild===document.querySelector('[data-task-row][data-id=tree-bug-44]')&&window.oldChild.querySelector('input').checked));
+ assert(await page.evaluate(()=>window.oldShell===document.querySelector('.layout')&&window.oldSearch===document.activeElement&&window.oldRoot.isConnected&&window.oldChild===document.querySelector('[data-task-row][data-id=tree-bug-44]')&&document.querySelectorAll('#task-table input[type=checkbox]').length===0));
  await page.evaluate(()=>window.observer.disconnect());
  await page.locator('[data-action=task-tree-page][data-page="2"]').click();await page.waitForFunction(()=>document.querySelector('[aria-label=子项分页]')?.textContent.includes('第 2'));
- assert.match(await page.locator('.task-selection').innerText(),/已选择 1 项/);
  await page.locator('[data-action=task-tree-page][data-page="3"]').click();await page.waitForFunction(()=>document.querySelector('[aria-label=子项分页]')?.textContent.includes('第 3'));assert.equal(await rows().count(),26);
- await page.locator('[data-action=task-selection-clear]').click();assert.equal(await page.locator('.task-selection').count(),0);
+ assert.equal(await page.locator('#task-table input[type=checkbox]').count(),0);
  await page.locator('#task-search').fill('支付金额校验问题');await page.locator('[data-task-row][data-id=tree-grandchild]').waitFor();
- assert.equal(await rows().count(),3);assert.equal(await page.locator('.task-tree-context').count(),2);assert(await page.locator(`[data-task-row][data-id="${root.id}"] input`).isDisabled());assert.match(await page.locator('.queue-footer').innerText(),/1 项匹配/);
+ assert.equal(await rows().count(),3);assert.equal(await page.locator('.task-tree-context').count(),2);assert.equal(await page.locator('#task-table input[type=checkbox]').count(),0);assert.match(await page.locator('.queue-footer').innerText(),/1 项匹配/);
  // A delayed old-filter child response must never replace the next flat view.
  let release,started,complete,held=false;const intercepted=new Promise(done=>started=done),completed=new Promise(done=>complete=done);
  await page.route('**/api/projects/*/tasks?*',async route=>{if(!held&&route.request().url().includes('tree_parent_id=')&&new URL(route.request().url()).searchParams.get('q')==='支付金额校验问题'){held=true;const response=await route.fetch();await new Promise(done=>{release=done;started();});await route.fulfill({response});complete();}else await route.continue();});
@@ -99,6 +102,6 @@ db.execute('UPDATE tasks SET payload=?,version=? WHERE id=?',(json.dumps(t),t['v
  await page.locator('[data-list=tasks][data-page="1"]').click();await rootToggle().waitFor();
  await page.setViewportSize({width:390,height:844});await page.waitForFunction(()=>document.querySelector('.sidebar').getBoundingClientRect().right<=0);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:join(output,'mobile.png')});
  assert(!requests.some(url=>url.endsWith('/context')),'full context downloaded');assert.deepEqual(errors,[]);
- await writeFile(join(output,'report.json'),JSON.stringify({tasks:73,rootFamilies:26,directChildren:46,childPages:3,nestedRelations:true,selectionAcrossFoldsAndChildPages:true,keyedPolling:true,unchangedPollMutations:0,staleResponseIgnored:true,filterAncestorContext:true,mobileWidth:390,errors},null,2));
- console.log('PASS: hierarchy, 26 root families / 73 tasks, 46 paged children, nesting, filter ancestors, selected IDs, keyed polling, stale responses, keyboard and mobile.');
+ await writeFile(join(output,'report.json'),JSON.stringify({tasks:73,rootFamilies:26,directChildren:46,childPages:3,nestedRelations:true,selectionOnlyInAssignmentDialog:true,assignmentSelectionAcrossPages:true,keyedPolling:true,unchangedPollMutations:0,staleResponseIgnored:true,filterAncestorContext:true,mobileWidth:390,errors},null,2));
+ console.log('PASS: hierarchy, 26 root families / 73 tasks, 46 paged children, nesting, filter ancestors, dialog-only cross-page selection, keyed polling, stale responses, keyboard and mobile.');
 }catch(error){console.error('Browser errors:',errors,'Server:',log,await page.locator('body').innerText());throw error;}finally{await browser.close();server.kill('SIGTERM');await stopped;await rm(data,{recursive:true,force:true});}

@@ -165,7 +165,7 @@ let state = {
 };
 const drafts = new Map();
 const accessUI = mountProjectAccess({api,modal,closeModal,getModalRevision:()=>modalRevision,getProject:()=>state.project,getAccess:()=>state.project_access,onAccessChange:refreshProjectAccess,heading,field,action,escape,toast});
-const projectVersionUI=mountProjectVersions({getSelectedTaskIDs:()=>taskTree.selectedIDs(),api,modal,closeModal,getModalRevision:()=>modalRevision,getContext:()=>state.context,getProject:()=>state.project,getUser:()=>state.auth?.user?.id||'local-owner',canAccessPage:page=>allowedPage(page,state.project_access,isPlatformAdmin()),canCreateRequirement:()=>canAction('requirement.create'),refresh:async()=>{await refresh();render();},onTask:openTask,onCreate:versionID=>taskForm(null,null,null,versionID),onPool:async filter=>{await navigate('tasks');state.versionFilter=filter;setListPage('tasks',1);await loadBusinessPage();},toast});
+const projectVersionUI=mountProjectVersions({api,modal,closeModal,getModalRevision:()=>modalRevision,getContext:()=>state.context,getProject:()=>state.project,getUser:()=>state.auth?.user?.id||'local-owner',canAccessPage:page=>allowedPage(page,state.project_access,isPlatformAdmin()),canCreateRequirement:()=>canAction('requirement.create'),refresh:async()=>{await refresh();render();},onTask:openTask,onCreate:versionID=>taskForm(null,null,null,versionID),onPool:async filter=>{await navigate('tasks');state.versionFilter=filter;setListPage('tasks',1);await loadBusinessPage();},toast});
 const timelineUI = mountProjectTimeline({
   api, getProject: () => state.project, onTask: openTask,
   onVersion: id => projectVersionUI.open(id),
@@ -407,7 +407,7 @@ async function readWorkspace(projectID,page=state.page) {
 }
 function applyWorkspace(snapshot) {
  if(snapshot.revision!==workspaceRevision||!snapshot.current())return false;
- if(snapshot.tree)taskTree.commit(snapshot.tree);else if(snapshot.page==='tasks')taskTree.syncSelection(snapshot.context.tasks||[]);
+ if(snapshot.tree)taskTree.commit(snapshot.tree);
  state.context=snapshot.context;state.project=snapshot.context.project;state.project_access=snapshot.access;
  for(const [key,value] of snapshot.lists)businessLists.set(`${snapshot.projectID}:${key}`,value);
  state.runs=mergeRunRefresh(snapshot.runs,state.runs,snapshot.runsAtStart).filter(r=>!deletedConversations.has(conversationKey(snapshot.projectID,conversationID(r))));
@@ -427,7 +427,6 @@ function updateBusinessPage() {
  if(renderer){
   if(state.page==='tasks'){
    patchKeyedHTML($('#task-table'),tasksTable());
-   $$('#task-table [data-plan-task]').forEach(input=>{input.checked=taskTree.isSelected(input.value);});
    const pager=$('[data-pager="tasks"]');if(pager){const holder=document.createElement('div');holder.innerHTML=tasksPagerHTML();patchKeyedHTML(pager,holder.firstElementChild.innerHTML);}
   }else {
     const profileSelect=state.page==='platform'?$('#platform-form [name=profile_id]'):null,selectedProfile=profileSelect?.value,selectedLabel=profileSelect?.selectedOptions[0]?.textContent;
@@ -653,7 +652,7 @@ function overview() {
 function filteredTasks() { return state.context?.tasks || []; }
 function tasksPagerHTML(){return pagerHTML(listResult('tasks'),'tasks',{unit:state.taskHierarchy?'组':'项'});}
 function tasksTable() {
- return requirementPoolHTML({result:listResult('tasks'),tasks:filteredTasks(),hierarchy:state.taskHierarchy,groupByVersion:state.versionGrouping,versionFilter:state.versionFilter,treeRows:items=>taskTree.rows(items),isSelected:id=>taskTree.isSelected(id),selectedCount:taskTree.selectedIDs().length,statusHTML:status,versionLabel:id=>versionName(state.context.project_versions||[],id),canViewVersion:allowedPage('versions',state.project_access),date});
+ return requirementPoolHTML({result:listResult('tasks'),tasks:filteredTasks(),hierarchy:state.taskHierarchy,groupByVersion:state.versionGrouping,versionFilter:state.versionFilter,treeRows:items=>taskTree.rows(items),statusHTML:status,versionLabel:id=>versionName(state.context.project_versions||[],id),canViewVersion:allowedPage('versions',state.project_access),date});
 }
 function mountTaskVersionFilter(){
  const host=$('[data-task-version-picker]');if(!host)return;
@@ -669,7 +668,7 @@ function tasksPage() {
     )
     .join(
       "",
-    )}</select><select id="kind-filter" aria-label="筛选类型"><option value="">所有类型</option><option value="requirement" ${state.kind === "requirement" ? "selected" : ""}>迭代需求</option><option value="bug" ${state.kind === "bug" ? "selected" : ""}>Bug 修复</option></select><div data-task-version-picker></div></div><div class="pv-pool-tools">${allowedPage("versions",state.project_access)?action("pv-assign-selected","安排目标版本"):""}${action("toggle-version-group","版本分组","ghost",`aria-pressed="${state.versionGrouping}"`)}<div class="task-view-switch" role="group" aria-label="需求展示方式">${["tree","flat"].map(view=>`<button type="button" data-action="task-list-view" data-view="${view}" aria-pressed="${state.taskHierarchy===(view==='tree')}">${view==='tree'?'层级展示':'平铺展示'}</button>`).join('')}</div></div><div id="task-table">${tasksTable()}</div>${tasksPagerHTML()}</div>`;
+    )}</select><select id="kind-filter" aria-label="筛选类型"><option value="">所有类型</option><option value="requirement" ${state.kind === "requirement" ? "selected" : ""}>迭代需求</option><option value="bug" ${state.kind === "bug" ? "selected" : ""}>Bug 修复</option></select><div data-task-version-picker></div></div><div class="pv-pool-tools">${allowedPage("versions",state.project_access)?action("pv-plan","安排目标版本"):""}${action("toggle-version-group","版本分组","ghost",`aria-pressed="${state.versionGrouping}"`)}<div class="task-view-switch" role="group" aria-label="需求展示方式">${["tree","flat"].map(view=>`<button type="button" data-action="task-list-view" data-view="${view}" aria-pressed="${state.taskHierarchy===(view==='tree')}">${view==='tree'?'层级展示':'平铺展示'}</button>`).join('')}</div></div><div id="task-table">${tasksTable()}</div>${tasksPagerHTML()}</div>`;
 }
 function reviewsPage() {
   const tasks = state.context.tasks.filter((t) => t.status === "review");
@@ -1602,7 +1601,6 @@ async function navigate(page, {historyMode='push'}={}) {
   pollActiveRuns();
 }
 document.addEventListener("click", async (event) => {
-  if(event.target.matches('input[type=checkbox][data-plan-task]')||event.target.closest('.pool-select-hit'))return;
   if (!event.target.closest(".project-picker")) closeProjectMenu();
   const button = event.target.closest("[data-action]");
   if (!button) return;
@@ -1638,7 +1636,6 @@ document.addEventListener("click", async (event) => {
     if(a==='task-tree-toggle'){taskTree.toggle(button.dataset.id,Number(button.dataset.depth));updateBusinessPage();await loadBusinessPage();return;}
     if(a==='task-tree-page'){taskTree.setPage(button.dataset.id,Number(button.dataset.page));updateBusinessPage();await loadBusinessPage();return;}
     if(a==='task-tree-retry'){await loadBusinessPage();return;}
-    if(a==='task-selection-clear'){taskTree.clearSelection();updateBusinessPage();return;}
     if(a==='toggle-version-group'){state.versionGrouping=!state.versionGrouping;renderPage();return;}
     if(a==='iterate-task'){await taskForm(null,button.dataset.id);return;}
     if(a==='iteration-more'){
@@ -2097,7 +2094,6 @@ document.addEventListener("drop", (event) => {
   addChatFiles([...(event.dataTransfer?.files || [])]);
 });
 document.addEventListener("change", async (event) => {
- if(event.target.matches('[data-plan-task]')){taskTree.choose(event.target.value,event.target.checked);updateBusinessPage();return;}
  if(event.target.matches('[data-page-size]')){const key=event.target.dataset.pageSize;if(key==='files'){setListPage(key,1,Number(event.target.value));void loadFiles();return;}if(key==='code-results'){void loadCodeResults(1,Number(event.target.value)).catch(e=>toast(e.message));return;}if(key.startsWith('detail-')){void loadDetailPage(key,1,Number(event.target.value)).catch(e=>toast(e.message));return;}setListPage(key,1,Number(event.target.value));if(['profiles','projects','platform-projects','admins','accounts'].includes(key)){void refresh().then(updateBusinessPage).catch(e=>toast(e.message));}else if(key==='mcp-grants'){void loadMCP();}else void loadBusinessPage().catch(e=>toast(e.message));return;}
 
  if(['tl-end','tl-days','tl-grain'].includes(event.target.id)){await timelineUI.change(event.target);return;}

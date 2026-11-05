@@ -134,7 +134,6 @@ export function mountProjectVersions({
   getModalRevision=()=>0,
   refresh,
   getContext,
-  getSelectedTaskIDs,
   getProject,
   getUser,
   onTask,
@@ -272,7 +271,7 @@ export function mountProjectVersions({
    if(form.dataset.payload){const refs=JSON.parse(form.dataset.payload).items||[];result={items:refs.slice((page-1)*size,page*size).map(ref=>({task:{id:ref.id,title:ref.id,version:ref.version,revision:ref.revision,submission:{sha:ref.sha}}})),total:refs.length,page,page_size:size};items=result.items.map(i=>i.task)}
    else if(form.id==='pv-publish-form'){params.set('status','pending_release');result=await api(`/project-versions/${encodeURIComponent(id)}/scope?${params}`);items=result.items.map(i=>i.task)}
    else if(form.dataset.fixedIds){const tasks=JSON.parse(form.dataset.fixedTasks);result={items:tasks.slice((page-1)*size,page*size),total:tasks.length,page,page_size:size};items=result.items}
-   else {if(form.dataset.origin)params.set('project_version_id',form.dataset.origin);result=await api(`/projects/${getProject().id}/tasks?${params}`);if(Array.isArray(result))result={items:result.slice((page-1)*size,page*size),total:result.length,page,page_size:size};items=result.items.filter(t=>!finished(t)&&t.status!=='review')}
+   else {params.set('status',Object.keys(taskStates).filter(status=>!finished({status})&&status!=='review').join(','));if(form.dataset.origin)params.set('project_version_id',form.dataset.origin);result=await api(`/projects/${getProject().id}/tasks?${params}`);if(Array.isArray(result))result={items:result.slice((page-1)*size,page*size),total:result.length,page,page_size:size};items=result.items.filter(t=>!finished(t)&&t.status!=='review')}
    if(!currentSection(form,generation))return;
    const selected=selectedRefs(form),refs=items.map(t=>({id:t.id,version:t.version,revision:t.revision,sha:t.submission?.sha}));form.dataset.items=JSON.stringify(refs);
    const key=form.id==='pv-publish-form'?'pv-publish':'pv-assign';
@@ -383,14 +382,9 @@ export function mountProjectVersions({
       case "pv-assign":
         await assign({ taskIDs: [node.dataset.task] });
         break;
-      case "pv-assign-selected": {
-        const ids = getSelectedTaskIDs ? getSelectedTaskIDs() : [
-          ...document.querySelectorAll("[data-plan-task]:checked"),
-        ].map((x) => x.value);
-        if (!ids.length) throw Error("先勾选需要安排版本的需求");
-        await assign({ taskIDs: ids });
+      case "pv-plan":
+        await assign({});
         break;
-      }
       case "pv-publish":
         await publish(id);
         break;

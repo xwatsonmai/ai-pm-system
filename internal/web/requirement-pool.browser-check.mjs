@@ -75,9 +75,12 @@ db.execute("INSERT INTO requirement_reviews(task_id,version,payload) VALUES('ite
  const line=await page.locator('.pool-children > .pool-child').first().evaluate(el=>({width:parseFloat(getComputedStyle(el,'::before').width),height:parseFloat(getComputedStyle(el,'::after').height),color:getComputedStyle(el,'::after').backgroundColor}));
  assert(line.width>0&&line.height>0&&line.color!=='rgba(0, 0, 0, 0)','relationship connectors are invisible');
  await page.evaluate(async()=>{await Promise.all([...document.querySelectorAll('.pool-branch')].flatMap(el=>el.getAnimations()).map(animation=>animation.finished.catch(()=>{})));document.activeElement?.blur();scrollTo(0,0);});await page.screenshot({path:join(output,'desktop-expanded.png'),fullPage:true});
- await page.locator('[data-task-row][data-id=bug-payment] .pool-select-hit').click();assert(await page.locator('[data-task-row][data-id=bug-payment] input').isChecked());assert.equal(await page.locator('dialog').count(),0,'selection label opened task detail');
- await toggle(root.id).click();assert.match(await page.locator('.task-selection').innerText(),/已选择 1 项/);await toggle(root.id).click();await page.locator('[data-task-row][data-id=bug-payment]').waitFor();assert(await page.locator('[data-task-row][data-id=bug-payment] input').isChecked());
- await page.locator('[data-action=task-selection-clear]').click();
+ assert.equal(await page.locator('#task-table input[type=checkbox]').count(),0);
+ await page.getByRole('button',{name:'安排目标版本',exact:true}).click();await page.locator('#pv-assign-form input[name=task_ids][value=bug-payment]').check();
+ assert.match(await page.locator('[data-selection-count]').innerText(),/已选择 1 项/);assert.equal(await page.locator('#task-table input[type=checkbox]').count(),0);
+ await page.screenshot({path:join(output,'assignment-dialog.png')});
+ await page.getByRole('button',{name:'取消',exact:true}).click();assert.equal(await page.locator('#pv-assign-form').count(),0);
+ assert.equal(await page.locator('#task-table input[type=checkbox]').count(),0);
  await page.locator('[data-task-row][data-id=bug-payment] .pool-title').focus();await page.keyboard.press('Enter');await page.locator('.detail-title').waitFor();await page.getByRole('button',{name:'关闭',exact:true}).click();
  await page.setViewportSize({width:390,height:844});await page.waitForFunction(()=>document.querySelector('.sidebar').getBoundingClientRect().right<=0);
  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'mobile page overflow');
@@ -104,6 +107,6 @@ v=json.loads(db.execute('SELECT payload FROM project_versions WHERE id=?',(sys.a
  await page.setViewportSize({width:1024,height:900});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  await page.setViewportSize({width:1600,height:1180});await page.getByRole('button',{name:'层级展示',exact:true}).click();await page.locator('[data-task-row][data-id=bug-service]').waitFor();
  assert.deepEqual(errors,[]);assert(!requests.some(url=>url.endsWith('/context')));
- const report={passed:true,equal_top_level_weight:weight,hierarchy_containment:true,visible_connectors:line,desktop_title_geometry:geometry,mobile_no_horizontal_scroll:true,long_titles_and_versions_fit:true,selection_label_and_keyboard:true,cross_version_visible:true,errors,preview:keepPreview?base+`/?page=tasks&project=${project.id}`:null};
+ const report={passed:true,equal_top_level_weight:weight,hierarchy_containment:true,visible_connectors:line,desktop_title_geometry:geometry,mobile_no_horizontal_scroll:true,long_titles_and_versions_fit:true,selection_only_in_dialog:true,keyboard_open:true,cross_version_visible:true,errors,preview:keepPreview?base+`/?page=tasks&project=${project.id}`:null};
  await writeFile(join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));passed=true;
 }catch(error){console.error('BROWSER',errors,log,await page.locator('body').innerText());throw error;}finally{await browser.close();if(keepPreview&&passed){server.unref();console.log('Preview retained at '+base);}else{server.kill('SIGTERM');await stopped;await rm(data,{recursive:true,force:true});}}
