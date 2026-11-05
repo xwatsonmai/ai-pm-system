@@ -1,3 +1,4 @@
+import { retestVersion, testingRequest } from "./testing-version.mjs";
 import { pagerHTML, pageQuery } from "./pagination.mjs";
 import { BASE, appURL } from "./base.mjs";
 // The to-do page: what IM cards and the workspace link to. It works on a
@@ -82,15 +83,15 @@ function requirement(task) {
 
 const actionForm = (name, title, body, buttons) => `<form class="todo-card todo-form" data-form="${name}"><h2>${escape(title)}</h2>${body}<p class="form-error" role="alert"></p><div class="todo-actions">${buttons}</div></form>`;
 
-function testingForms(todo, task) {
+function testingForms(todo, task, candidate) {
   const sub = task.submission || {};
   const verify = todo.kind === "verify";
   const retest = todo.kind === "retest";
   const action = retest ? "start_retest" : verify ? "verify_bug" : "test_pass";
   const title = retest ? "开始复测" : verify ? "验证 Bug 修复" : "确认测试结果";
   const body =
-    (retest ? '<p class="hint">填写已合入全部 Bug 修复的需求分支提交 SHA，平台会校验版本包含关系。</p>' : "") +
-    field("实际测试版本", `<input name="sha" required value="${escape(sub.sha)}" ${retest ? "" : "readonly"} autocomplete="off" spellcheck="false">`) +
+    (retest ? `<p class="hint">${escape(candidate.hint)}</p>` : "") +
+    field("实际测试版本", `<input name="sha" required value="${escape(retest ? candidate.sha : sub.sha)}" ${retest ? "" : "readonly"} autocomplete="off" spellcheck="false">`) +
     field("测试环境", `<input name="environment" required value="${escape(sub.environment)}">`) +
     field("测试说明与证据", '<textarea name="note" required rows="4" placeholder="说明验证过程、结果和证据链接"></textarea>');
   const bug = task.kind === "bug" && (verify || !task.parent_requirement_id);
@@ -127,8 +128,10 @@ async function detail(todoID) {
     mountRequirementReview($(".todo-review .requirement-review"), { task, api, userID: session.user?.id || "local-owner", onDetails: leave, onResolve: leave, onConfirmed: () => location.reload() });
     return;
   }
+  const candidate = todo.kind === "retest" ? await retestVersion(task, api) : null;
+  if (candidate) { task.version = candidate.version; task.revision = candidate.revision; }
   const body =
-    { test: testingForms, verify: testingForms, retest: testingForms }[todo.kind]?.(todo, task) ??
+    { test: testingForms, verify: testingForms, retest: testingForms }[todo.kind]?.(todo, task, candidate) ??
     (todo.kind === "release" ? releaseForms(task) : todo.kind === "acceptance" ? acceptanceForm(task) : `<section class="todo-card"><h2>等待开发认领</h2><p>开发在自己的 Agent 客户端（例如 Codex、Claude Code）里通过个人 MCP 认领这条需求，认领后这项待办会自动结束。</p><a class="todo-button" href="${workbench(task)}">在工作台查看</a></section>`);
   show(head + body + requirement(task));
   root.addEventListener("click", (e) => {
@@ -152,7 +155,9 @@ async function detail(todoID) {
       case "test_pass":
       case "verify_bug":
       case "start_retest":
-        payload = { ...base, action: form.dataset.form, body: data.note, test_verification: { revision: task.revision, sha: data.sha.trim(), environment: data.environment.trim(), note: data.note } };
+        form.dataset.version = task.version;
+        form.dataset.revision = task.revision;
+        payload = testingRequest(form, data, id);
         break;
       case "return_bug":
       case "rework":

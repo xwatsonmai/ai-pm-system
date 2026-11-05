@@ -54,7 +54,7 @@ let mcpSeq=0;
 async function claim(token,args){const r=await fetch(base+'/mcp',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',Accept:'application/json, text/event-stream','MCP-Protocol-Version':'2025-11-25'},body:JSON.stringify({jsonrpc:'2.0',id:++mcpSeq,method:'tools/call',params:{name:'task_claim',arguments:args}})});const v=await r.json();assert(r.ok&&!v.error&&!v.result.isError,JSON.stringify(v));return JSON.parse(v.result.content[0].text);}
 const task=id=>api(`/tasks/${id}`).then(v=>v.task);
 async function waitTask(id,status){for(let n=0;n<160;n++){const t=await task(id);if(t.status===status)return t;await new Promise(r=>setTimeout(r,75));}const review=await api(`/tasks/${id}/requirement-review`);assert.fail(`task never reached ${status}; review=${review.status}: ${review.error}; source=${JSON.stringify(review.source?.bug_context)}`)}
-async function open(id){await page.goto(base);await page.getByRole('button',{name:'需求池',exact:true}).click();await page.locator(`[data-task-row][data-id="${id}"]`).click();await page.locator('.detail-title').waitFor();}
+async function open(id){await page.goto(base+'/?task='+encodeURIComponent(id));await page.locator('.detail-title').waitFor();}
 async function close(){await page.getByRole('button',{name:'关闭',exact:true}).click();}
 const report={};
 try{
@@ -123,7 +123,44 @@ try{
  await claim(developer,{task_id:bug.id,request_id:'fix-claim',branch:'feature/testing'});
  bug=await task(bug.id);await api(`/tasks/${bug.id}/actions`,{action:'submit',revision:bug.revision,request_id:'fix-submit',submission:{summary:'重复请求已去重',sha:fixed,environment:'测试环境',tests:'本地回归通过'}});
  assert.equal((await task(parent.id)).status,'fixing');await open(bug.id);await page.getByRole('button',{name:'确认修复有效',exact:true}).click();await page.locator('#testing-form [name=note]').fill('实际复现步骤回归通过');await page.locator('#testing-form button[type=submit]').click();await waitTask(bug.id,'resolved');assert.equal((await task(parent.id)).status,'retest');
- await open(parent.id);await page.getByRole('button',{name:'开始复测',exact:true}).click();await page.locator('#testing-form [name=sha]').fill(fixed);await page.locator('#testing-form [name=note]').fill('全部修复已合入，开始复测');await page.locator('#testing-form button[type=submit]').click();await waitTask(parent.id,'testing');
+ // Mobile to-do uses the same candidate and refreshes edited retries.
+ parent=await task(parent.id);
+ const retestTodo='td_abcd987654';
+ await page.route(base+'/api/todos/'+retestTodo,route=>route.fulfill({json:{todo:{id:retestTodo,project:project.name,title:'待复测',kind:'retest',subject:parent.title,created_at:Date.now(),fields:[],open:true},task:parent,recipient:true}}));
+ await page.setViewportSize({width:390,height:844});await page.goto(base+'/todo/'+retestTodo);
+ await page.locator('[data-form=start_retest] [name=sha]').waitFor();
+ assert.equal(await page.locator('[data-form=start_retest] [name=sha]').inputValue(),fixed);
+ await page.screenshot({path:join(output,'retest-todo-mobile.png')});
+ assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+ const retries=[];
+ await page.route(base+`/api/tasks/${parent.id}/actions`,async route=>{retries.push(route.request().postDataJSON());await route.fulfill({status:400,json:{error:'手机重试验证'}})});
+ await page.locator('[data-form=start_retest] [name=sha]').fill(baseline);
+ await page.locator('[data-form=start_retest] [name=note]').fill('手机首次提交');
+ await page.locator('[data-form=start_retest] button[type=submit]').click();await page.getByText('手机重试验证',{exact:true}).waitFor();
+ await page.locator('[data-form=start_retest] [name=sha]').fill(fixed);
+ await page.locator('[data-form=start_retest] [name=note]').fill('手机更新后的证据');
+ await page.locator('[data-form=start_retest] button[type=submit]').click();
+ await page.waitForFunction(()=>!document.querySelector('[data-form=start_retest] button[type=submit]').disabled);
+ assert.equal(retries.length,2);assert.equal(retries[1].test_verification.sha,fixed);assert.equal(retries[1].test_verification.note,'手机更新后的证据');assert.notEqual(retries[0].request_id,retries[1].request_id);
+ await page.unroute(base+`/api/tasks/${parent.id}/actions`);
+ await page.setViewportSize({width:1440,height:1050});await open(parent.id);
+ // A failed candidate lookup must not silently fill the old submission.
+ await page.route(base+`/api/tasks/${parent.id}/retest-version`,route=>route.fulfill({status:503,json:{error:'仓库暂不可读取'}}));
+ await page.getByRole('button',{name:'开始复测',exact:true}).click();
+ assert.equal(await page.locator('#testing-form [name=sha]').inputValue(),'');assert.match(await page.locator('#testing-form').innerText(),/仓库暂不可读取/);
+ await page.locator('#testing-form').getByRole('button',{name:'取消',exact:true}).click();
+ await page.unroute(base+`/api/tasks/${parent.id}/retest-version`);
+ await open(parent.id);await page.getByRole('button',{name:'开始复测',exact:true}).click();
+ assert.equal(await page.locator('#testing-form [name=sha]').inputValue(),fixed);
+ await page.screenshot({path:join(output,'retest-default-desktop.png')});
+ // The real validator still rejects the old version. Editing the same form
+ // then sends the corrected SHA instead of its cached first request.
+ await page.locator('#testing-form [name=sha]').fill(baseline);await page.locator('#testing-form [name=note]').fill('检查旧版本拦截');
+ await page.locator('#testing-form button[type=submit]').click();await page.locator('#testing-form .form-error').filter({hasText:'请更新复测 SHA'}).waitFor();
+ assert.doesNotMatch(await page.locator('#testing-form .form-error').innerText(),/请先合入/);
+ await page.locator('#testing-form [name=sha]').fill(fixed);await page.locator('#testing-form [name=note]').fill('全部修复已合入，开始复测');await page.locator('#testing-form button[type=submit]').click();await waitTask(parent.id,'testing');
+ assert.equal((await task(parent.id)).submission.sha,fixed);
+ report.retestVersion='桌面和手机自动带出包含修复的 SHA；读取失败留空；旧版本真实校验拦截且准确提示；同一表单修改后重试使用新 SHA 和证据';
  await page.getByRole('button',{name:'确认测试通过',exact:true}).click();await page.locator('#testing-form [name=note]').fill('复测通过，全部验收条件满足');await page.locator('#testing-form button[type=submit]').click();await waitTask(parent.id,'pending_release');
  report.lifecycle='待修复 → 产品验证 Bug → 待复测 → 开始复测 → 测试通过 → 待上线通过';
  await page.getByRole('button',{name:'确认已上线',exact:true}).waitFor();

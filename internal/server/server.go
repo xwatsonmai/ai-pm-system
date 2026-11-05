@@ -9,6 +9,7 @@ import (
 	"ai-pm-system/internal/gitrepo"
 	"ai-pm-system/internal/notify"
 	"ai-pm-system/internal/web"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Server struct {
@@ -71,6 +73,7 @@ func read(r *http.Request, v any) error {
 func (s *Server) Handler() http.Handler {
 	if s.Git != nil {
 		s.App.ValidateTestingCode = s.Git.ValidateTestingCode
+		s.App.ResolveTestingCode = s.Git.TestingCandidate
 	}
 	mux := http.NewServeMux()
 	handle := func(pattern string, handler http.HandlerFunc) { mux.Handle(pattern, s.projectAccess(handler)) }
@@ -185,6 +188,16 @@ func (s *Server) Handler() http.Handler {
 		v, e := s.App.Context(r.Context(), s.actor(r), t.ProjectID, t.ID)
 		if e != nil {
 			fail(w, e)
+			return
+		}
+		respond(w, v)
+	})
+	handle("GET /api/tasks/{id}/retest-version", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+		v, err := s.App.RetestCandidate(ctx, s.actor(r), r.PathValue("id"))
+		if err != nil {
+			fail(w, err)
 			return
 		}
 		respond(w, v)

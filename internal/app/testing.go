@@ -41,21 +41,9 @@ func (s *Service) applyTestingAction(c context.Context, t *domain.Task, in Actio
 		if t.Status != "retest" || t.Kind != "requirement" {
 			return errors.New("全部关联 Bug 解决或关闭后，才能开始复测")
 		}
-		tasks, err := s.Store.ListTasks(c, t.ProjectID)
+		required, err := s.verifiedBugFixes(c, *t)
 		if err != nil {
 			return err
-		}
-		required := []string{}
-		for _, bug := range tasks {
-			if bug.ParentRequirementID != t.ID {
-				continue
-			}
-			if !domain.TaskFinished(bug.Status) {
-				return errors.New("仍有未解决或未关闭的 Bug")
-			}
-			if bug.Status == "resolved" && bug.Submission != nil {
-				required = append(required, bug.Submission.SHA)
-			}
 		}
 		if err := s.validateTestingVersion(c, *t, v.SHA, required); err != nil {
 			return err
@@ -71,6 +59,65 @@ func (s *Service) applyTestingAction(c context.Context, t *domain.Task, in Actio
 	verified.Actor, verified.At = a.Name, domain.Now()
 	t.TestVerification = &verified
 	return nil
+}
+
+type RetestVersion struct {
+	SHA      string `json:"sha"`
+	Branch   string `json:"branch"`
+	Version  int    `json:"version"`
+	Revision int    `json:"revision"`
+}
+
+// RetestCandidate only suggests code. Starting testing still requires an
+// explicit human action with the actual environment and a fresh validation.
+func (s *Service) RetestCandidate(c context.Context, a domain.Actor, id string) (RetestVersion, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, err := s.Store.GetTask(c, id)
+	if err != nil {
+		return RetestVersion{}, err
+	}
+	if err = s.RequireTaskAction(c, a, t, "start_retest"); err != nil {
+		return RetestVersion{}, err
+	}
+	if t.Kind != "requirement" || t.Status != "retest" {
+		return RetestVersion{}, errors.New("仅待复测需求可以读取复测候选版本，请刷新事项")
+	}
+	fixes, err := s.verifiedBugFixes(c, t)
+	if err != nil {
+		return RetestVersion{}, err
+	}
+	if s.ResolveTestingCode == nil {
+		return RetestVersion{}, errors.New("代码版本校验服务不可用，请稍后重试")
+	}
+	sha, err := s.ResolveTestingCode(c, t.ProjectID, t.Branch, fixes)
+	if err != nil {
+		return RetestVersion{}, err
+	}
+	return RetestVersion{SHA: sha, Branch: t.Branch, Version: t.Version, Revision: t.Revision}, nil
+}
+
+func (s *Service) verifiedBugFixes(c context.Context, t domain.Task) ([]string, error) {
+	tasks, err := s.Store.ListTasks(c, t.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	required := []string{}
+	for _, bug := range tasks {
+		if bug.ParentRequirementID != t.ID {
+			continue
+		}
+		if !domain.TaskFinished(bug.Status) {
+			return nil, errors.New("仍有未解决或未关闭的 Bug")
+		}
+		if bug.Status == "resolved" {
+			if bug.Submission == nil || !nonempty(bug.Submission.SHA) {
+				return nil, errors.New("已解决 Bug 缺少修复提交，请先补全修复版本")
+			}
+			required = append(required, bug.Submission.SHA)
+		}
+	}
+	return required, nil
 }
 
 func (s *Service) validateTestingVersion(c context.Context, t domain.Task, sha string, required []string) error {
