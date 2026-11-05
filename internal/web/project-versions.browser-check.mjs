@@ -126,7 +126,7 @@ try {
     0,
   );
   await page.locator("#page [data-action=new-task]").click();
-  await page.locator('.milestone-association [data-version-options]').waitFor();
+  await page.locator('.milestone-association [data-version-trigger]').waitFor();
   assert.equal(await page.locator('#task-form [name=project_version_id]').inputValue(),'');
   assert.equal(await page.locator("[name=planned_version_id]").count(), 0);
   await page.locator("#task-form [name=title]").fill("AI 质检结果补充原因");
@@ -226,7 +226,7 @@ try {
     .locator("#overlays")
     .getByRole("button", { name: "创建需求", exact: true })
     .click();
-  await page.locator('.milestone-association [data-version-options]').waitFor();
+  await page.locator('.milestone-association [data-version-trigger]').waitFor();
   assert.equal(await page.locator('#task-form [name=project_version_id]').inputValue(),versionID);
   await page.locator("#task-form [name=title]").fill("上线后追加的需求");
   await page.locator(".requirement-prose").fill("里程碑结束前继续补齐细节");
@@ -366,6 +366,7 @@ try {
   report.timeline =
     "真实Git三条提交、明确SHA关联、上下轨道、7/30天范围、提交详情、键盘打开里程碑及390px布局通过";
   await nav("需求池");
+  await page.locator('[data-task-version-picker] [data-version-trigger]').click();
   await page.locator('[data-task-version-picker] [data-version-options]').selectOption(versionID);
   await page.locator(`tr[data-id="${ready.id}"]`).click();
   await page.getByRole("button", { name: "开始验收", exact: true }).waitFor();

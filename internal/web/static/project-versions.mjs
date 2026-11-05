@@ -233,6 +233,7 @@ export function mountProjectVersions({
     form._saveVersionDraft = save;
   }
   function lock(form, value) {
+    for (const control of form.querySelectorAll('[data-version-trigger],[data-version-page]')) control.disabled=value;
     for (const el of form.elements) {
       if (el.type === "checkbox" || el.tagName === "SELECT")
         el.disabled = value;

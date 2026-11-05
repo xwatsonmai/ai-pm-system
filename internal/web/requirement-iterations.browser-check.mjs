@@ -205,7 +205,7 @@ try {
   await page.locator(`tr[data-id="${source.id}"]`).click();
   await page.getByRole("button", { name: "追加迭代", exact: true }).click();
   assert.equal(await page.locator("#task-form [name=title]").inputValue(), "");
-  await page.locator('.milestone-association [data-version-options]').waitFor();
+  await page.locator('.milestone-association [data-version-trigger]').waitFor();
   assert.equal(await page.locator('#task-form [name=project_version_id]').inputValue(),'');
   assert.equal(await page.locator('.milestone-association [data-version-options]').inputValue(),'');
   await page.locator(".iteration-snapshot summary").first().click();
