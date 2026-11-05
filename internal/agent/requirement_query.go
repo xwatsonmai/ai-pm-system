@@ -76,6 +76,11 @@ func (m *Manager) initialContext(c context.Context, a domain.Actor, r domain.Run
 	if err != nil {
 		return nil, err
 	}
+	project, err := m.App.Store.GetProject(c, r.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	out["capabilities"] = questionCapabilities(a, project)
 	out["conversation_requirement_proposals"], out["conversation_attachments"] = visible, files
 	out["conversation_proposals_truncated"] = start > 0
 	items, err := m.App.Store.ListCollaborations(c, r.ProjectID)
@@ -130,6 +135,7 @@ func (m *Manager) questionProjectContext(c context.Context, a domain.Actor, r do
 	if err != nil {
 		return nil, err
 	}
+	out["capabilities"] = questionCapabilities(a, p)
 	if !app.CanAccessPage(a, p, "reviews") {
 		out["project_artifacts"] = []domain.Artifact{}
 		return out, nil
@@ -146,4 +152,19 @@ func (m *Manager) questionProjectContext(c context.Context, a domain.Actor, r do
 	}
 	out["project_artifacts"] = projectArtifacts
 	return out, nil
+}
+
+func questionCapabilities(a domain.Actor, p domain.Project) map[string]any {
+	actions, pages := []string{}, []string{}
+	for _, action := range domain.ProjectActions {
+		if app.CanPerformAction(a, p, action) {
+			actions = append(actions, action)
+		}
+	}
+	for _, page := range domain.ProjectPages {
+		if app.CanAccessPage(a, p, page) {
+			pages = append(pages, page)
+		}
+	}
+	return map[string]any{"actions": actions, "readable_pages": pages}
 }

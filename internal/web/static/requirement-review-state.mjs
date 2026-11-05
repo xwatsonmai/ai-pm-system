@@ -116,7 +116,7 @@ export function discussionAvailable(task) {
 export function chatTimeline(review, {viewerID = ''} = {}) {
   const items = [], messages = review?.messages || [], source = review?.source || {};
   // The first saved snapshot is the original document; it belongs to the creation line.
-  const original = messages[0]?.role === 'system' && !messages[0].action && messages[0].source ? messages[0] : null;
+  const original = messages.find(m=>m.role === 'system' && !m.action && m.source) || null;
   if (source.created_at) items.push({key: 'created', type: 'event', action: 'task_created', at: source.created_at,
     text: `${review.creator?.name ? review.creator.name + ' ' : ''}创建了需求`,
     button: original ? {action: 'snapshot', label: '查看原文', message: original.id} : {action: 'source', label: '查看原文'}});

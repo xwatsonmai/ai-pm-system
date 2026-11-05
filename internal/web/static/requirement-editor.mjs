@@ -11,7 +11,7 @@ const templates = {
 };
 const tools = [['heading','H₂','二级标题'],['bold','B','加粗'],['italic','I','斜体'],['strike','S','删除线'],['bullet','☷','无序列表'],['ordered','1.','有序列表'],['quote','❞','引用'],['code','〈/〉','代码块'],['table','▦','插入表格'],['link','↗','插入链接'],['undo','↶','撤销'],['redo','↷','重做']];
 const accept = 'image/png,image/jpeg,image/gif,image/webp,.pdf,.docx,text/*,.md,.log,.json,.csv,.yaml,.yml,.xml,.html,.css,.js,.ts,.tsx,.jsx,.vue,.go,.py,.sql,.sh,.java,.c,.cpp,.h,.toml,.ini,.conf';
-export function requirementFormHTML(task = {}) {
+export function requirementFormHTML(task = {},allowedKinds=['requirement','bug']) {
   return `<form id="task-form" data-id="${esc(task.id || '')}" data-version="${task.version || 0}" novalidate>
     <div class="requirement-layout"><main class="requirement-document">
       <label class="sr-only" for="requirement-title">需求标题</label><input id="requirement-title" class="requirement-title" name="title" placeholder="为这个需求起一个清晰的标题" maxlength="200" required autocomplete="off">
@@ -23,7 +23,7 @@ export function requirementFormHTML(task = {}) {
       <div class="document-hint">可直接粘贴截图，或拖入图片和文档<span class="document-count"></span></div></div>
       <section class="requirement-attachments"><div class="document-heading"><h3>附件 <span class="attachment-count">0</span></h3><button type="button" class="ghost" data-editor-action="files">＋ 添加文件</button></div><p class="hint">图片、PDF、Word（DOCX）、文本 · 单个 10 MB，最多 6 个，合计 20 MB</p><div class="requirement-file-list"></div><p class="upload-status" role="status" aria-live="polite"></p></section>
       <input type="file" id="requirement-files" hidden multiple accept="${accept}"><input type="file" id="requirement-images" hidden multiple accept="image/png,image/jpeg,image/gif,image/webp">
-    </main><aside class="requirement-properties"><h3>需求属性</h3><fieldset class="requirement-kind"><legend>类型</legend><label><input type="radio" name="kind" value="requirement"><span>迭代需求</span></label><label><input type="radio" name="kind" value="bug"><span>Bug 修复</span></label></fieldset>
+    </main><aside class="requirement-properties"><h3>需求属性</h3><fieldset class="requirement-kind"><legend>类型</legend>${allowedKinds.map(kind=>`<label><input type="radio" name="kind" value="${kind}"><span>${kind==='bug'?'Bug 修复':'迭代需求'}</span></label>`).join('')}</fieldset>
       <label class="field"><span>优先级</span><select name="priority"><option value="now">现在做</option><option value="next">接下来做</option><option value="later">暂存</option></select></label>
       <label class="field"><span>验收负责人</span><input name="reviewer" placeholder="可选"></label>
       <label class="field acceptance-field"><span>验收条件</span><textarea name="acceptance" rows="6" placeholder="每行一条可验证的条件"></textarea><small class="hint">明确什么结果代表需求完成。</small></label>
@@ -32,7 +32,7 @@ export function requirementFormHTML(task = {}) {
   </form>`;
 }
 
-export function mountRequirementEditor(form, { task = {}, projectID, userID, onDiscard, onUnauthorized, draftScope, sourceVersion, parentRequirement }) {
+export function mountRequirementEditor(form, { task = {}, projectID, userID, onDiscard, onUnauthorized, draftScope, sourceVersion, parentRequirement, allowedKinds=['requirement','bug'] }) {
   const $ = (s) => form.querySelector(s);
   const key = `pm-requirement-draft:${userID}:${projectID}:${draftScope || task.id || 'new'}`;
   let draft;
@@ -43,7 +43,8 @@ export function mountRequirementEditor(form, { task = {}, projectID, userID, onD
   form.dataset.projectVersionId=initial.project_version_id||'';
   form.dataset.hasRequirementDraft=String(Boolean(draft));
   form.elements.title.value = initial.title || '';
-  form.elements.kind.value = initial.kind || 'requirement';
+  const kind=allowedKinds.includes(initial.kind)?initial.kind:allowedKinds[0];
+  for(const input of form.querySelectorAll('[name=kind]'))input.checked=input.value===kind;
   form.elements.priority.value = initial.priority || 'next';
   form.elements.reviewer.value = initial.reviewer || '';
   form.elements.acceptance.value = (initial.acceptance || []).join('\n');
@@ -221,6 +222,7 @@ export function mountRequirementEditor(form, { task = {}, projectID, userID, onD
     payload(createID) {
       if (pending) throw new Error('附件正在上传，请稍候');
       const value = snapshot();
+      if(!allowedKinds.includes(value.kind))throw new Error('当前不能创建此类型，请重新打开表单');
       if (!value.title.trim()) { form.elements.title.focus(); throw new Error('请填写需求标题'); }
       if (new TextEncoder().encode(value.description).length > 60000) throw new Error('需求描述过长，请将补充内容整理为文档附件');
       const payload = {...value, attachment_ids:files.map(f=>f.id)}; delete payload.attachments;

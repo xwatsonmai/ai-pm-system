@@ -148,6 +148,11 @@ func (s *Service) saveRequirementReview(c context.Context, a domain.Actor, id st
 	if err = s.RequirePages(c, a, t.ProjectID, pages...); err != nil {
 		return domain.RequirementReview{}, err
 	}
+	if in.Action == "request_change" || (in.Action == "confirm" && t.ReviewingChange()) {
+		if err = s.RequireAction(c, a, t.ProjectID, domain.ActionCreateRequirement); err != nil {
+			return domain.RequirementReview{}, err
+		}
+	}
 	if a.Kind != "human" && authorization == nil && !(a.Kind == "platform" && in.Action == "start") {
 		return domain.RequirementReview{}, domain.ErrForbidden
 	}

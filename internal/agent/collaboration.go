@@ -61,6 +61,9 @@ func (m *Manager) replySource(ctx context.Context, id string) (domain.Collaborat
 	if !app.CanReadRun(a, p, origin) {
 		return v, domain.ErrForbidden
 	}
+	if err = m.App.RequireAction(ctx, a, v.ProjectID, domain.ActionAskAgent); err != nil {
+		return v, err
+	}
 	return v, nil
 }
 
@@ -263,6 +266,9 @@ func (m *Manager) RetryCollaboration(ctx context.Context, a domain.Actor, id str
 	}
 	if a.ID != v.OwnerID || a.Kind != v.OwnerKind || v.Status != "completed" {
 		return domain.ReplyJob{}, domain.ErrForbidden
+	}
+	if err = m.App.RequireAction(ctx, a, v.ProjectID, domain.ActionAskAgent); err != nil {
+		return domain.ReplyJob{}, err
 	}
 	if v.Reply == nil {
 		return domain.ReplyJob{}, domain.ErrNotFound

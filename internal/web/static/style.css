@@ -2424,6 +2424,7 @@ details.rc-card > summary::-webkit-details-marker { display: none; }
 .rc-mention-empty { margin: 0; padding: 7px 10px; font-size: 12px; color: var(--muted); white-space: nowrap; }
 .rc-mention-selected { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--muted); }
 .rc-mention-chip, .rc-mention { color: var(--accent); background: var(--accent-bg); border-radius: 4px; padding: 1px 4px; }
+.rc-event .rc-mention { display: inline-block; max-width: 100%; vertical-align: bottom; }
 .rc-mention-chip button { border: 0; padding: 0 3px; background: transparent; color: inherit; }
 .rc-mine .rc-mention { color: inherit; background: #ffffff30; }
 .rc-mention-delivery { margin: 4px 0 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
@@ -3033,3 +3034,5 @@ details.rc-card > summary::-webkit-details-marker { display: none; }
   .pv-page .page-heading { flex-direction: column; }
   .pv-page .page-heading > .row { width: 100%; justify-content: flex-start; }
 }
+
+.composer[hidden]{display:none!important}

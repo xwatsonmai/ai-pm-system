@@ -357,10 +357,16 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		page := "tasks"
+		action := domain.ActionRunAnalysis
 		if in.Kind == "question" {
 			page = "chat"
+			action = domain.ActionAskAgent
 		}
 		if e := s.App.RequirePages(r.Context(), s.actor(r), r.PathValue("id"), page); e != nil {
+			fail(w, e)
+			return
+		}
+		if e := s.App.RequireAction(r.Context(), s.actor(r), r.PathValue("id"), action); e != nil {
 			fail(w, e)
 			return
 		}

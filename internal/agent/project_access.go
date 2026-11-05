@@ -38,6 +38,14 @@ func (m *Manager) runReadActor(c context.Context, r domain.Run) (domain.Actor, e
 	return a, m.App.RequirePages(c, a, r.ProjectID, "tasks")
 }
 
+func (m *Manager) requireRunAction(c context.Context, a domain.Actor, r domain.Run) error {
+	action := domain.ActionRunAnalysis
+	if r.Kind == "question" {
+		action = domain.ActionAskAgent
+	}
+	return m.App.RequireAction(c, a, r.ProjectID, action)
+}
+
 func (m *Manager) authorizeRunTool(c context.Context, a domain.Actor, r domain.Run, name string) error {
 	var pages []string
 	switch {
@@ -51,8 +59,10 @@ func (m *Manager) authorizeRunTool(c context.Context, a domain.Actor, r domain.R
 		pages = []string{"code"}
 	case name == "save_analysis":
 		pages = []string{"overview", "chat"}
-	case name == "create_bug" || name == "resolve_requirement_proposal":
-		pages = []string{"tasks"}
+	case name == "create_bug":
+		return m.App.RequireAction(c, a, r.ProjectID, domain.ActionCreateBug)
+	case name == "create_collaboration":
+		return m.App.RequireAction(c, a, r.ProjectID, domain.ActionCreateCollaboration)
 	}
 	if len(pages) == 0 {
 		return nil
@@ -71,6 +81,9 @@ func (m *Manager) guardRunPermissions(c context.Context, cancel context.CancelFu
 			return
 		case <-ticker.C:
 			a, e := m.runReadActor(c, r)
+			if e == nil {
+				e = m.requireRunAction(c, a, r)
+			}
 			if e != nil {
 				cancel()
 				return

@@ -1,13 +1,30 @@
 import {projectPages} from './navigation.mjs';
 
+export const projectActions=[
+ {id:'agent.ask',name:'使用问答 Agent',description:'发起项目问答和重试回答'},
+ {id:'analysis.run',name:'发起分析',description:'手动启动项目或需求分析'},
+ {id:'requirement.create',name:'提起需求',description:'创建需求及追加迭代'},
+ {id:'bug.create',name:'提起 Bug',description:'创建平台 Bug 或关联测试反馈'},
+ {id:'bug.create.linked',name:'仅提起关联 Bug',description:'仅在测试或验收中向已有需求提起关联 Bug；已有全局 Bug 权限时无需另选'},
+ {id:'collaboration.create',name:'发起协查',description:'通过问答 Agent 发起协同排查'},
+];
+export const actionAllowed=(access,id)=>access?.actions?.includes(id)===true;
+export const runStartAllowed=(access,kind)=>actionAllowed(access,kind==='question'?'agent.ask':'analysis.run')&&access?.pages?.includes(kind==='question'?'chat':'tasks')===true;
+export const reviewConfirmationAllowed=(changing,canCreate)=>!changing||canCreate===true;
+export const creationKinds=access=>['requirement','bug'].filter(kind=>actionAllowed(access,kind+'.create'));
+export const creationLabel=access=>actionAllowed(access,'requirement.create')?'创建需求':'提起 Bug';
+
 export const responsibilities = {product:'产品',developer:'开发',tester:'测试'};
 export function taskControlAllowed(action, task, access) {
+  if(['iterate-task','request-change'].includes(action)&&!actionAllowed(access,'requirement.create'))return false;
+  if(action==='file-testing-bug'&&!actionAllowed(access,'bug.create')&&!actionAllowed(access,'bug.create.linked'))return false;
+  if(action==='task-analyze'&&!actionAllowed(access,'analysis.run'))return false;
   let pages=['tasks'];
   if(['review','test-pass','start-retest','verify-bug','return-bug'].includes(action))pages=['reviews'];
   else if(action==='mark-deployed')pages=['reviews','versions'];
   else if(['pv-open','pv-assign'].includes(action))pages=['versions'];
-  else if(action==='file-testing-bug')pages=['tasks','reviews'];
-  else if(task.parent_requirement_id && ['edit-task','requirement-review','task-close','task-decline','task-reopen'].includes(action))pages=['tasks','reviews'];
+  else if(action==='file-testing-bug')pages=['tasks','reviews','versions'];
+  else if(task.parent_requirement_id && ['edit-task','requirement-review','request-change','task-close','task-decline','task-reopen'].includes(action))pages=['tasks','reviews'];
   return pages.some(page=>access?.pages?.includes(page));
 }
 export function memberPayload(form, picked, version) {
@@ -23,7 +40,7 @@ export function updateSelection(selected, id, checked) {
 }
 
 export function mountProjectAccess({api,modal,closeModal,getModalRevision=()=>0,getProject,getAccess,onAccessChange,heading,field,action,escape,toast}) {
-  const caches = new Map(), pickers = new WeakMap();
+  const caches = new Map(), pickers = new WeakMap(), roleDrafts=new Map();
   let revision = 0, modalRequest = 0, searchTimer;
   const cache = project => {
     if (!caches.has(project)) caches.set(project,{rolePage:1,memberPage:1,roleSize:20,memberSize:20,roleQuery:'',memberQuery:'',roles:[],members:[]});
@@ -45,7 +62,7 @@ export function mountProjectAccess({api,modal,closeModal,getModalRevision=()=>0,
   };
   function page() {
     const c=cache(getProject().id);
-    return `<div class="page access-page">${heading('角色与权限','为成员分配角色，按页面控制访问；待办职责单独设置。')}<section class="settings-section"><div class="row between"><h2>项目角色</h2>${action('access-create-role','添加角色','primary')}</div><p>成员拥有多个角色时，页面权限取并集。获得某页权限后，可使用该页已有的业务能力。</p><input data-access-search="roles" value="${escape(c.roleQuery)}" aria-label="搜索角色" placeholder="搜索角色名称"><div id="project-roles" aria-live="polite"><p class="hint">正在读取角色…</p></div></section><section class="settings-section"><div class="row between"><h2>项目成员</h2>${action('invite-member','添加成员','',`data-project="${escape(getProject().id)}"`)}</div><input data-access-search="members" value="${escape(c.memberQuery)}" aria-label="搜索项目成员" placeholder="搜索姓名或账号"><div id="project-members" aria-live="polite"><p class="hint">正在读取成员…</p></div></section></div>`;
+    return `<div class="page access-page">${heading('角色与权限','分别设置成员可访问的页面、可发起的操作和待办职责。')}<section class="settings-section"><div class="row between"><h2>项目角色</h2>${action('access-create-role','添加角色','primary')}</div><p>成员拥有多个角色时，页面和操作权限分别取并集；待办职责单独设置。</p><input data-access-search="roles" value="${escape(c.roleQuery)}" aria-label="搜索角色" placeholder="搜索角色名称"><div id="project-roles" aria-live="polite"><p class="hint">正在读取角色…</p></div></section><section class="settings-section"><div class="row between"><h2>项目成员</h2>${action('invite-member','添加成员','',`data-project="${escape(getProject().id)}"`)}</div><input data-access-search="members" value="${escape(c.memberQuery)}" aria-label="搜索项目成员" placeholder="搜索姓名或账号"><div id="project-members" aria-live="polite"><p class="hint">正在读取成员…</p></div></section></div>`;
   }
   async function loadRoles(project=getProject()?.id) {
     const root=document.querySelector('#project-roles'); if(!root || !project)return;
@@ -54,7 +71,7 @@ export function mountProjectAccess({api,modal,closeModal,getModalRevision=()=>0,
     if(!root.isConnected || getProject()?.id!==project || generation!==revision)return;
     c.roles=data.items; c.version=data.version;
     if(c.rolePage>1 && !data.items.length){c.rolePage--;return loadRoles(project);}
-    root.innerHTML = `<div class="role-list">${data.items.map(role=>`<div class="role-row"><div class="grow"><strong>${escape(role.name)}</strong><p class="hint">${escape(role.description||'未填写说明')}</p><div class="member-badges">${(role.pages||[]).map(id=>`<span class="badge">${escape(projectPages.find(p=>p.id===id)?.title||id)}</span>`).join('')||'<span class="hint">未分配页面权限</span>'}</div></div><div class="row">${action('access-edit-role','编辑','ghost',`data-id="${escape(role.id)}"`)}${action('access-delete-role','删除','ghost danger',`data-id="${escape(role.id)}"`)}</div></div>`).join('')||'<p class="context-note">没有匹配的角色。</p>'}</div>${pager(data,'roles',project)}`;
+    root.innerHTML = `<div class="role-list">${data.items.map(role=>`<div class="role-row"><div class="grow"><strong>${escape(role.name)}</strong><p class="hint">${escape(role.description||'未填写说明')}</p><div class="member-badges">${(role.pages||[]).map(id=>`<span class="badge">${escape(projectPages.find(p=>p.id===id)?.title||id)}</span>`).join('')||'<span class="hint">未分配页面权限</span>'}</div><p class="hint">可发起：${(role.actions||[]).map(id=>escape(projectActions.find(a=>a.id===id)?.name||id)).join('、')||'无'}</p></div><div class="row">${action('access-edit-role','编辑','ghost',`data-id="${escape(role.id)}"`)}${action('access-delete-role','删除','ghost danger',`data-id="${escape(role.id)}"`)}</div></div>`).join('')||'<p class="context-note">没有匹配的角色。</p>'}</div>${pager(data,'roles',project)}`;
   }
   async function loadMembers(project=getProject()?.id, target='#project-members') {
     const root=document.querySelector(target); if(!root || !project)return;
@@ -101,7 +118,8 @@ export function mountProjectAccess({api,modal,closeModal,getModalRevision=()=>0,
     return memberPayload(form,s.selected,s.version);
   }
   function roleForm(role,version,project) {
-    return `<form id="access-role-form" data-project="${escape(project)}" data-id="${escape(role?.id||'')}" data-version="${version}">${field('角色名称',`<input name="name" required maxlength="80" value="${escape(role?.name||'')}">`)}${field('说明',`<textarea name="description" maxlength="1000">${escape(role?.description||'')}</textarea>`)}<fieldset class="page-permissions"><legend>可访问页面</legend>${projectPages.map(p=>`<label><input type="checkbox" name="pages" value="${p.id}" ${role?.pages?.includes(p.id)?'checked':''}>${p.title}</label>`).join('')}</fieldset><p class="hint">页面内沿用现有业务操作规则。待办职责在成员上单独设置。</p><div class="form-error" role="alert"></div><div class="modal-actions">${action('close','取消')}<button type="submit" class="primary">保存角色</button></div></form>`;
+    if(role&&!Array.isArray(role.actions))throw Error('操作权限尚未读取完整，请刷新后重试');
+    return `<form id="access-role-form" data-project="${escape(project)}" data-id="${escape(role?.id||'')}" data-version="${version}">${field('角色名称',`<input name="name" required maxlength="80" value="${escape(role?.name||'')}">`)}${field('说明',`<textarea name="description" maxlength="1000">${escape(role?.description||'')}</textarea>`)}<fieldset class="page-permissions"><legend>可访问页面</legend>${projectPages.map(p=>`<label><input type="checkbox" name="pages" value="${p.id}" ${role?.pages?.includes(p.id)?'checked':''}>${p.title}</label>`).join('')}</fieldset><fieldset class="page-permissions action-permissions"><legend>操作权限</legend>${projectActions.map(a=>`<label title="${escape(a.description)}"><input type="checkbox" name="actions" value="${a.id}" ${role?.actions?.includes(a.id)?'checked':''}>${a.name}</label>`).join('')}${(role?.actions||[]).filter(id=>!projectActions.some(a=>a.id===id)).map(id=>`<input type="hidden" name="actions" value="${escape(id)}">`).join('')}</fieldset><p class="hint">页面决定能查看什么，操作权限决定能发起什么。待办职责在成员上单独设置。</p><div class="form-error" role="alert"></div><div class="modal-actions">${action('close','取消')}<button type="submit" class="primary">保存角色</button></div></form>`;
   }
   async function click(button) {
     const a=button.dataset.action;if(!a?.startsWith('access-'))return false;
@@ -117,8 +135,11 @@ export function mountProjectAccess({api,modal,closeModal,getModalRevision=()=>0,
       const form=button.closest('form'),s=pickers.get(form);s.selected.delete(button.dataset.id);await loadPicker(form);
     }else if(a==='access-create-role'||a==='access-edit-role'){
       const access=await accessFor(project);if(!stillCurrent())return true;
-      const role=c.roles.find(r=>r.id===button.dataset.id);if(a==='access-edit-role'&&!role)return true;
+      const role=access.roles.find(r=>r.id===button.dataset.id)||c.roles.find(r=>r.id===button.dataset.id);if(a==='access-edit-role'&&!role)return true;
       modal(role?'编辑角色':'添加角色',roleForm(role,access.version,project));
+      const form=document.querySelector('#access-role-form'),key=project+':'+(role?.id||'new'),draft=roleDrafts.get(key);form.dataset.draftKey=key;
+      if(draft){form.elements.name.value=draft.name;form.elements.description.value=draft.description;form.dataset.version=draft.version;for(const el of form.querySelectorAll('input[type=checkbox]'))el.checked=(draft[el.name]||[]).includes(el.value);}
+      const save=()=>{const data=new FormData(form);roleDrafts.set(key,{name:data.get('name'),description:data.get('description'),pages:data.getAll('pages'),actions:data.getAll('actions'),version:Number(form.dataset.version)});};form.addEventListener('input',save);form.addEventListener('change',save);
     }else if(a==='access-delete-role'){
       const access=await accessFor(project);if(!stillCurrent())return true;const role=c.roles.find(r=>r.id===button.dataset.id);if(!role)return true;
       modal('删除角色',`<form id="access-delete-role-form" data-project="${escape(project)}" data-id="${escape(role.id)}" data-version="${access.version}"><p>删除「${escape(role.name)}」。已分配该角色的成员需要转为其他角色。</p>${field('替代角色',`<select name="replacement_role_id"><option value="">无成员引用时直接删除</option>${access.roles.filter(r=>r.id!==role.id).map(r=>`<option value="${escape(r.id)}">${escape(r.name)}</option>`).join('')}</select>`)}<div class="form-error" role="alert"></div><div class="modal-actions">${action('close','取消')}<button type="submit" class="danger">删除角色</button></div></form>`);
@@ -137,7 +158,7 @@ export function mountProjectAccess({api,modal,closeModal,getModalRevision=()=>0,
     if(!form.id.startsWith('access-'))return false;
     const project=form.dataset.project||getProject()?.id,base=`/projects/${encodeURIComponent(project)}`,data=new FormData(form),version=Number(form.dataset.version);
     if(form.id==='access-role-form'){
-      await api(base+'/roles'+(form.dataset.id?'/'+encodeURIComponent(form.dataset.id):''),{name:data.get('name'),description:data.get('description'),pages:data.getAll('pages'),version},form.dataset.id?'PUT':'POST');
+      await api(base+'/roles'+(form.dataset.id?'/'+encodeURIComponent(form.dataset.id):''),{name:data.get('name'),description:data.get('description'),pages:data.getAll('pages'),actions:data.getAll('actions'),version},form.dataset.id?'PUT':'POST');
     }else if(form.id==='access-delete-role-form'){
       await api(base+'/roles/'+encodeURIComponent(form.dataset.id),{version,replacement_role_id:data.get('replacement_role_id')||''},'DELETE');
     }else if(form.id==='access-member-form'){
@@ -145,6 +166,7 @@ export function mountProjectAccess({api,modal,closeModal,getModalRevision=()=>0,
     }else if(form.id==='access-remove-member-form'){
       await api(base+'/members/'+encodeURIComponent(form.dataset.user),{version},'DELETE');
     }else return false;
+    if(form.id==='access-role-form')roleDrafts.delete(form.dataset.draftKey);
     closeModal();await changed(project);
     if(document.querySelector('.access-page'))await load();else await loadMembers(project);
     toast('角色与成员权限已更新');return true;

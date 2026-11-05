@@ -62,7 +62,7 @@ await page.route("**/api/**", async (route) => {
   else if (path.endsWith("/collaborations")) body = paged(collaborations);
   else if (path === "/api/collaborations/collab_fixture") body = collaborations[0];
   else if (path === "/api/collaborations/collab_fixture/cancel") { collaborations[0] = { ...collaborations[0], status: "canceled" }; body = { collaboration: collaborations[0] }; }
-  else if(path.endsWith('/access'))body={pages:['overview','tasks','reviews','versions','timeline','chat','code','settings','git','access'],roles:[],responsibilities:['product','developer','tester'],version:1,can_manage:true,recovery:false};
+  else if(path.endsWith('/access'))body={pages:['overview','tasks','reviews','versions','timeline','chat','code','settings','git','access'],roles:[],actions:['agent.ask','analysis.run','requirement.create','bug.create','bug.create.linked','collaboration.create'],responsibilities:['product','developer','tester'],version:1,can_manage:true,recovery:false};
   else if(path.endsWith('/conversations'))body=paged(chatConversations(allRuns).map(c=>({id:c.id,title:c.title,updatedAt:c.updatedAt,active:c.active,naming:c.naming,legacy:c.legacy,reply_event_ids:c.turns.filter(r=>r.trigger_type==='collaboration_result'&&r.status==='succeeded').map(r=>r.source_event_id),turns:[]})));
   else if(path.endsWith('/requirement-intakes')||path===`/api/projects/${project.id}/tasks`||path===`/api/projects/${project.id}/events`)body=paged([]);
   else if(path===`/api/projects/${project.id}/artifacts`)body=paged([]);

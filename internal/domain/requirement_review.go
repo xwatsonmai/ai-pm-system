@@ -66,7 +66,8 @@ type RequirementReviewMessage struct {
 	Source *Task `json:"source,omitempty"`
 }
 
-// ReviewMention records an explicitly selected person, never inferred from @text.
+// ReviewMention records a verified member selected by a person or server policy,
+// never inferred from @text.
 // Offsets use UTF-16 code units, matching browser text selection offsets.
 type ReviewMention struct {
 	UserID string `json:"user_id"`

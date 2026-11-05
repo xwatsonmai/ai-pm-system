@@ -174,98 +174,106 @@ func TestManualAnalysisKindsCannotBorrowPlatformPrivileges(t *testing.T) {
 	}
 }
 
-func TestManualSandboxRunStopsWhenSourcePageIsRevoked(t *testing.T) {
-	m, db, origin, _ := collaborationToolsFixture(t)
-	c := context.Background()
-	p, _ := db.GetProject(c, origin.ProjectID)
-	p.Name, p.AgentReadMode = "Sandbox permission", "sandbox"
-	p.ProjectRoles = append(p.ProjectRoles, domain.ProjectRole{ID: "manual-source", Name: "Manual", Pages: []string{"tasks", "code"}, Version: 1})
-	p.Memberships[0].Roles = []string{"manual-source"}
-	p.AccessVersion++
-	if e := db.PutProject(c, p); e != nil {
-		t.Fatal(e)
-	}
-	if e := db.PutProfile(c, domain.Profile{ID: "profile", Name: "Fixture", Model: "fixture", BaseURL: "http://unused"}); e != nil {
-		t.Fatal(e)
-	}
-	if e := db.PutPlatformSettings(c, domain.PlatformSettings{ProfileID: "profile"}); e != nil {
-		t.Fatal(e)
-	}
-	worker := filepath.Join(t.TempDir(), "unused-worker.mjs")
-	if e := os.WriteFile(worker, nil, 0600); e != nil {
-		t.Fatal(e)
-	}
-	m.Worker = worker
-	m.Git = &gitrepo.Repositories{Root: filepath.Join(t.TempDir(), "repos"), App: m.App}
-	socketDir, e := os.MkdirTemp("/tmp", "pm-access-")
-	if e != nil {
-		t.Fatal(e)
-	}
-	t.Cleanup(func() { os.RemoveAll(socketDir) })
-	m.SandboxSocket = filepath.Join(socketDir, "runner.sock")
-	listener, e := net.Listen("unix", m.SandboxSocket)
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer listener.Close()
-	started, stopped := make(chan struct{}), make(chan struct{})
-	errCh := make(chan error, 1)
-	go func() {
-		conn, err := listener.Accept()
-		if err != nil {
-			errCh <- err
-			return
-		}
-		defer conn.Close()
-		decoder, encoder := json.NewDecoder(conn), json.NewEncoder(conn)
-		var request sandbox.Request
-		if err = decoder.Decode(&request); err != nil {
-			errCh <- err
-			return
-		}
-		if err = encoder.Encode(map[string]bool{"ready": true}); err != nil {
-			errCh <- err
-			return
-		}
-		var message map[string]any
-		if err = decoder.Decode(&message); err != nil {
-			errCh <- err
-			return
-		}
-		close(started)
-		if err = decoder.Decode(&message); err != nil {
-			errCh <- err
-			return
-		}
-		if message["type"] == "stop" {
-			close(stopped)
-		}
-	}()
-	r, e := m.StartAs(c, domain.Actor{ID: origin.OwnerID, Kind: "human"}, p.ID, "", "progress", "Read source", "")
-	if e != nil {
-		t.Fatal(e)
-	}
-	if r.OwnerID != origin.OwnerID || r.CodeSnapshot == nil {
-		t.Fatal("manual run was not bound to owner/sandbox", r)
-	}
-	select {
-	case <-started:
-	case e := <-errCh:
-		t.Fatal(e)
-	case <-time.After(5 * time.Second):
-		t.Fatal("sandbox did not start")
-	}
-	p, _ = db.GetProject(c, p.ID)
-	p.ProjectRoles[len(p.ProjectRoles)-1].Pages = []string{"tasks"}
-	p.AccessVersion++
-	if e = db.PutProject(c, p); e != nil {
-		t.Fatal(e)
-	}
-	select {
-	case <-stopped:
-	case e := <-errCh:
-		t.Fatal(e)
-	case <-time.After(4 * time.Second):
-		t.Fatal("native worker retained revoked source access")
+func TestManualSandboxRunStopsWhenSourcePageOrActionIsRevoked(t *testing.T) {
+	for _, revoke := range []string{"source", "action"} {
+		t.Run(revoke, func(t *testing.T) {
+			m, db, origin, _ := collaborationToolsFixture(t)
+			c := context.Background()
+			p, _ := db.GetProject(c, origin.ProjectID)
+			p.Name, p.AgentReadMode = "Sandbox permission", "sandbox"
+			p.ProjectRoles = append(p.ProjectRoles, domain.ProjectRole{ID: "manual-source", Name: "Manual", Pages: []string{"tasks", "code"}, Actions: []string{domain.ActionRunAnalysis}, Version: 1})
+			p.Memberships[0].Roles = []string{"manual-source"}
+			p.AccessVersion++
+			if e := db.PutProject(c, p); e != nil {
+				t.Fatal(e)
+			}
+			if e := db.PutProfile(c, domain.Profile{ID: "profile", Name: "Fixture", Model: "fixture", BaseURL: "http://unused"}); e != nil {
+				t.Fatal(e)
+			}
+			if e := db.PutPlatformSettings(c, domain.PlatformSettings{ProfileID: "profile"}); e != nil {
+				t.Fatal(e)
+			}
+			worker := filepath.Join(t.TempDir(), "unused-worker.mjs")
+			if e := os.WriteFile(worker, nil, 0600); e != nil {
+				t.Fatal(e)
+			}
+			m.Worker = worker
+			m.Git = &gitrepo.Repositories{Root: filepath.Join(t.TempDir(), "repos"), App: m.App}
+			socketDir, e := os.MkdirTemp("/tmp", "pm-access-")
+			if e != nil {
+				t.Fatal(e)
+			}
+			t.Cleanup(func() { os.RemoveAll(socketDir) })
+			m.SandboxSocket = filepath.Join(socketDir, "runner.sock")
+			listener, e := net.Listen("unix", m.SandboxSocket)
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer listener.Close()
+			started, stopped := make(chan struct{}), make(chan struct{})
+			errCh := make(chan error, 1)
+			go func() {
+				conn, err := listener.Accept()
+				if err != nil {
+					errCh <- err
+					return
+				}
+				defer conn.Close()
+				decoder, encoder := json.NewDecoder(conn), json.NewEncoder(conn)
+				var request sandbox.Request
+				if err = decoder.Decode(&request); err != nil {
+					errCh <- err
+					return
+				}
+				if err = encoder.Encode(map[string]bool{"ready": true}); err != nil {
+					errCh <- err
+					return
+				}
+				var message map[string]any
+				if err = decoder.Decode(&message); err != nil {
+					errCh <- err
+					return
+				}
+				close(started)
+				if err = decoder.Decode(&message); err != nil {
+					errCh <- err
+					return
+				}
+				if message["type"] == "stop" {
+					close(stopped)
+				}
+			}()
+			r, e := m.StartAs(c, domain.Actor{ID: origin.OwnerID, Kind: "human"}, p.ID, "", "progress", "Read source", "")
+			if e != nil {
+				t.Fatal(e)
+			}
+			if r.OwnerID != origin.OwnerID || r.CodeSnapshot == nil {
+				t.Fatal("manual run was not bound to owner/sandbox", r)
+			}
+			select {
+			case <-started:
+			case e := <-errCh:
+				t.Fatal(e)
+			case <-time.After(5 * time.Second):
+				t.Fatal("sandbox did not start")
+			}
+			p, _ = db.GetProject(c, p.ID)
+			if revoke == "source" {
+				p.ProjectRoles[len(p.ProjectRoles)-1].Pages = []string{"tasks"}
+			} else {
+				p.ProjectRoles[len(p.ProjectRoles)-1].Actions = []string{}
+			}
+			p.AccessVersion++
+			if e = db.PutProject(c, p); e != nil {
+				t.Fatal(e)
+			}
+			select {
+			case <-stopped:
+			case e := <-errCh:
+				t.Fatal(e)
+			case <-time.After(4 * time.Second):
+				t.Fatal("native worker retained revoked source access")
+			}
+		})
 	}
 }
