@@ -112,6 +112,18 @@ func (s *Service) requireTaskCreation(c context.Context, a domain.Actor, project
 
 // The caller holds Service.mu through the corresponding storage commit.
 func (s *Service) authorizeTaskWrite(c context.Context, a domain.Actor, t domain.Task, old int) error {
+	if old == 0 && t.ParentTaskID != "" {
+		if e := s.RequirePages(c, ActionActor(c, a), t.ProjectID, "tasks", "reviews", "versions"); e != nil {
+			return e
+		}
+		parent, e := s.Store.GetTask(c, t.ParentTaskID)
+		if e != nil {
+			return e
+		}
+		if parent.ProjectID != t.ProjectID || parent.Kind != "requirement" || t.Kind != "requirement" || t.ParentRequirementID != "" || t.Iteration != nil {
+			return domain.ErrForbidden
+		}
+	}
 	if old == 0 {
 		if e := s.requireTaskCreation(c, a, t.ProjectID, t.Kind, t.ParentRequirementID); e != nil {
 			return e
@@ -131,6 +143,17 @@ func (s *Service) authorizeTaskWrite(c context.Context, a domain.Actor, t domain
 		if t.Kind != current.Kind {
 			if e = s.requireTaskCreation(c, a, current.ProjectID, t.Kind, current.ParentRequirementID); e != nil {
 				return e
+			}
+			if current.Kind == "requirement" {
+				children, err := s.Store.ListTasks(c, current.ProjectID)
+				if err != nil {
+					return err
+				}
+				for _, child := range children {
+					if child.ParentTaskID == current.ID {
+						return errors.New("已有子需求的上级不能转换为 Bug")
+					}
+				}
 			}
 		}
 	}

@@ -1,4 +1,5 @@
 @import url("fonts.css");
+@import url("version-lineage.css");
 :root {
   --text: #272731;
   font-family:
@@ -3039,6 +3040,10 @@ details.rc-card > summary::-webkit-details-marker { display: none; }
 
 
 /* Equal-weight requirement rows; structure is conveyed only by the tree rail. */
+.requirement-pool-page { max-width: none; }
+@media (min-width: 1101px) {
+ .requirement-pool-page { padding-inline: 40px; }
+}
 .requirement-pool-page .page-heading { margin-bottom: 24px; }
 .requirement-pool-page .pv-pool-tools { flex-wrap: wrap; align-items: center; margin-bottom: 24px; }
 .task-view-switch { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid #e5e0ee; border-radius: 8px; margin-left: auto; }

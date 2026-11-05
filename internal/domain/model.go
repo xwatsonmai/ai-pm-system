@@ -71,6 +71,7 @@ type TestVerification struct {
 }
 
 type Task struct {
+	ParentTaskID        string             `json:"parent_task_id,omitempty"`
 	RequirementChange   *RequirementChange `json:"requirement_change,omitempty"`
 	ChangeRequestID     string             `json:"change_request_id,omitempty"`
 	ParentRequirementID string             `json:"parent_requirement_id,omitempty"`

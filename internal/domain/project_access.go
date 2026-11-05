@@ -4,7 +4,7 @@ import "slices"
 
 // ProjectPages are stable capabilities. Labels and navigation groups may change
 // without changing grants. Permission is intentionally at page granularity.
-var ProjectPages = []string{"overview", "tasks", "reviews", "versions", "timeline", "chat", "code", "settings", "git", "access"}
+var ProjectPages = []string{"overview", "tasks", "reviews", "versions", "lineage", "timeline", "chat", "code", "settings", "git", "access"}
 var ProjectResponsibilities = []string{"product", "developer", "tester"}
 
 const (

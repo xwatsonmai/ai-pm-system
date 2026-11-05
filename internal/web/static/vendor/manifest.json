@@ -18,5 +18,30 @@
     "source": "https://github.com/ueberdosis/tiptap/tree/v3.32.0",
     "build": "internal/web/scripts/vendor-editor.py",
     "source_lock": "internal/web/scripts/editor-sources.json"
+  },
+  {
+    "package": "@tabler/icons",
+    "version": "3.50.0",
+    "integrity": "sha512-HflLxyrH1cqC7s7jzQGSjpsTAVIoaf7+/yHjbdM59rJQBMjliibp+LYhDPFxOMcwa1M8DNpOk6ENzQiWn9a1Dg==",
+    "source": "https://registry.npmjs.org/@tabler/icons/-/icons-3.50.0.tgz",
+    "files": [
+      "tabler/cube.svg",
+      "tabler/file-description.svg",
+      "tabler/bug.svg",
+      "tabler/user.svg",
+      "tabler/plus.svg",
+      "tabler/minus.svg",
+      "tabler/arrows-maximize.svg",
+      "tabler/chevron-down.svg",
+      "tabler/chevron-right.svg",
+      "tabler/search.svg",
+      "tabler/external-link.svg",
+      "tabler/x.svg",
+      "tabler/git-branch.svg",
+      "tabler/refresh.svg",
+      "tabler/chevron-left.svg",
+      "tabler/focus-centered.svg",
+      "tabler/LICENSE"
+    ]
   }
 ]

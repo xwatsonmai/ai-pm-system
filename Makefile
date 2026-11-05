@@ -32,3 +32,4 @@ test:
 	node --check internal/web/static/task-hierarchy.mjs
 	node --check internal/web/static/requirement-pool.mjs
 	node --check internal/web/static/version-picker.mjs
+	node --check internal/web/static/version-lineage.mjs
