@@ -5,6 +5,7 @@ import (
 	"ai-pm-system/internal/domain"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -19,6 +20,10 @@ func TestSubrequirementCreationPermissionsRetryAndImmutableParent(t *testing.T) 
 	child, e := s.CreateTask(c, owner, p.ID, in)
 	if e != nil || child.Task.ParentTaskID != parent.Task.ID || child.Task.ProjectVersionID != parent.Task.ProjectVersionID {
 		t.Fatal(child, e)
+	}
+	_, e = s.EditTask(c, owner, parent.Task.ID, app.TaskInput{Title: "Parent becomes Bug", Kind: "bug", Version: parent.Task.Version, RequestID: "convert-parent"})
+	if e == nil || !strings.Contains(e.Error(), "已有子需求") {
+		t.Fatal("parent conversion broke the subrequirement relation", e)
 	}
 	again, e := s.CreateTask(c, owner, p.ID, in)
 	if e != nil || again.Task.ID != child.Task.ID {

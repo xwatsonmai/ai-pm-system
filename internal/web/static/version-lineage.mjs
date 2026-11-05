@@ -80,6 +80,7 @@ export function mountVersionLineage({api,getProject,getDefaultVersion=()=>'',can
  }
  function rejected(s,e){
   if(!active(s)||![401,403].includes(e.status))return false;
+  s.graphRequest++;s.versionRequest++;
   s.graph=null;s.layout=null;s.signature='';s.children.clear();s.versions=emptyPage();
   for(const selector of ['.ln-version-list','.ln-version-pages','.ln-nodes','.ln-version-root','.ln-edge-labels','.ln-root-pages'])patchKeyedHTML(s.root.querySelector(selector),'');
   s.root.querySelector('.ln-edges').innerHTML='';s.root.querySelector('.ln-scene').hidden=true;s.root.querySelector('.ln-minimap').hidden=true;
@@ -169,7 +170,7 @@ export function mountVersionLineage({api,getProject,getDefaultVersion=()=>'',can
   s.zoom=Math.max(.35,Math.min(1.6,old+delta));s.x=x-(x-s.x)*s.zoom/old;s.y=y-(y-s.y)*s.zoom/old;applyViewport(s);
  }
  async function selectVersion(s,id){
-  if(!id)return; clearTimeout(timer);s.root.querySelector('.ln-scene').hidden=true;s.root.querySelector('.ln-minimap').hidden=true;s.layout=null; s.version=id;s.rootPage=1;s.children=new Map();s.expanded=new Set();s.pages=new Map();s.initialized=false;s.signature='';s.selected='';s.graph=null;s.query='';s.root.querySelector('[data-ln-search]').value='';
+  if(!id)return; clearTimeout(timer);s.root.querySelector('.ln-scene').hidden=true;s.root.querySelector('.ln-minimap').hidden=true;patchKeyedHTML(s.root.querySelector('.ln-root-pages'),'');s.layout=null; s.version=id;s.rootPage=1;s.children=new Map();s.expanded=new Set();s.pages=new Map();s.initialized=false;s.signature='';s.selected='';s.graph=null;s.query='';s.root.querySelector('[data-ln-search]').value='';
   renderVersions(s);announce(s,'正在加载关系…');await readGraph(s,{fit:true});
  }
  function findNode(s,id){return s.layout?.nodes.find(n=>n.id===id);}

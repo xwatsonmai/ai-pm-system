@@ -144,6 +144,17 @@ func (s *Service) authorizeTaskWrite(c context.Context, a domain.Actor, t domain
 			if e = s.requireTaskCreation(c, a, current.ProjectID, t.Kind, current.ParentRequirementID); e != nil {
 				return e
 			}
+			if current.Kind == "requirement" {
+				children, err := s.Store.ListTasks(c, current.ProjectID)
+				if err != nil {
+					return err
+				}
+				for _, child := range children {
+					if child.ParentTaskID == current.ID {
+						return errors.New("已有子需求的上级不能转换为 Bug")
+					}
+				}
+			}
 		}
 	}
 	ids := []string{}
