@@ -49,7 +49,7 @@ func (s *Server) queryStore() (storage.PagedQueries, error) {
 // pagedList preserves old response shapes unless pagination was requested.
 func (s *Server) pagedList(w http.ResponseWriter, r *http.Request, resource string) bool {
 	q, explicit, e := pageQuery(r)
-	if !explicit {
+	if !explicit && !(resource == "tasks" && r.URL.Query().Get("view") == "tree") {
 		return false
 	}
 	if e != nil {
@@ -64,7 +64,25 @@ func (s *Server) pagedList(w http.ResponseWriter, r *http.Request, resource stri
 	project := r.PathValue("id")
 	a := s.actor(r)
 	if resource == "tasks" {
-		tasks, e := store.QueryTasks(r.Context(), project, domain.TaskListQuery{PageQuery: q, Status: r.URL.Query().Get("status"), Kind: r.URL.Query().Get("kind"), ProjectVersionID: r.URL.Query().Get("project_version_id"), ParentRequirementID: r.URL.Query().Get("parent_requirement_id")})
+		query := domain.TaskListQuery{PageQuery: q, Status: r.URL.Query().Get("status"), Kind: r.URL.Query().Get("kind"), ProjectVersionID: r.URL.Query().Get("project_version_id"), ParentRequirementID: r.URL.Query().Get("parent_requirement_id")}
+		var tasks domain.Page[domain.Task]
+		var tree *domain.TaskTreePage
+		if r.URL.Query().Get("view") == "tree" {
+			adapter, ok := store.(storage.TaskTreeQueries)
+			if !ok {
+				fail(w, errors.New("存储适配器未实现层级查询"))
+				return true
+			}
+			value, err := adapter.QueryTaskTree(r.Context(), project, domain.TaskTreeQuery{TaskListQuery: query, ParentID: r.URL.Query().Get("tree_parent_id")})
+			e = err
+			tree = &value
+			tasks = domain.Page[domain.Task]{Total: value.Total, Page: value.Page.Page, PageSize: value.PageSize, Items: []domain.Task{}}
+			for _, node := range value.Items {
+				tasks.Items = append(tasks.Items, node.Task)
+			}
+		} else {
+			tasks, e = store.QueryTasks(r.Context(), project, query)
+		}
 		if e != nil {
 			fail(w, e)
 			return true
@@ -93,7 +111,13 @@ func (s *Server) pagedList(w http.ResponseWriter, r *http.Request, resource stri
 			fail(w, e)
 			return true
 		}
-		respond(w, map[string]any{"items": tasks.Items, "total": tasks.Total, "page": tasks.Page, "page_size": tasks.PageSize, "requirement_reviews": reviews, "version_options": options})
+		response := map[string]any{"items": tasks.Items, "total": tasks.Total, "page": tasks.Page, "page_size": tasks.PageSize, "requirement_reviews": reviews, "version_options": options}
+		if tree != nil {
+			response["items"] = tree.Items
+			response["matching_total"] = tree.MatchingTotal
+			response["view"] = "tree"
+		}
+		respond(w, response)
 		return true
 	}
 	if resource == "members" {

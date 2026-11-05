@@ -134,6 +134,7 @@ export function mountProjectVersions({
   getModalRevision=()=>0,
   refresh,
   getContext,
+  getSelectedTaskIDs,
   getProject,
   getUser,
   onTask,
@@ -383,7 +384,7 @@ export function mountProjectVersions({
         await assign({ taskIDs: [node.dataset.task] });
         break;
       case "pv-assign-selected": {
-        const ids = [
+        const ids = getSelectedTaskIDs ? getSelectedTaskIDs() : [
           ...document.querySelectorAll("[data-plan-task]:checked"),
         ].map((x) => x.value);
         if (!ids.length) throw Error("先勾选需要安排版本的需求");

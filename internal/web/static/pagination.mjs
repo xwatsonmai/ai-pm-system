@@ -1,9 +1,9 @@
 const escape = value => String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export function pageQuery(page = 1, pageSize = 20) { return new URLSearchParams({page:String(page),page_size:String(pageSize)}); }
-export function pagerHTML(result, key) {
+export function pagerHTML(result, key, {unit='项'}={}) {
  if (!result) return '';
  const {total=0,page=1,page_size=20}=result, pages=Math.max(1,Math.ceil(total/page_size));
- return `<nav class="list-pagination" aria-label="列表分页" data-pager="${escape(key)}"><span class="hint">共 ${total} 项 · 第 ${page} / ${pages} 页</span><div class="row"><label class="hint">每页 <select data-page-size="${escape(key)}" aria-label="每页条数">${[20,50,100].map(size=>`<option value="${size}" ${size===page_size?'selected':''}>${size}</option>`).join('')}</select></label><button type="button" data-action="list-page" data-list="${escape(key)}" data-page="${page-1}" ${page<=1?'disabled':''}>上一页</button><button type="button" data-action="list-page" data-list="${escape(key)}" data-page="${page+1}" ${page>=pages?'disabled':''}>下一页</button></div></nav>`;
+ return `<nav class="list-pagination" aria-label="列表分页" data-pager="${escape(key)}"><span class="hint">共 ${total} ${escape(unit)} · 第 ${page} / ${pages} 页</span><div class="row"><label class="hint">每页 <select data-page-size="${escape(key)}" aria-label="每页条数">${[20,50,100].map(size=>`<option value="${size}" ${size===page_size?'selected':''}>${size}</option>`).join('')}</select></label><button type="button" data-action="list-page" data-list="${escape(key)}" data-page="${page-1}" ${page<=1?'disabled':''}>上一页</button><button type="button" data-action="list-page" data-list="${escape(key)}" data-page="${page+1}" ${page>=pages?'disabled':''}>下一页</button></div></nav>`;
 }
 const markup = new WeakMap();
 const sameKind = (a,b) => a.nodeType===b.nodeType && a.nodeName===b.nodeName && a.namespaceURI===b.namespaceURI;

@@ -297,6 +297,8 @@ try {
     .locator(".nav")
     .getByRole("button", { name: "需求池", exact: true })
     .click();
+  const parentToggle=page.locator(`[data-action="task-tree-toggle"][data-id="${source.id}"]`);
+  if(await parentToggle.getAttribute("aria-expanded")==="false")await parentToggle.click();
   await page.locator(`tr[data-id="${child.id}"]`).click();
   assert.equal(
     await page.getByRole("button", { name: "追加迭代", exact: true }).count(),

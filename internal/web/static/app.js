@@ -4,6 +4,8 @@ import { chatConversations, conversationID } from "./conversations.mjs";
 import { renderMarkdown } from "./markdown.mjs";
 import { mountVersionPicker } from "./version-picker.mjs";
 import { pagerHTML, pageQuery, patchKeyedHTML } from "./pagination.mjs";
+import { createTaskHierarchy } from "./task-hierarchy.mjs";
+const taskTree = createTaskHierarchy();
 import { patchHTML, mergeRunRefresh } from "./dom-update.mjs";
 import { requirementFormHTML, mountRequirementEditor } from "./requirement-editor.mjs";
 import { requirementReviewHTML, mountRequirementReview } from "./requirement-review.mjs";
@@ -154,6 +156,7 @@ let state = {
   kind: "",
   versionFilter: "",
   versionGrouping: true,
+  taskHierarchy: true,
   selectedRun: "",
   switchingProject: false,
   busy: false,
@@ -161,7 +164,7 @@ let state = {
 };
 const drafts = new Map();
 const accessUI = mountProjectAccess({api,modal,closeModal,getModalRevision:()=>modalRevision,getProject:()=>state.project,getAccess:()=>state.project_access,onAccessChange:refreshProjectAccess,heading,field,action,escape,toast});
-const projectVersionUI=mountProjectVersions({api,modal,closeModal,getModalRevision:()=>modalRevision,getContext:()=>state.context,getProject:()=>state.project,getUser:()=>state.auth?.user?.id||'local-owner',canAccessPage:page=>allowedPage(page,state.project_access,isPlatformAdmin()),canCreateRequirement:()=>canAction('requirement.create'),refresh:async()=>{await refresh();render();},onTask:openTask,onCreate:versionID=>taskForm(null,null,null,versionID),onPool:async filter=>{await navigate('tasks');state.versionFilter=filter;setListPage('tasks',1);await loadBusinessPage();},toast});
+const projectVersionUI=mountProjectVersions({getSelectedTaskIDs:()=>taskTree.selectedIDs(),api,modal,closeModal,getModalRevision:()=>modalRevision,getContext:()=>state.context,getProject:()=>state.project,getUser:()=>state.auth?.user?.id||'local-owner',canAccessPage:page=>allowedPage(page,state.project_access,isPlatformAdmin()),canCreateRequirement:()=>canAction('requirement.create'),refresh:async()=>{await refresh();render();},onTask:openTask,onCreate:versionID=>taskForm(null,null,null,versionID),onPool:async filter=>{await navigate('tasks');state.versionFilter=filter;setListPage('tasks',1);await loadBusinessPage();},toast});
 const timelineUI = mountProjectTimeline({
   api, getProject: () => state.project, onTask: openTask,
   onVersion: id => projectVersionUI.open(id),
@@ -358,12 +361,25 @@ function listParams(key,extra={}) {
 function mayReadPage(access,page) { return !access || access.pages?.includes(page); }
 async function readWorkspace(projectID,page=state.page) {
  const revision=++workspaceRevision,scope=projectID,runsAtStart=new Map(state.runs.map(r=>[r.id,r]));
+ const hierarchy=state.taskHierarchy,filters={status:state.filter,q:state.search,kind:state.kind,project_version_id:state.versionFilter},rootPage={...listResult('tasks')};
+ const current=()=>revision===workspaceRevision&&state.project?.id===projectID&&state.page===page&&(page!=='tasks'||(hierarchy===state.taskHierarchy&&filters.status===state.filter&&filters.q===state.search&&filters.kind===state.kind&&filters.project_version_id===state.versionFilter&&rootPage.page===listResult('tasks').page&&rootPage.page_size===listResult('tasks').page_size));
+ let tree=null;
  const [context,access]=await Promise.all([api(`/projects/${projectID}/summary`),api(`/projects/${projectID}/access`)]);
  const lists=new Map();
  const get=async(key,path,extra={})=>{const current=businessLists.get(`${scope}:${key}`)||emptyPage();const params=pageQuery(current.page,current.page_size);for(const [k,v] of Object.entries(extra))if(v!==''&&v!=null)params.set(k,String(v));const result=await api(`${path}?${params}`);lists.set(key,result);return result;};
  const task=async(key,status)=>get(key,`/projects/${projectID}/tasks`,{status,...(key==='tasks'?{q:state.search,kind:state.kind,project_version_id:state.versionFilter}:{})});
  let runs=[],intakes=[],collaborations=[];
- if(page==='tasks'&&mayReadPage(access,'tasks')){const result=await task('tasks',state.filter);context.tasks=result.items;context.requirement_reviews=result.requirement_reviews||[];}
+ if(page==='tasks'&&current()){
+  taskTree.begin(JSON.stringify([projectID,state.auth?.user?.id,hierarchy,filters,rootPage.page,rootPage.page_size]),{project:projectID,user:state.auth?.user?.id||'local-owner',filtered:Object.values(filters).some(Boolean)});
+  if(mayReadPage(access,'tasks')){
+   const result=await get('tasks',`/projects/${projectID}/tasks`,{...filters,...(hierarchy?{view:'tree'}:{})});
+   if(hierarchy&&current()){
+    tree=await taskTree.read(result,(parent,page)=>{const query=pageQuery(page,20);for(const [k,v]of Object.entries({...filters,view:'tree',tree_parent_id:parent}))if(v)query.set(k,v);return api(`/projects/${projectID}/tasks?${query}`);},current);
+    if(tree){const data=taskTree.data(tree);context.tasks=data.nodes;context.requirement_reviews=data.reviews;context.project_versions=[...(context.project_versions||[]),...data.versions];}
+   }else{context.tasks=result.items;context.requirement_reviews=result.requirement_reviews||[];}
+  }
+ }
+
  if(page==='overview'&&mayReadPage(access,'overview')){
   const taskAccess=['tasks','reviews','versions'].some(key=>mayReadPage(access,key)),eventAccess=['timeline','tasks','reviews','versions'].some(key=>mayReadPage(access,key));
   const [tasks,events,artifacts]=await Promise.all([taskAccess?task('overview-tasks','active'):emptyPage(),eventAccess?get('overview-events',`/projects/${projectID}/events`):emptyPage(),mayReadPage(access,'reviews')?get('overview-artifacts',`/projects/${projectID}/artifacts`):emptyPage()]);
@@ -386,10 +402,11 @@ async function readWorkspace(projectID,page=state.page) {
  const names=new Map((context.project_versions||[]).map(v=>[v.id,v]));
  for(const result of lists.values())for(const v of result.version_options||[])names.set(v.id,v);
  context.project_versions=[...names.values()];
- return {revision,projectID,page,context,access,lists,runs,intakes,collaborations,runsAtStart};
+ return {revision,projectID,page,context,access,lists,runs,intakes,collaborations,runsAtStart,tree,current};
 }
 function applyWorkspace(snapshot) {
- if(snapshot.revision!==workspaceRevision)return false;
+ if(snapshot.revision!==workspaceRevision||!snapshot.current())return false;
+ if(snapshot.tree)taskTree.commit(snapshot.tree);else if(snapshot.page==='tasks')taskTree.syncSelection(snapshot.context.tasks||[]);
  state.context=snapshot.context;state.project=snapshot.context.project;state.project_access=snapshot.access;
  for(const [key,value] of snapshot.lists)businessLists.set(`${snapshot.projectID}:${key}`,value);
  state.runs=mergeRunRefresh(snapshot.runs,state.runs,snapshot.runsAtStart).filter(r=>!deletedConversations.has(conversationKey(snapshot.projectID,conversationID(r))));
@@ -409,7 +426,8 @@ function updateBusinessPage() {
  if(renderer){
   if(state.page==='tasks'){
    patchKeyedHTML($('#task-table'),tasksTable());
-   const pager=$('[data-pager="tasks"]');if(pager){const holder=document.createElement('div');holder.innerHTML=pagerHTML(listResult('tasks'),'tasks');patchKeyedHTML(pager,holder.firstElementChild.innerHTML);}
+   $$('#task-table [data-plan-task]').forEach(input=>{input.checked=taskTree.isSelected(input.value);});
+   const pager=$('[data-pager="tasks"]');if(pager){const holder=document.createElement('div');holder.innerHTML=tasksPagerHTML();patchKeyedHTML(pager,holder.firstElementChild.innerHTML);}
   }else {
     const profileSelect=state.page==='platform'?$('#platform-form [name=profile_id]'):null,selectedProfile=profileSelect?.value,selectedLabel=profileSelect?.selectedOptions[0]?.textContent;
     patchKeyedHTML($('#page'),renderer());
@@ -632,13 +650,32 @@ function overview() {
     )}</div><div class="overview-grid"><div><h2 class="section-label">当前工作 ${action("navigate", "查看全部 " + icon("arrow"), "ghost", 'data-page="tasks"')}</h2>${now.length ? now.map(taskRow).join("") : empty("当前没有推进中的需求", "提出一个需求，或记录一个需要处理的问题。", action("new-task", icon("plus") + " 创建需求"))}${pagerHTML(listResult("overview-tasks"),"overview-tasks")}<div class="divider"></div><h2 class="section-label">项目进度解读 ${action("analyze", "更新分析", "ghost", 'data-kind="progress"')}</h2>${evidence ? `<div class="prewrap">${escape(evidence.body)}</div><p class="hint">平台 Agent · ${date(evidence.at)} · 结论依据可在记录中查看</p>` : `<div class="context-note">${state.platform.configured ? "点击更新分析，让平台 Agent 对照需求和 Git 变化解释进度。" : "由平台管理员配置 Agent 模型后，平台 Agent 将结合需求、Git 与开发汇报分析进度。"}</div>`}</div><aside class="context-column"><section><h2 class="section-label">仓库观察</h2><p class="context-note"><strong>${escape(state.project.branch)}</strong><br>${state.project.sha ? `<span class="mono">${state.project.sha.slice(0, 12)}</span>` : "尚未读取代码"}<br>最近同步 ${date(state.project.synced_at)}</p>${action("navigate", "查看代码与变更 " + icon("arrow"), "inline-link", 'data-page="code"')}<p class="page-note">代码状态与上线记录分别记录。<br>按需求确认上线版本和环境。</p></section><section><h2 class="section-label">最近动态</h2>${events.length ? events.map((e) => `<div class="event" data-key="event:${e.seq}"><p>${escape(e.body || e.kind)}</p><time>${escape(e.actor)} · ${date(e.at)}</time></div>`).join("") : '<p class="context-note">项目活动会记录在这里。</p>'}${pagerHTML(listResult('overview-events'),'overview-events')}</section></aside></div></div>`;
 }
 function filteredTasks() { return state.context?.tasks || []; }
+function tasksPagerHTML(){return pagerHTML(listResult('tasks'),'tasks',{unit:state.taskHierarchy?'组':'项'});}
 function tasksTable() {
-  const tasks=filteredTasks();
-  if(!tasks.length)return empty("没有符合条件的需求","调整筛选，或创建一个新需求。");
-  const table=items=>`<div class="table-scroll"><table class="task-table"><thead><tr><th class="task-checkbox">选择</th><th>状态</th><th>需求</th><th>优先级</th><th>负责人</th><th>更新</th></tr></thead><tbody>${items.map(t=>`<tr data-key="${t.id}" tabindex="0" data-action="open-task" data-id="${t.id}"><td><input type="checkbox" data-plan-task value="${t.id}" aria-label="选择需求 ${escape(t.title)}" ${taskFinished(t)||t.status==='review'?'disabled':''}></td><td>${status(t)}</td><td class="task-title"><span class="badge ${t.kind==='bug'?'bug':''}">${t.kind==='bug'?(t.parent_requirement_id?'需求测试 Bug':'平台 Bug'):'迭代需求'}</span> ${escape(t.title)}${t.blocker?' <span class="badge blocked">阻塞</span>':''}<div class="task-id">${short(t.id)}${t.iteration?` · 迭代自 ${short(t.iteration.parent_task_id)}`:""} · R${t.revision} · ${escape(versionName(state.context.project_versions||[],t.project_version_id))}</div></td><td><span class="priority-mark ${t.priority}">${t.priority === "now" ? "▰▰▰" : t.priority === "next" ? "▰▰▱" : "▰▱▱"}</span> ${priorities[t.priority]}</td><td>${escape(t.owner||'未认领')}</td><td class="muted small">${date(t.updated_at)}</td></tr>`).join('')}</tbody></table></div>`;
-  if(!state.versionGrouping||state.versionFilter)return table(tasks)+`<div class="queue-footer">${listResult("tasks").total} 个需求</div>`;
+ const result=listResult('tasks'),tasks=state.taskHierarchy?result.items:filteredTasks();
+ if(!tasks.length)return empty("没有符合条件的需求","调整筛选，或创建一个新需求。");
+ const row=({node:t,depth=0,expanded=false})=>{
+  const context=state.taskHierarchy&&t.matches_filter===false;
+  const toggle=state.taskHierarchy?(t.children_count?`<button type="button" class="task-tree-toggle" data-action="task-tree-toggle" data-id="${escape(t.id)}" data-depth="${depth}" aria-expanded="${expanded}" aria-label="${expanded?'收起':'展开'} ${escape(t.title)} 的子项">${icon('chevron')}</button>`:'<span class="task-tree-spacer" aria-hidden="true"></span>'):'';
+  const relation=state.taskHierarchy&&t.tree_parent_id?`<span class="task-relation">${t.tree_relation==='bug'?'关联 Bug':'追加迭代'}</span>`:'';
+  return `<tr data-key="${escape(t.id)}" tabindex="0" data-action="open-task" data-id="${escape(t.id)}" class="${context?'task-tree-context':''}"><td><input type="checkbox" data-plan-task value="${escape(t.id)}" aria-label="选择需求 ${escape(t.title)}" ${taskFinished(t)||t.status==='review'||context?'disabled':''} ${taskTree.isSelected(t.id)?'checked':''}></td><td>${status(t)}</td><td class="task-title"><div class="task-tree-title" style="--task-depth:${Math.min(depth,6)}">${toggle}<div class="task-tree-content"><div>${relation}<span class="badge ${t.kind==='bug'?'bug':''}">${t.kind==='bug'?(t.parent_requirement_id?'需求测试 Bug':'平台 Bug'):'迭代需求'}</span> ${escape(t.title)}${t.blocker?' <span class="badge blocked">阻塞</span>':''}${context?' <span class="task-context-label">父级上下文</span>':''}</div><div class="task-id">${short(t.id)}${t.iteration?` · 迭代自 ${short(t.iteration.parent_task_id)}`:''} · R${t.revision} · ${escape(versionName(state.context.project_versions||[],t.project_version_id))}${state.taskHierarchy&&t.children_count?` <span class="task-child-count">${t.children_count} 个直接子项${!expanded&&t.pending_count?` · 含待确认 ${t.pending_count} 项`:''}</span>`:''}</div></div></div></td><td><span class="priority-mark ${t.priority}">${t.priority==='now'?'▰▰▰':t.priority==='next'?'▰▰▱':'▰▱▱'}</span> ${priorities[t.priority]}</td><td>${escape(t.owner||'未认领')}</td><td class="muted small">${date(t.updated_at)}</td></tr>`;
+ };
+ const treeRow=r=>{
+  if(r.kind==='task')return row(r);
+  let content=r.kind==='error'?`${escape(r.text)} ${action('task-tree-retry','重试','ghost')}`:'正在加载子项…';
+  if(r.kind==='page'){const v=r.result,pages=Math.ceil(v.total/v.page_size);content=`<span>子项 ${v.total} 项 · 第 ${v.page} / ${pages} 页</span><button type="button" data-action="task-tree-page" data-id="${escape(r.parent)}" data-page="${v.page-1}" ${v.page<=1?'disabled':''}>上一页</button><button type="button" data-action="task-tree-page" data-id="${escape(r.parent)}" data-page="${v.page+1}" ${v.page>=pages?'disabled':''}>下一页</button>`;}
+  return `<tr class="task-tree-extra" data-key="${r.kind}:${escape(r.parent)}"><td></td><td colspan="5"><div class="task-child-pager" style="--task-depth:${Math.min(r.depth,6)}" ${r.kind==='page'?'role="group" aria-label="子项分页"':'role="status"'}>${content}</div></td></tr>`;
+ };
+ const table=items=>`<div class="table-scroll"><table class="task-table"><thead><tr><th class="task-checkbox">选择</th><th>状态</th><th>需求</th><th>优先级</th><th>负责人</th><th>更新</th></tr></thead><tbody>${state.taskHierarchy?taskTree.rows(items).map(treeRow).join(''):items.map(node=>row({node})).join('')}</tbody></table></div>`;
+ const selected=taskTree.selectedIDs().length;
+ const selection=selected?`<div class="task-selection" data-key="task-selection">已选择 ${selected} 项（含折叠或子项其他页中的选择）${action('task-selection-clear','清空选择','ghost')}</div>`:'';
+ let content;
+ if(!state.versionGrouping||state.versionFilter)content=table(tasks);
+ else{
   const groups=[...new Set(tasks.map(t=>t.project_version_id||''))].map(id=>({id,name:versionName(state.context.project_versions||[],id)}));
-  return groups.map(g=>{const items=tasks.filter(t=>(t.project_version_id||'')===g.id);return items.length?`<section class="pv-pool-group" data-key="version:${escape(g.id)}"><div class="pv-pool-heading"><h2>${escape(g.name)} <span class="muted small">${items.length} 项</span></h2>${g.id&&allowedPage('versions',state.project_access)?action('pv-open','查看版本','ghost',`data-id="${g.id}"`):''}</div>${table(items)}</section>`:''}).join('')+`<div class="queue-footer">${listResult("tasks").total} 个需求 · 以实际验收结果确认业务完成</div>`;
+  content=groups.map(g=>{const items=tasks.filter(t=>(t.project_version_id||'')===g.id);return `<section class="pv-pool-group" data-key="version:${escape(g.id)}"><div class="pv-pool-heading"><h2>${escape(g.name)} <span class="muted small">本页 ${items.length} ${state.taskHierarchy?'组':'项'}</span></h2>${g.id&&allowedPage('versions',state.project_access)?action('pv-open','查看版本','ghost',`data-id="${escape(g.id)}"`):''}</div>${table(items)}</section>`;}).join('');
+ }
+ return selection+content+`<div class="queue-footer">${state.taskHierarchy?`${result.matching_total} 项匹配 · ${result.total} 组主需求 · 按主需求分页，子项展开后分页`:`${result.total} 个需求`}</div>`;
 }
 function mountTaskVersionFilter(){
  const host=$('[data-task-version-picker]');if(!host)return;
@@ -654,7 +691,7 @@ function tasksPage() {
     )
     .join(
       "",
-    )}</select><select id="kind-filter" aria-label="筛选类型"><option value="">所有类型</option><option value="requirement" ${state.kind === "requirement" ? "selected" : ""}>迭代需求</option><option value="bug" ${state.kind === "bug" ? "selected" : ""}>Bug 修复</option></select><div data-task-version-picker></div></div><div class="pv-pool-tools">${allowedPage("versions",state.project_access)?action("pv-assign-selected","安排目标版本"):""}${action("toggle-version-group",state.versionGrouping?"切换平铺列表":"按版本分组","ghost")}</div><div id="task-table">${tasksTable()}</div>${pagerHTML(listResult("tasks"),"tasks")}</div>`;
+    )}</select><select id="kind-filter" aria-label="筛选类型"><option value="">所有类型</option><option value="requirement" ${state.kind === "requirement" ? "selected" : ""}>迭代需求</option><option value="bug" ${state.kind === "bug" ? "selected" : ""}>Bug 修复</option></select><div data-task-version-picker></div></div><div class="pv-pool-tools">${allowedPage("versions",state.project_access)?action("pv-assign-selected","安排目标版本"):""}${action("toggle-version-group",state.versionGrouping?"取消版本分组":"按版本分组","ghost")}<div class="task-view-switch" role="group" aria-label="需求展示方式">${["tree","flat"].map(view=>`<button type="button" data-action="task-list-view" data-view="${view}" aria-pressed="${state.taskHierarchy===(view==='tree')}">${view==='tree'?'层级展示':'平铺展示'}</button>`).join('')}</div></div><div id="task-table">${tasksTable()}</div>${tasksPagerHTML()}</div>`;
 }
 function reviewsPage() {
   const tasks = state.context.tasks.filter((t) => t.status === "review");
@@ -1614,6 +1651,16 @@ document.addEventListener("click", async (event) => {
       else await loadBusinessPage();
       return;
     }
+    if(a==='task-list-view'){
+      const project=state.project?.id,hierarchy=button.dataset.view==='tree';
+      state.taskHierarchy=hierarchy;setListPage('tasks');await loadBusinessPage();
+      if(state.page==='tasks'&&state.project?.id===project&&state.taskHierarchy===hierarchy)renderPage();
+      return;
+    }
+    if(a==='task-tree-toggle'){taskTree.toggle(button.dataset.id,Number(button.dataset.depth));updateBusinessPage();await loadBusinessPage();return;}
+    if(a==='task-tree-page'){taskTree.setPage(button.dataset.id,Number(button.dataset.page));updateBusinessPage();await loadBusinessPage();return;}
+    if(a==='task-tree-retry'){await loadBusinessPage();return;}
+    if(a==='task-selection-clear'){taskTree.clearSelection();updateBusinessPage();return;}
     if(a==='toggle-version-group'){state.versionGrouping=!state.versionGrouping;renderPage();return;}
     if(a==='iterate-task'){await taskForm(null,button.dataset.id);return;}
     if(a==='iteration-more'){
@@ -2072,6 +2119,7 @@ document.addEventListener("drop", (event) => {
   addChatFiles([...(event.dataTransfer?.files || [])]);
 });
 document.addEventListener("change", async (event) => {
+ if(event.target.matches('[data-plan-task]')){taskTree.choose(event.target.value,event.target.checked);updateBusinessPage();return;}
  if(event.target.matches('[data-page-size]')){const key=event.target.dataset.pageSize;if(key==='files'){setListPage(key,1,Number(event.target.value));void loadFiles();return;}if(key==='code-results'){void loadCodeResults(1,Number(event.target.value)).catch(e=>toast(e.message));return;}if(key.startsWith('detail-')){void loadDetailPage(key,1,Number(event.target.value)).catch(e=>toast(e.message));return;}setListPage(key,1,Number(event.target.value));if(['profiles','projects','platform-projects','admins','accounts'].includes(key)){void refresh().then(updateBusinessPage).catch(e=>toast(e.message));}else if(key==='mcp-grants'){void loadMCP();}else void loadBusinessPage().catch(e=>toast(e.message));return;}
 
  if(['tl-end','tl-days','tl-grain'].includes(event.target.id)){await timelineUI.change(event.target);return;}
