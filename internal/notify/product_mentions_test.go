@@ -83,7 +83,7 @@ func TestAutomaticProductMentionRecoversBeforeReviewAndSendsOnce(t *testing.T) {
 }
 
 func TestAutomaticProductMentionRechecksDutyAndPageBeforeSending(t *testing.T) {
-	for _, revoke := range []string{"duty", "page", "membership"} {
+	for _, revoke := range []string{"duty", "page", "membership", "disabled"} {
 		t.Run(revoke, func(t *testing.T) {
 			c := context.Background()
 			db, hub, _ := setup(t)
@@ -92,6 +92,11 @@ func TestAutomaticProductMentionRechecksDutyAndPageBeforeSending(t *testing.T) {
 			p.ProjectRoles[0].Actions = append(p.ProjectRoles[0].Actions, domain.ActionCreateRequirement)
 			if err := db.PutProject(c, p); err != nil {
 				t.Fatal(err)
+			}
+			if revoke == "disabled" {
+				if err := db.CreateAccount(c, domain.Account{UserID: "manager", Username: "manager", Name: "产品成员", PasswordHash: "fixture-hash", Version: 1}, false); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err := hub.Bind(c, "fake", "manager", "wx_product"); err != nil {
 				t.Fatal(err)
@@ -115,6 +120,15 @@ func TestAutomaticProductMentionRechecksDutyAndPageBeforeSending(t *testing.T) {
 				p.ProjectRoles[1].Pages = []string{"reviews", "versions"}
 			case "membership":
 				p.Memberships = append(p.Memberships[:1], p.Memberships[2:]...)
+			case "disabled":
+				account, err := db.GetAccount(c, "manager")
+				if err != nil {
+					t.Fatal(err)
+				}
+				account.Disabled, account.Version = true, account.Version+1
+				if err = db.UpdateAccount(c, account, account.Version-1); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err = db.PutProject(c, p); err != nil {
 				t.Fatal(err)

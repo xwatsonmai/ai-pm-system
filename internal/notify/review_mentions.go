@@ -113,6 +113,13 @@ func (h *Hub) canDeliverMention(ctx context.Context, d Delivery) (bool, error) {
 		return false, nil
 	}
 	if d.Mention.Action == domain.RequirementProductMentionAction {
+		account, err := h.Data.GetAccount(ctx, d.UserID)
+		if err == nil && account.Disabled {
+			return false, nil
+		}
+		if err != nil && !errors.Is(err, domain.ErrNotFound) {
+			return false, err
+		}
 		events, err := h.Data.Events(ctx, p.ID, d.Mention.TaskID, 0)
 		if err != nil {
 			return false, err

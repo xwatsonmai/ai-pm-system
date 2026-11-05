@@ -183,3 +183,28 @@ func TestProductCreationAndBugsDoNotAutoMentionProducts(t *testing.T) {
 		t.Fatal("reminder changed the existing page grant", err)
 	}
 }
+
+func TestDisabledProductAccountIsNotAutomaticallyMentioned(t *testing.T) {
+	s, p, member := productMentionFixture(t)
+	c := context.Background()
+	if err := s.Store.CreateAccount(c, domain.Account{UserID: "product-a", Username: "disabled-product", Name: "停用产品", PasswordHash: "fixture-hash", Disabled: true, Version: 1}, false); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.CreateTask(c, member, p.ID, app.TaskInput{Title: "新的需求", RequestID: "disabled-product"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := s.Store.Events(c, p.ID, result.Task.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if m, ok := domain.CreatedRequirementProductMention(event); ok {
+			if len(m.Mentions) != 1 || m.Mentions[0].UserID != "product-b" {
+				t.Fatal("disabled product account was automatically mentioned", m.Mentions)
+			}
+			return
+		}
+	}
+	t.Fatal("enabled product member lost the reminder")
+}

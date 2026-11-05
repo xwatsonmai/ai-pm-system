@@ -19,6 +19,7 @@ import (
 
 // Data is what the hub reads from the platform's own records.
 type Data interface {
+	GetAccount(context.Context, string) (domain.Account, error)
 	GetTask(context.Context, string) (domain.Task, error)
 	ListTasks(context.Context, string) ([]domain.Task, error)
 	GetProject(context.Context, string) (domain.Project, error)

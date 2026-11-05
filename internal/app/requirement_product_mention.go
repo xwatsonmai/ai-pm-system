@@ -4,6 +4,7 @@ import (
 	"ai-pm-system/internal/domain"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"unicode/utf16"
 )
@@ -49,6 +50,14 @@ func (s *Service) addCreationProductMention(c context.Context, t domain.Task, ev
 	m := domain.RequirementReviewMessage{ID: domain.RequirementProductMentionID(t.ID), Role: "system", Actor: "系统", ActorID: "system", ActorKind: "platform", Action: domain.RequirementProductMentionAction, At: event.At,
 		Body: creator + " 提交了需求，请产品同事协助评审与确认："}
 	for _, id := range ids {
+		account, err := s.Store.GetAccount(c, id)
+		if err == nil && account.Disabled {
+			continue
+		}
+		// External-login users have no built-in account row.
+		if err != nil && !errors.Is(err, domain.ErrNotFound) {
+			return err
+		}
 		name := strings.TrimSpace(names[id])
 		if name == "" {
 			name = id
