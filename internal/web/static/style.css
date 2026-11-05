@@ -3006,6 +3006,25 @@ details.rc-card > summary::-webkit-details-marker { display: none; }
 .list-pagination{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:16px 0;flex-wrap:wrap}.list-pagination .row{gap:8px}.list-pagination select{width:auto;min-width:64px;padding:6px}.list-pagination button{white-space:nowrap}.list-load-error{padding:12px;color:var(--danger,#b84136)}
 @media(max-width:600px){.list-pagination{align-items:flex-start}.list-pagination>.row{width:100%;flex-wrap:wrap}}
 .review-history-pagination:empty{display:none}.review-history-pagination{display:flex;justify-content:center;align-items:center;gap:12px;padding:8px 16px;border-bottom:1px solid var(--line,#e5e7eb);flex-shrink:0}.review-history-pagination button{padding:5px 10px;font-size:12px}
+.version-picker{min-width:0;margin-bottom:19px}
+.version-picker-label{margin-bottom:7px}
+.version-picker-trigger{width:100%;min-width:0;justify-content:space-between;padding:10px 12px;border-color:#dddde5;font-size:14px;font-weight:400;text-align:left}
+.version-picker-trigger [data-version-value]{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.version-picker-trigger svg{flex-shrink:0}
+.version-picker--compact{width:190px;max-width:100%;margin-bottom:0}
+.version-picker--compact .version-picker-trigger{min-height:34px;padding:8px 10px;font-size:12px}
+.version-picker-panel{display:grid;gap:9px;position:fixed;inset:auto;margin:0;padding:12px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--text);box-shadow:0 8px 28px #27273120;max-width:calc(100vw - 24px);max-height:calc(100dvh - 24px);overflow:auto;overscroll-behavior:contain}
+.version-picker-panel[popover]:not(:popover-open){display:none}
+.version-picker-panel[hidden]{display:none}
+.version-picker-panel:not([popover]){position:static;margin-top:8px;width:100%}
+.version-picker-panel [data-version-search]{width:100%;min-width:0;max-width:none;flex:none;padding:8px 10px;font-size:13px}
+.version-picker-panel [data-version-options]{width:100%;min-width:0;max-width:none;min-height:160px;padding:4px;font-size:13px}
+.version-picker-panel [data-version-options] option{padding:7px 8px}
+.version-picker-pages{display:flex;align-items:center;flex-wrap:wrap;gap:6px;border-top:1px solid var(--line);padding-top:9px}
+.version-picker-pages span{margin-right:auto;color:var(--muted);font-size:12px}
+.version-picker-pages button{padding:5px 9px;font-size:12px}
+.version-picker-panel [data-version-error]{margin:0;overflow-wrap:anywhere}
+@media(max-width:760px){.toolbar .version-picker--compact{flex:1 1 140px}}
 
 /* Parallel versions keep the two creation actions usable on narrow screens. */
 .pv-page .page-heading > :first-child { min-width: 0; }
