@@ -7,12 +7,52 @@ import "slices"
 var ProjectPages = []string{"overview", "tasks", "reviews", "versions", "timeline", "chat", "code", "settings", "git", "access"}
 var ProjectResponsibilities = []string{"product", "developer", "tester"}
 
+const (
+	ActionAskAgent            = "agent.ask"
+	ActionRunAnalysis         = "analysis.run"
+	ActionCreateRequirement   = "requirement.create"
+	ActionCreateBug           = "bug.create"
+	ActionCreateLinkedBug     = "bug.create.linked"
+	ActionCreateCollaboration = "collaboration.create"
+)
+
+var ProjectActions = []string{ActionAskAgent, ActionRunAnalysis, ActionCreateRequirement, ActionCreateBug, ActionCreateLinkedBug, ActionCreateCollaboration}
+
 type ProjectRole struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
 	Pages       []string `json:"pages"`
+	Actions     []string `json:"actions"`
 	Version     int      `json:"version"`
+}
+
+// LegacyProjectActions preserves the actual pre-action operations. Reviews
+// alone could file linked Bugs, never independent Bugs, including with chat.
+func LegacyProjectActions(pages []string) []string {
+	out := []string{}
+	for _, action := range ProjectActions {
+		grant := false
+		switch action {
+		case ActionAskAgent, ActionCreateCollaboration:
+			grant = slices.Contains(pages, "chat")
+		case ActionRunAnalysis, ActionCreateRequirement, ActionCreateBug:
+			grant = slices.Contains(pages, "tasks")
+		case ActionCreateLinkedBug:
+			grant = !slices.Contains(pages, "tasks") && slices.Contains(pages, "reviews")
+		}
+		if grant {
+			out = append(out, action)
+		}
+	}
+	return out
+}
+
+func ProjectRoleActions(role ProjectRole) []string {
+	if role.Actions == nil {
+		return LegacyProjectActions(role.Pages)
+	}
+	return role.Actions
 }
 
 func DefaultProjectRoles() []ProjectRole {
@@ -22,7 +62,7 @@ func DefaultProjectRoles() []ProjectRole {
 		if v.id != "admin" {
 			pages = pages[:len(pages)-1]
 		}
-		out = append(out, ProjectRole{ID: v.id, Name: v.name, Pages: pages, Version: 1})
+		out = append(out, ProjectRole{ID: v.id, Name: v.name, Pages: pages, Actions: LegacyProjectActions(pages), Version: 1})
 	}
 	return out
 }

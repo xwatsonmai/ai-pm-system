@@ -110,6 +110,18 @@ func (s *Service) PatchRequirementFromMCP(c context.Context, a domain.Actor, id 
 	if e = s.CheckProject(c, a, t.ProjectID, false); e != nil {
 		return domain.Mutation{}, e
 	}
+	pages := []string{"tasks"}
+	if t.ParentRequirementID != "" {
+		pages = append(pages, "reviews")
+	}
+	if e = s.RequirePages(c, a, t.ProjectID, pages...); e != nil {
+		return domain.Mutation{}, e
+	}
+	if in.Kind != nil && *in.Kind != t.Kind {
+		if e = s.requireTaskCreation(c, a, t.ProjectID, *in.Kind, t.ParentRequirementID); e != nil {
+			return domain.Mutation{}, e
+		}
+	}
 	if in.RequestID == "" || in.Version <= 0 {
 		return domain.Mutation{}, errors.New("必须提供request_id和最新需求version")
 	}
@@ -151,7 +163,13 @@ func (s *Service) UploadProductAttachment(c context.Context, a domain.Actor, nam
 	if e != nil {
 		return domain.Attachment{}, e
 	}
-	if e = s.RequirePages(c, a, a.ProjectID, "tasks", "reviews"); e != nil {
+	// Existing task/review editors still need new attachments after initiation
+	// actions are revoked. Create-only roles can upload without gaining a page.
+	e = s.RequirePages(c, a, a.ProjectID, "tasks", "reviews")
+	if errors.Is(e, domain.ErrForbidden) {
+		e = s.RequireAnyAction(c, a, a.ProjectID, domain.ActionCreateRequirement, domain.ActionCreateBug, domain.ActionCreateLinkedBug)
+	}
+	if e != nil {
 		return domain.Attachment{}, e
 	}
 	if request == "" {

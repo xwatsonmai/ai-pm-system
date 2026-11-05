@@ -105,14 +105,14 @@ function pendingOperations(project, user) {
 }
 
 const listState={project:'',page:1,size:20,query:'',status:'',result:null,error:'',generation:0};
-function versionRows(result,canAccessPage=()=>true) {
+function versionRows(result,canAccessPage=()=>true,canCreateRequirement=true) {
  if(!result)return '<p class="context-note" role="status">正在加载版本…</p>';
- return (result.items.map(v=>`<article class="pv-version-row ${v.is_default?'pv-current':''}" data-key="${esc(v.id)}"><div class="pv-version-title"><span class="badge">${v.is_default?'默认版本 · ':''}${versionPhases[v.phase]||v.phase}</span><h2>${button('open',esc(v.name),`data-id="${esc(v.id)}"`,'ghost')}</h2><p>${esc(v.goal||'尚未填写目标')}</p><p class="small muted">${esc(v.owner||'负责人未指定')} · 计划完成 ${esc(v.target_date||'待安排')}</p></div><div class="pv-version-progress"><strong>${v.counts.included} 项需求</strong>${progress(v.counts)}${stageCounts(v.counts)}</div>${button('open','查看里程碑',`data-id="${esc(v.id)}"`)}</article>`).join('')||`<div class="pv-no-current"><h2>暂无匹配的版本</h2><p>可创建版本，独立规划并推进交付。</p>${canAccessPage('tasks')?'<button data-action="new-task" class="primary">创建需求</button>':''}</div>`)+pagerHTML(result,'pv-versions');
+ return (result.items.map(v=>`<article class="pv-version-row ${v.is_default?'pv-current':''}" data-key="${esc(v.id)}"><div class="pv-version-title"><span class="badge">${v.is_default?'默认版本 · ':''}${versionPhases[v.phase]||v.phase}</span><h2>${button('open',esc(v.name),`data-id="${esc(v.id)}"`,'ghost')}</h2><p>${esc(v.goal||'尚未填写目标')}</p><p class="small muted">${esc(v.owner||'负责人未指定')} · 计划完成 ${esc(v.target_date||'待安排')}</p></div><div class="pv-version-progress"><strong>${v.counts.included} 项需求</strong>${progress(v.counts)}${stageCounts(v.counts)}</div>${button('open','查看里程碑',`data-id="${esc(v.id)}"`)}</article>`).join('')||`<div class="pv-no-current"><h2>暂无匹配的版本</h2><p>可创建版本，独立规划并推进交付。</p>${canCreateRequirement?'<button data-action="new-task" class="primary">创建需求</button>':''}</div>`)+pagerHTML(result,'pv-versions');
 }
-export function projectVersionsPage(context,user='local-owner',canAccessPage=()=>true) {
+export function projectVersionsPage(context,user='local-owner',canAccessPage=()=>true,canCreateRequirement=true) {
  const project=context.project.id;
  if(listState.project!==project){Object.assign(listState,{project,page:1,size:20,query:'',status:'',result:null,error:''})}
- return `<div class="page pv-page" data-project="${esc(project)}"><div class="page-heading"><div><div class="eyebrow">PROJECT VERSIONS</div><h1>项目版本</h1><p>多个版本可同时推进；默认版本接收未指定归属的新需求。</p></div><div class="row">${canAccessPage('tasks')?button('new-requirement','创建需求'):''}${button('new','创建版本','','primary')}</div></div>${pendingOperations(project,user)}<div class="row"><input type="search" data-version-list-search placeholder="搜索版本名称或目标" aria-label="搜索版本" value="${esc(listState.query)}"><select data-version-list-status aria-label="版本状态"><option value="">全部版本</option>${[['active','进行中'],['planned','待开始'],['completed','已结束'],['closed','已关闭']].map(([v,l])=>`<option value="${v}" ${listState.status===v?'selected':''}>${l}</option>`).join('')}</select></div><p class="form-error" data-version-list-error role="status">${esc(listState.error)}</p><div class="pv-version-results">${versionRows(listState.result,canAccessPage)}</div></div>`;
+ return `<div class="page pv-page" data-project="${esc(project)}"><div class="page-heading"><div><div class="eyebrow">PROJECT VERSIONS</div><h1>项目版本</h1><p>多个版本可同时推进；默认版本接收未指定归属的新需求。</p></div><div class="row">${canCreateRequirement?button('new-requirement','创建需求'):''}${button('new','创建版本','','primary')}</div></div>${pendingOperations(project,user)}<div class="row"><input type="search" data-version-list-search placeholder="搜索版本名称或目标" aria-label="搜索版本" value="${esc(listState.query)}"><select data-version-list-status aria-label="版本状态"><option value="">全部版本</option>${[['active','进行中'],['planned','待开始'],['completed','已结束'],['closed','已关闭']].map(([v,l])=>`<option value="${v}" ${listState.status===v?'selected':''}>${l}</option>`).join('')}</select></div><p class="form-error" data-version-list-error role="status">${esc(listState.error)}</p><div class="pv-version-results">${versionRows(listState.result,canAccessPage,canCreateRequirement)}</div></div>`;
 }
 
 function taskLine(item) {
@@ -121,9 +121,9 @@ function taskLine(item) {
 }
 function releaseTask(t){return `<details class="pv-release-task" data-key="${esc(t.id)}"><summary>${esc(t.title)} · R${t.revision}</summary><p class="mono small">${esc(t.submission?.sha)}</p><div class="markdown-content">${renderMarkdown(t.description)}</div><ul>${(t.acceptance||[]).map(a=>`<li>${esc(a)}</li>`).join('')}</ul>${t.attachments?.length?`<p class="small muted">附件：${t.attachments.map(a=>`<a href="${BASE}/api/projects/${encodeURIComponent(t.project_id)}/attachments/${encodeURIComponent(a.id)}" target="_blank" rel="noopener">${esc(a.name)}</a>`).join('、')}</p>`:''}</details>`}
 function historyRows(result){return result.items.map(h=>`<div class="record" data-key="${esc(h.at)}:${esc(h.action)}:${esc(h.body)}"><div class="record-header"><span>${esc(h.actor)}</span><span>${date(h.at)}</span></div><p class="prewrap">${esc(h.body)}</p>${h.task_ids?.length?`<p class="small muted">涉及 ${h.task_ids.length} 项需求</p>`:''}${h.user_instruction?`<p class="small prewrap">用户原话：${esc(h.user_instruction)}</p>`:''}</div>`).join('')+pagerHTML(result,'pv-history')}
-export function projectVersionDetail(view,canAccessPage=()=>true) {
+export function projectVersionDetail(view,canAccessPage=()=>true,canCreateRequirement=true) {
  const v=view.project_version,c=view.summary.counts,active=v.status==='active',ended=['closed','completed'].includes(v.status);
- const controls=active?button('edit','编辑里程碑',`data-id="${esc(v.id)}"`)+(canAccessPage('tasks')?button('new-requirement','创建需求',`data-id="${esc(v.id)}"`):'')+button('publish','登记本次已上线',`data-id="${esc(v.id)}"`)+(!view.summary.is_default?button('action-form','设为默认版本',`data-id="${esc(v.id)}" data-operation="set_default"`):'')+button('action-form','结束里程碑',`data-id="${esc(v.id)}" data-operation="complete"`,'primary')+button('action-form','关闭里程碑',`data-id="${esc(v.id)}" data-operation="close"`):button('action-form',ended?'重新打开里程碑':'开始里程碑',`data-id="${esc(v.id)}" data-operation="${ended?'reopen':'start'}"`);
+ const controls=active?button('edit','编辑里程碑',`data-id="${esc(v.id)}"`)+(canCreateRequirement?button('new-requirement','创建需求',`data-id="${esc(v.id)}"`):'')+button('publish','登记本次已上线',`data-id="${esc(v.id)}"`)+(!view.summary.is_default?button('action-form','设为默认版本',`data-id="${esc(v.id)}" data-operation="set_default"`):'')+button('action-form','结束里程碑',`data-id="${esc(v.id)}" data-operation="complete"`,'primary')+button('action-form','关闭里程碑',`data-id="${esc(v.id)}" data-operation="close"`):button('action-form',ended?'重新打开里程碑':'开始里程碑',`data-id="${esc(v.id)}" data-operation="${ended?'reopen':'start'}"`);
  return `<section class="pv-detail" data-version="${esc(v.id)}"><div class="detail-meta"><span class="badge">${view.summary.is_default?'默认版本 · ':''}${versionPhases[view.summary.phase]}</span></div><h1 class="detail-title">${esc(v.name)}</h1><p class="prewrap">${esc(v.goal||'尚未填写目标')}</p><p class="muted small">${esc(v.owner||'负责人未指定')} · 计划完成 ${esc(v.target_date||'待安排')}</p><div class="detail-actions">${controls}${canAccessPage('tasks')?button('pool','查看需求',`data-id="${esc(v.id)}"`):''}${button('open','刷新进展',`data-id="${esc(v.id)}"`)}</div><section class="pv-detail-progress"><strong>需求范围 ${c.included} 项</strong>${progress(c)}${stageCounts(c)}<p class="small muted">拒绝/关闭 ${c.ended} 项，移出 ${c.removed} 项。</p></section><section class="detail-section"><h3>版本范围</h3><label class="hint"><input type="checkbox" data-version-include-removed> 包含已移出需求</label><div data-version-scope>正在加载…</div></section><section class="detail-section"><h3>发布记录</h3><div data-version-releases>正在加载…</div></section><details class="pv-history"><summary>范围与计划变更</summary><div data-version-history>正在加载…</div></details></section>`;
 }
 
@@ -141,6 +141,7 @@ export function mountProjectVersions({
   toast,
   onCreate,
   canAccessPage=()=>true,
+  canCreateRequirement=()=>true,
 }) {
   const formEnd = (label) =>
     `<div class="form-error" role="alert"></div><p class="small muted">输入暂存在本浏览器；请求失败不会清空。</p><div class="modal-actions">${button("refresh-form", "刷新清单并保留输入")}${button("cancel", "取消")}<button type="submit" class="primary">${label}</button></div>`;
@@ -154,7 +155,7 @@ export function mountProjectVersions({
    const root=document.querySelector('.pv-page');if(!root||root.dataset.project!==getProject()?.id)return;
    const project=getProject().id,epoch=++listState.generation,params=pageQuery(listState.page,listState.size);
    if(listState.query)params.set('q',listState.query);if(listState.status)params.set('status',listState.status);
-   try{const result=await api(`/projects/${project}/versions?${params}`);if(epoch!==listState.generation||!root.isConnected||project!==getProject()?.id)return;listState.result=result;listState.error='';patchKeyedHTML(root.querySelector('.pv-version-results'),versionRows(result,canAccessPage));root.querySelector('[data-version-list-error]').textContent=''}catch(e){if(root.isConnected){listState.error=e.message;root.querySelector('[data-version-list-error]').textContent=e.message}}
+   try{const result=await api(`/projects/${project}/versions?${params}`);if(epoch!==listState.generation||!root.isConnected||project!==getProject()?.id)return;listState.result=result;listState.error='';patchKeyedHTML(root.querySelector('.pv-version-results'),versionRows(result,canAccessPage,canCreateRequirement()));root.querySelector('[data-version-list-error]').textContent=''}catch(e){if(root.isConnected){listState.error=e.message;root.querySelector('[data-version-list-error]').textContent=e.message}}
   }
   async function detailPart(kind,page=1,size=20){
    const root=document.querySelector('.pv-detail');if(!root||!detailState||root.dataset.version!==detailState.id)return;
@@ -169,7 +170,7 @@ export function mountProjectVersions({
   const detail=async id=>{
    const token=beginModalRequest(),view=await api(`/project-versions/${encodeURIComponent(id)}?summary=1`);
    if(!currentModalRequest(token))return;
-   detailState={id};modal('版本详情',pendingOperations(getProject().id,getUser())+projectVersionDetail(view,canAccessPage),{drawer:true});
+   detailState={id};modal('版本详情',pendingOperations(getProject().id,getUser())+projectVersionDetail(view,canAccessPage,canCreateRequirement()),{drawer:true});
    await Promise.all(['scope','releases','history'].map(kind=>detailPart(kind)));
   };
   async function releaseTasks(id,release,page=1,size=20){
@@ -352,7 +353,7 @@ export function mountProjectVersions({
         break;
       }
       case "pv-new-requirement":
-        if(!canAccessPage('tasks'))throw Error('没有需求池访问权限');
+        if(!canCreateRequirement())throw Error('当前不能提起需求');
         await onCreate(id);
         break;
       case "pv-new":

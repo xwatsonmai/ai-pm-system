@@ -24,9 +24,15 @@ func (s *Server) projectRoleRoutes(mux *http.ServeMux) {
 		p = domain.NormalizeProjectAccess(p)
 		a := s.actor(r)
 		pages := []string{}
+		actions := []string{}
 		for _, page := range domain.ProjectPages {
 			if app.CanAccessPage(a, p, page) {
 				pages = append(pages, page)
+			}
+		}
+		for _, action := range domain.ProjectActions {
+			if app.CanPerformAction(a, p, action) {
+				actions = append(actions, action)
 			}
 		}
 		roles := []domain.ProjectRole{}
@@ -43,7 +49,7 @@ func (s *Server) projectRoleRoutes(mux *http.ServeMux) {
 				roles = append(roles, role)
 			}
 		}
-		respond(w, map[string]any{"pages": pages, "roles": roles, "responsibilities": duties, "version": p.AccessVersion, "can_manage": app.CanManage(a, p), "recovery": a.PlatformAdmin && !app.CanAccessPage(a, p, "access")})
+		respond(w, map[string]any{"pages": pages, "actions": actions, "action_catalog": projectActionCatalog(), "roles": roles, "responsibilities": duties, "version": p.AccessVersion, "can_manage": app.CanManage(a, p), "recovery": a.PlatformAdmin && !app.CanAccessPage(a, p, "access")})
 	})
 	respondRoles := func(w http.ResponseWriter, p domain.Project) {
 		respond(w, map[string]any{"items": p.ProjectRoles, "version": p.AccessVersion})
@@ -109,6 +115,17 @@ func (s *Server) projectRoleRoutes(mux *http.ServeMux) {
 }
 
 var errInvalidPage = &pageParameterError{}
+
+func projectActionCatalog() []map[string]string {
+	return []map[string]string{
+		{"id": domain.ActionAskAgent, "name": "项目问答", "description": "向 Agent 提问和继续会话"},
+		{"id": domain.ActionRunAnalysis, "name": "发起分析", "description": "手动启动需求整理、Bug 初诊、进度或知识分析"},
+		{"id": domain.ActionCreateRequirement, "name": "创建需求", "description": "创建需求、追加迭代和确认需求创建建议"},
+		{"id": domain.ActionCreateBug, "name": "创建 Bug", "description": "提交独立或关联 Bug，并确认 Bug 创建建议"},
+		{"id": domain.ActionCreateLinkedBug, "name": "仅提起关联 Bug", "description": "围绕可读的父需求提交测试或验收 Bug"},
+		{"id": domain.ActionCreateCollaboration, "name": "发起协查", "description": "从本人会话发起只读协查"},
+	}
+}
 
 type pageParameterError struct{}
 
@@ -220,7 +237,7 @@ func (s *Server) authorizeProjectRoute(r *http.Request, id string, manage bool, 
 			}
 		}
 	case "requirement-intakes":
-		pages = []string{"tasks"}
+		pages = []string{"tasks", "chat"} // the service checks persisted owner and proposal kind
 	case "runs":
 		return nil // CanReadRun checks page + private conversation ownership
 	case "projects":
@@ -242,12 +259,18 @@ func (s *Server) authorizeProjectRoute(r *http.Request, id string, manage bool, 
 			pages = []string{"code"}
 		case "tasks":
 			pages = []string{"tasks", "reviews", "versions"}
+			if r.Method == "POST" && len(path) == 4 {
+				return nil // creation capability is checked against the decoded task kind
+			}
 			if r.Method != "GET" {
 				pages = []string{"tasks", "reviews"}
 			}
 		case "requirement-intakes":
-			pages = []string{"tasks"}
+			pages = []string{"tasks", "chat"}
 		case "version-options":
+			if s.App.RequireAnyAction(r.Context(), s.actor(r), id, domain.ActionCreateRequirement, domain.ActionCreateBug) == nil {
+				return nil // lightweight names only; version details keep their page gate
+			}
 			pages = []string{"tasks", "reviews", "versions", "overview"}
 		case "versions", "version-assignments":
 			pages = []string{"versions"}
@@ -285,6 +308,13 @@ func (s *Server) authorizeProjectRoute(r *http.Request, id string, manage bool, 
 func (s *Server) authorizeMCPPage(c context.Context, a domain.Actor, name string) error {
 	pages := []string{"tasks"}
 	switch {
+	case name == "requirement_create":
+		return nil // the service checks the decoded kind and corresponding capability
+	case name == "requirement_attachment_upload":
+		if s.App.RequireAnyAction(c, a, a.ProjectID, domain.ActionCreateRequirement, domain.ActionCreateBug, domain.ActionCreateLinkedBug) == nil {
+			return nil
+		}
+		pages = []string{"tasks", "reviews"}
 	case name == "analysis_get":
 		return nil // CanReadRun checks the actual run kind, page and employee owner
 	case name == "project_get_context":

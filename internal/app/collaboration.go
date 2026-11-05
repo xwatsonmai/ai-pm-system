@@ -155,7 +155,15 @@ func (s *Service) CreateCollaboration(ctx context.Context, a domain.Actor, in Co
 	if origin.Kind != "question" || origin.TriggerType == "collaboration_result" || !CanRead(a, p) || (a.Kind != "platform" && !CanReadRun(a, p, origin)) {
 		return domain.CollaborationMutation{}, domain.ErrForbidden
 	}
-	if _, err = s.CollaborationOwner(ctx, origin.OwnerID, origin.OwnerKind, p.ID); err != nil {
+	owner, err := s.CollaborationOwner(ctx, origin.OwnerID, origin.OwnerKind, p.ID)
+	if err != nil {
+		return domain.CollaborationMutation{}, err
+	}
+	actual := ActionActor(ctx, a)
+	if actual.Kind != "platform" && !OwnsRun(actual, origin) {
+		return domain.CollaborationMutation{}, domain.ErrForbidden
+	}
+	if err = s.RequireAction(ctx, owner, p.ID, domain.ActionCreateCollaboration); err != nil {
 		return domain.CollaborationMutation{}, err
 	}
 	if !nonempty(in.RequestID) || !nonempty(in.Title) || !nonempty(in.Brief) || !nonempty(in.Environment) || origin.OwnerID == "" {

@@ -3033,3 +3033,5 @@ details.rc-card > summary::-webkit-details-marker { display: none; }
   .pv-page .page-heading { flex-direction: column; }
   .pv-page .page-heading > .row { width: 100%; justify-content: flex-start; }
 }
+
+.composer[hidden]{display:none!important}

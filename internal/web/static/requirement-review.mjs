@@ -1,3 +1,4 @@
+import {reviewConfirmationAllowed} from './project-access.mjs';
 import { iterationContextHTML } from './requirement-iterations.mjs';
 import { createID } from './id.mjs';
 import { renderMarkdown, renderDocumentMarkdown } from './markdown.mjs';
@@ -207,7 +208,7 @@ export function mountRequirementReview(root, {task,api,userID,messageID = '',onD
     const full = `<div class="markdown-content">${renderDocumentMarkdown(proposal.description)}</div>`;
     if (state === 'superseded' || state === 'draft') return `<details class="rc-card rc-proposal rc-card-muted" data-state="${state}" data-key="${esc(message.id)}:proposal"><summary class="rc-card-head">${head}</summary><div class="rc-proposal-body">${full}<h4>验收条件</h4><ol>${proposal.acceptance.map(value=>`<li>${esc(value)}</li>`).join('')}</ol></div></details>`;
     const changing=source().requirement_change?.status==='reviewing';
-    const foot = state === 'current' ? `<div class="rc-card-foot"><span class="rc-card-tip rc-confirm-tip">${changing?"确认后交回开发重新实现与提测；来源反馈转入变更并关闭，其他 Bug 保留":"确认后需求进入待认领，等待开发领取"}</span><button type="button" class="primary review-confirm" data-review-action="confirm">${changing?"确认变更，交回开发":"确认需求，进入待认领"}</button></div>` : '';
+    const foot = state === 'current' && reviewConfirmationAllowed(changing,Boolean(onChange)) ? `<div class="rc-card-foot"><span class="rc-card-tip rc-confirm-tip">${changing?"确认后交回开发重新实现与提测；来源反馈转入变更并关闭，其他 Bug 保留":"确认后需求进入待认领，等待开发领取"}</span><button type="button" class="primary review-confirm" data-review-action="confirm">${changing?"确认变更，交回开发":"确认需求，进入待认领"}</button></div>` : '';
     return `<div class="rc-card rc-proposal" data-state="${state}"><div class="rc-card-head">${head}</div><div class="rc-proposal-body"><h4>验收条件</h4><ol>${proposal.acceptance.map(value=>`<li>${esc(value)}</li>`).join('')}</ol><details class="rc-proposal-full" data-key="${esc(message.id)}:full"><summary>查看完整需求稿</summary>${full}</details></div>${foot}</div>`;
   }
   function rejectionHTML(message) {
@@ -370,7 +371,7 @@ export function mountRequirementReview(root, {task,api,userID,messageID = '',onD
   function updateActions() {
     if (disposed) return;
     for(const button of root.querySelectorAll('[data-review-action=cancel_change]')){button.hidden=source().requirement_change?.status!=='reviewing'||closed();button.disabled=saving||uploading;}
-    for(const button of root.querySelectorAll('[data-review-action=request_change]')){button.hidden=Boolean(source().change_request_id)||!['clarify','ready'].includes(source().status);button.disabled=saving||uploading;}
+    for(const button of root.querySelectorAll('[data-review-action=request_change]')){button.hidden=!onChange||Boolean(source().change_request_id)||!['clarify','ready'].includes(source().status);button.disabled=saving||uploading;}
     const note = $('.review-composer-note'), hint = $('.rc-composer-hint');
     note.textContent = discussing() ? '' : source().change_request_id ? '此反馈已转入原需求变更，原报告与讨论保留；请在原需求继续处理。' : changeDone() ? '本次变更评审已结束，记录保留；请在原需求查看后续开发与测试。' : closed() ? '需求已结束，评审记录只读' : bugReadOnly() ? 'Bug 已进入修复或验证流程，评审历史保留；后续补充请使用工作记录。' : alignmentDone() ? '开发已确认对齐完成，新的问题会开启新一轮对齐。' : '';
     note.hidden = !note.textContent;
@@ -494,6 +495,7 @@ export function mountRequirementReview(root, {task,api,userID,messageID = '',onD
   }
   async function operate(action) {
     if (saving || uploading) return;
+    if(action==='confirm'&&!reviewConfirmationAllowed(source().requirement_change?.status==='reviewing',Boolean(onChange)))return;
     if (['confirm','confirm_rejection'].includes(action) && hasDraft()) { $('.review-send-error').textContent = '请先发送当前补充，让 Agent 根据最新说明评审后再确认。'; saveDraft(); input.focus(); return; }
     const operationKey = source().requirement_change?.status==='reviewing'?`${action}:${v?.generation || 0}:${source().version}`:`${action}:${v?.generation || 0}`;
     const payload = {action,request_id:operations[operationKey] ||= createID(),generation:v?.generation || 0,...(source().requirement_change?.status==='reviewing'?{expected_task_version:source().version}:{})};
@@ -595,8 +597,8 @@ export function mountRequirementReview(root, {task,api,userID,messageID = '',onD
     const action = button.dataset.reviewAction;
     if(action==='history-more'){void loadOlderMessages();return;}
     if(action === 'file_bug'){if(saving||uploading)return;saveDraft();onFileBug?.();return;}
-    if(action === 'change_requirement'){if(saving||uploading)return;saveDraft();onChange?.();return;}
-    if(action === 'request_change'){if(saving||uploading)return;if(hasDraft()){$('.review-send-error').textContent='请先发送当前补充，再转为本轮变更；草稿已保留。';saveDraft();input.focus();return;}saveDraft();onChange?.();return;}
+    if(action === 'change_requirement'){if(saving||uploading||!onChange)return;saveDraft();onChange?.();return;}
+    if(action === 'request_change'){if(saving||uploading||!onChange)return;if(hasDraft()){$('.review-send-error').textContent='请先发送当前补充，再转为本轮变更；草稿已保留。';saveDraft();input.focus();return;}saveDraft();onChange?.();return;}
     if (action === 'details' || action === 'related') { if (uploading || saving) return; saveDraft(); onDetails(action==='related'?button.dataset.task:undefined); return; }
     if (action === 'decline' || action === 'close-task' || action === 'reopen') { closeMenu(); if (uploading || saving) return; saveDraft(); onResolve?.(action==='decline'?'decline':action==='reopen'?'reopen':'close'); return; }
     if (action === 'menu') { const menu = $('.rc-menu'); menu.hidden = !menu.hidden; button.setAttribute('aria-expanded',String(!menu.hidden)); if (!menu.hidden) menu.querySelector('button')?.focus(); return; }

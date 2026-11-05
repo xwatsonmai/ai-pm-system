@@ -13,7 +13,7 @@ import { iterationContextHTML, iterationHistoryHTML, iterationRowsHTML } from '.
 import {mountProjectTimeline} from './project-timeline.mjs';
 import {projectVersionsPage,mountProjectVersions,versionName,versionOptions} from './project-versions.mjs';
 import {pageTitles, navigationHTML, routeFromURL, routeURL, allowedPage, firstAccessiblePage, expandedForPage} from './navigation.mjs';
-import {mountProjectAccess, taskControlAllowed} from './project-access.mjs';
+import {mountProjectAccess, taskControlAllowed, actionAllowed, creationKinds, creationLabel, runStartAllowed} from './project-access.mjs';
 const busyIntakes = new Set();
 let requirementEditor = null;
 let requirementReview = null;
@@ -120,8 +120,20 @@ const field = (label, control, hint = "") => {
 };
 const empty = (title, detail = "", button = "") =>
   `<div class="empty"><div class="empty-symbol">${icon("folder")}</div><h3>${title}</h3><p>${detail}</p>${button}</div>`;
-const action = (name, text, cls = "", attrs = "") =>
-  `<button type="button" class="${cls}" data-action="${name}" ${attrs}>${text}</button>`;
+const action = (name, text, cls = "", attrs = "") => {
+  if(name==='new-task'){if(!creationKinds(state.project_access).length)return '';text=text.replace('创建需求',creationLabel(state.project_access));}
+  if(['analyze','task-analyze'].includes(name)&&!canAnalyze())return '';
+  if(['iterate-task','request-change'].includes(name)&&!canAction('requirement.create'))return '';
+  if(name==='file-testing-bug'&&!canFileLinkedBug())return '';
+  if(['new-conversation','suggestion'].includes(name)&&!canAsk())return '';
+  return `<button type="button" class="${cls}" data-action="${name}" ${attrs}>${text}</button>`;
+};
+const canAction=id=>actionAllowed(state.project_access,id);
+const canAsk=()=>runStartAllowed(state.project_access,'question');
+const canAnalyze=()=>runStartAllowed(state.project_access,'analysis');
+const canFileLinkedBug=()=>canReadTasks()&&(canAction('bug.create')||canAction('bug.create.linked'));
+const canIterate=()=>state.project_access?.pages?.includes('tasks')&&canAction('requirement.create');
+const canReadTasks=()=>['tasks','reviews','versions'].some(page=>state.project_access?.pages?.includes(page));
 let state = {
   auth: null,
   platform: {},
@@ -149,7 +161,7 @@ let state = {
 };
 const drafts = new Map();
 const accessUI = mountProjectAccess({api,modal,closeModal,getModalRevision:()=>modalRevision,getProject:()=>state.project,getAccess:()=>state.project_access,onAccessChange:refreshProjectAccess,heading,field,action,escape,toast});
-const projectVersionUI=mountProjectVersions({api,modal,closeModal,getModalRevision:()=>modalRevision,getContext:()=>state.context,getProject:()=>state.project,getUser:()=>state.auth?.user?.id||'local-owner',canAccessPage:page=>allowedPage(page,state.project_access,isPlatformAdmin()),refresh:async()=>{await refresh();render();},onTask:openTask,onCreate:versionID=>taskForm(null,null,null,versionID),onPool:async filter=>{await navigate('tasks');state.versionFilter=filter;setListPage('tasks',1);await loadBusinessPage();},toast});
+const projectVersionUI=mountProjectVersions({api,modal,closeModal,getModalRevision:()=>modalRevision,getContext:()=>state.context,getProject:()=>state.project,getUser:()=>state.auth?.user?.id||'local-owner',canAccessPage:page=>allowedPage(page,state.project_access,isPlatformAdmin()),canCreateRequirement:()=>canAction('requirement.create'),refresh:async()=>{await refresh();render();},onTask:openTask,onCreate:versionID=>taskForm(null,null,null,versionID),onPool:async filter=>{await navigate('tasks');state.versionFilter=filter;setListPage('tasks',1);await loadBusinessPage();},toast});
 const timelineUI = mountProjectTimeline({
   api, getProject: () => state.project, onTask: openTask,
   onVersion: id => projectVersionUI.open(id),
@@ -366,7 +378,7 @@ async function readWorkspace(projectID,page=state.page) {
   const saved=chatSelections.get(chatScope(projectID))??localStorage.getItem(`pm-chat:${chatScope(projectID)}`);
   const selected=saved===''?'':saved||conversations.items[0]?.id||'';
   if(selected){
-   const [messages,ints,cols]=await Promise.all([get(`messages:${selected}`,`/projects/${projectID}/runs`,{conversation_id:selected}),mayReadPage(access,'tasks')?get(`intakes:${selected}`,`/projects/${projectID}/requirement-intakes`,{conversation_id:selected}):emptyPage(),get(`collaborations:${selected}`,`/projects/${projectID}/collaborations`,{conversation_id:selected})]);
+   const [messages,ints,cols]=await Promise.all([get(`messages:${selected}`,`/projects/${projectID}/runs`,{conversation_id:selected}),get(`intakes:${selected}`,`/projects/${projectID}/requirement-intakes`,{conversation_id:selected}),get(`collaborations:${selected}`,`/projects/${projectID}/collaborations`,{conversation_id:selected})]);
    runs=messages.items;intakes=ints.items;collaborations=cols.items;
   }
   chatSelections.set(chatScope(projectID),selected);
@@ -494,7 +506,7 @@ function render() {
   const project = state.project;
   ensurePageAccess();
   $("#app").innerHTML =
-    `<div class="layout"><aside class="sidebar"><div class="brand"><div class="brand-mark">智</div><div><div class="brand-name">智驱</div><div class="brand-sub">AI-NATIVE PM</div></div></div>${projectSwitcher()}<div class="side-caption">工作空间</div><nav class="nav" id="project-navigation" aria-label="项目导航">${projectNavigation()}</nav><div class="side-caption personal-caption">个人与平台</div><nav class="nav" aria-label="个人与平台">${action("navigate", icon("code") + " 我的 MCP", state.page === "mcp" ? "active" : "", 'data-page="mcp"')}${isPlatformAdmin() ? action("navigate", icon("settings") + " 平台设置", state.page === "platform" ? "active" : "", 'data-page="platform"') : ""}</nav><div class="sidebar-bottom"><div class="agent-indicator"><span class="dot ${state.platform.configured ? "live" : ""}"></span>${state.platform.configured ? "平台 Agent 已配置" : "平台 Agent 待配置"}</div><div class="local-label"><span>项目工作台</span><span>v0.1</span></div></div></aside><main class="main"><header class="topbar"><div class="breadcrumbs">${action("menu", icon("menu"), "ghost icon-only mobile-menu", 'aria-label="打开导航"')}<span>${escape(project?.name || "工作空间")}</span><span>/</span><strong>${paths[state.page]}</strong></div><div class="row">${project && !["mcp", "platform"].includes(state.page) ? (state.project_access?.pages.includes("tasks") ? action("new-task", icon("plus") + " 创建需求", "header-new") : "") : action("new-project", icon("plus") + " 创建项目", "header-new")}${accountHTML()}</div></header><div id="repository-status" aria-live="polite"></div><div id="page"></div></main></div>`;
+    `<div class="layout"><aside class="sidebar"><div class="brand"><div class="brand-mark">智</div><div><div class="brand-name">智驱</div><div class="brand-sub">AI-NATIVE PM</div></div></div>${projectSwitcher()}<div class="side-caption">工作空间</div><nav class="nav" id="project-navigation" aria-label="项目导航">${projectNavigation()}</nav><div class="side-caption personal-caption">个人与平台</div><nav class="nav" aria-label="个人与平台">${action("navigate", icon("code") + " 我的 MCP", state.page === "mcp" ? "active" : "", 'data-page="mcp"')}${isPlatformAdmin() ? action("navigate", icon("settings") + " 平台设置", state.page === "platform" ? "active" : "", 'data-page="platform"') : ""}</nav><div class="sidebar-bottom"><div class="agent-indicator"><span class="dot ${state.platform.configured ? "live" : ""}"></span>${state.platform.configured ? "平台 Agent 已配置" : "平台 Agent 待配置"}</div><div class="local-label"><span>项目工作台</span><span>v0.1</span></div></div></aside><main class="main"><header class="topbar"><div class="breadcrumbs">${action("menu", icon("menu"), "ghost icon-only mobile-menu", 'aria-label="打开导航"')}<span>${escape(project?.name || "工作空间")}</span><span>/</span><strong>${paths[state.page]}</strong></div><div class="row">${project && !["mcp", "platform"].includes(state.page) ? (creationKinds(state.project_access).length ? action("new-task", icon("plus") + " 创建需求", "header-new") : "") : action("new-project", icon("plus") + " 创建项目", "header-new")}${accountHTML()}</div></header><div id="repository-status" aria-live="polite"></div><div id="page"></div></main></div>`;
   renderPage();
 }
 function updateRepositoryStatus() {
@@ -559,7 +571,7 @@ function renderPage() {
     overview: overview,
     tasks: tasksPage,
     timeline:()=>timelineUI.page(),
-    versions:()=>projectVersionsPage(state.context,state.auth?.user?.id||'local-owner',page=>allowedPage(page,state.project_access,isPlatformAdmin())),
+    versions:()=>projectVersionsPage(state.context,state.auth?.user?.id||'local-owner',page=>allowedPage(page,state.project_access,isPlatformAdmin()),canAction('requirement.create')),
     chat: chatPage,
     reviews: reviewsPage,
     settings: settingsPage,
@@ -692,7 +704,7 @@ function codeSnapshotHTML(r) {
 }
 function runHTML(r, processOpen = ["running", "queued"].includes(r.status)) {
   const active = ["running", "queued"].includes(r.status);
-  return `<div class="answer-label">${icon("spark")} 平台 Agent ${r.trigger_type === "collaboration_result" ? `<span class="collaboration-source">协同排查结果 · ${short(r.collaboration_id)}</span>` : ""}<span class="muted">· ${date(r.started_at)}</span></div>${codeSnapshotHTML(r)}${runProcessHTML(r, processOpen)}<div class="answer-content markdown-content">${renderMarkdown(r.output)}</div><div class="form-error run-error">${escape(r.error)}</div><div class="run-status ${active ? "running" : ""}">${runStates[r.status] || r.status}${active ? " · 正在读取项目上下文" : ""}</div><div class="run-actions">${active ? action("stop-run", "停止分析", "ghost", `data-id="${r.id}"`) : r.status !== "succeeded" && r.trigger_type !== "collaboration_result" ? action("retry-run", "重新分析", "ghost", `data-id="${r.id}"`) : ""}</div>`;
+  return `<div class="answer-label">${icon("spark")} 平台 Agent ${r.trigger_type === "collaboration_result" ? `<span class="collaboration-source">协同排查结果 · ${short(r.collaboration_id)}</span>` : ""}<span class="muted">· ${date(r.started_at)}</span></div>${codeSnapshotHTML(r)}${runProcessHTML(r, processOpen)}<div class="answer-content markdown-content">${renderMarkdown(r.output)}</div><div class="form-error run-error">${escape(r.error)}</div><div class="run-status ${active ? "running" : ""}">${runStates[r.status] || r.status}${active ? " · 正在读取项目上下文" : ""}</div><div class="run-actions">${active ? action("stop-run", "停止分析", "ghost", `data-id="${r.id}"`) : r.status !== "succeeded" && r.trigger_type !== "collaboration_result" && runStartAllowed(state.project_access,r.kind) ? action("retry-run", "重新分析", "ghost", `data-id="${r.id}"`) : ""}</div>`;
 }
 function chatTurns() {
   return chatConversations(state.runs).find((c) => c.id === selectedConversation())?.turns || [];
@@ -702,7 +714,7 @@ const replyStates = {pending:"等待补充回答", running:"正在生成补充�
 function collaborationCards(runID) {
   return state.collaborations.filter((c) => c.origin_run_id === runID).map((c) => {
     const latest = c.updates?.at(-1);
-    return `<section class="collaboration-card" aria-label="协同排查"><div class="row"><strong>${escape(c.title)}</strong><span class="badge">${collaborationStates[c.status] || escape(c.status)}</span></div><p class="small muted">${short(c.id)} · ${escape(c.environment)} · ${c.claimant_name ? escape(c.claimant_name) : "等待开发 Agent 认领"} · ${date(c.created_at)}</p>${latest ? `<p class="small prewrap">${escape(latest.body)}</p>` : ""}${c.reply ? `<p class="small">${replyStates[c.reply.status] || escape(c.reply.status)}${c.reply.error ? " · "+escape(c.reply.error) : ""}</p>` : ""}<div class="row">${action("collaboration-detail", "查看排查详情", "ghost", `data-id="${escape(c.id)}"`)}${c.status !== "canceled" && c.reply?.status !== "delivered" ? action("cancel-collaboration", "取消协同", "ghost", `data-id="${escape(c.id)}"`) : ""}${c.status === "completed" && c.reply?.status === "failed" ? action("retry-collaboration", "重试补充回答", "ghost", `data-id="${escape(c.id)}"`) : ""}</div></section>`;
+    return `<section class="collaboration-card" aria-label="协同排查"><div class="row"><strong>${escape(c.title)}</strong><span class="badge">${collaborationStates[c.status] || escape(c.status)}</span></div><p class="small muted">${short(c.id)} · ${escape(c.environment)} · ${c.claimant_name ? escape(c.claimant_name) : "等待开发 Agent 认领"} · ${date(c.created_at)}</p>${latest ? `<p class="small prewrap">${escape(latest.body)}</p>` : ""}${c.reply ? `<p class="small">${replyStates[c.reply.status] || escape(c.reply.status)}${c.reply.error ? " · "+escape(c.reply.error) : ""}</p>` : ""}<div class="row">${action("collaboration-detail", "查看排查详情", "ghost", `data-id="${escape(c.id)}"`)}${c.status !== "canceled" && c.reply?.status !== "delivered" ? action("cancel-collaboration", "取消协同", "ghost", `data-id="${escape(c.id)}"`) : ""}${c.status === "completed" && c.reply?.status === "failed" && canAsk() ? action("retry-collaboration", "重试补充回答", "ghost", `data-id="${escape(c.id)}"`) : ""}</div></section>`;
   }).join("");
 }
 function collaborationDetail(c) {
@@ -736,7 +748,7 @@ async function refreshChatActivity() {
  chatRefreshing=true;try{await loadBusinessPage();pollActiveRuns();}catch{}finally{chatRefreshing=false;}
 }
 function chatIntro() {
-  return `<div class="chat-intro"><div class="chat-icon">${icon("spark")}</div><h2>开始一个新对话</h2><p>询问项目进度、现有规则，或描述你想改进的地方。<br>Agent 会整理需求或 Bug 并建议创建；你同意后，Bug 直接待开发认领，迭代需求进入评审。</p><div class="suggestions">${["当前还有哪些工作需要我处理？", "帮我整理一个需求", "最近的代码变化影响了什么？"].map((q) => action("suggestion", q, "", `data-question="${q}"`)).join("")}</div></div>`;
+  return `<div class="chat-intro"><div class="chat-icon">${icon("spark")}</div><h2>开始一个新对话</h2><p>询问项目进度、现有规则，或描述你想改进的地方。<br>Agent 会整理需求或 Bug 并建议创建；你同意后，Bug 直接待开发认领，迭代需求进入评审。</p><div class="suggestions">${['当前还有哪些工作需要我处理？',...(canAction('requirement.create')?['帮我整理一个需求']:[]),...(canAction('bug.create')?['帮我整理一个 Bug']:[]),...(canAction('collaboration.create')?['帮我发起协同排查']:[]),'最近的代码变化影响了什么？'].map((q) => action("suggestion", q, "", `data-question="${q}"`)).join("")}</div></div>`;
 }
 function conversationListHTML() {
   const conversations = workspaceConversations();
@@ -761,7 +773,7 @@ function forgetConversation(projectID, id) {
   else updateChat();
 }
 function chatTurnHTML(r) {
-  return `<div class="chat-turn" data-run-id="${escape(r.id)}">${r.trigger_type === "collaboration_result" ? "" : `<div class="user-question">${escape(r.prompt)}${sentAttachments(r)}</div>`}<div class="agent-answer" id="run-${escape(r.id)}">${runHTML(r)}</div><div class="requirement-intakes">${requirementIntakeCards(state.intakes,r.id,busyIntakes,state.context)}</div><div class="collaboration-items">${collaborationCards(r.id)}</div></div>`;
+  return `<div class="chat-turn" data-run-id="${escape(r.id)}">${r.trigger_type === "collaboration_result" ? "" : `<div class="user-question">${escape(r.prompt)}${sentAttachments(r)}</div>`}<div class="agent-answer" id="run-${escape(r.id)}">${runHTML(r)}</div><div class="requirement-intakes">${requirementIntakeCards(state.intakes,r.id,busyIntakes,state.context,state.project_access)}</div><div class="collaboration-items">${collaborationCards(r.id)}</div></div>`;
 }
 const runViews = new WeakMap();
 function updateRun(element, r) {
@@ -818,7 +830,7 @@ function updateChat() {
     } else {
       if (r.trigger_type !== "collaboration_result") changed = patchHTML($(".user-question", turn), `${escape(r.prompt)}${sentAttachments(r)}`) || changed;
       changed = patchHTML($(".collaboration-items", turn), collaborationCards(r.id)) || changed;
-      changed = patchHTML($(".requirement-intakes", turn), requirementIntakeCards(state.intakes,r.id,busyIntakes,state.context)) || changed;
+      changed = patchHTML($(".requirement-intakes", turn), requirementIntakeCards(state.intakes,r.id,busyIntakes,state.context,state.project_access)) || changed;
       changed = updateRun($(".agent-answer", turn), r) || changed;
     }
     if (turn !== cursor) {
@@ -833,7 +845,7 @@ function updateChat() {
   }
   if (!turns.length && !$(".chat-intro", feed)) feed.innerHTML = chatIntro();
   const send = $("#chat-send", page);
-  const disabled = chatDraft().sending || Boolean(conversation?.active) || (!chatDraft().text.trim() && !chatDraft().files.length);
+  const disabled = !canAsk() || chatDraft().sending || Boolean(conversation?.active) || (!chatDraft().text.trim() && !chatDraft().files.length);
   if (send.disabled !== disabled) send.disabled = disabled;
   if (changed) scroll.scrollTop = follow ? scroll.scrollHeight : scrollTop;
   if (follow) markVisibleRepliesRead();
@@ -841,7 +853,7 @@ function updateChat() {
 function chatPage() {
   const draft = chatDraft();
   const turns = chatTurns();
-  return `<div class="page chat-page" data-project-id="${escape(state.project.id)}" data-conversation-id="${escape(selectedConversation())}"><aside class="chat-sidebar" aria-label="对话历史">${action("new-conversation", icon("plus") + " 新会话", "new-conversation-button")}<div class="conversation-list-heading">我的对话</div><nav class="conversation-list" aria-label="我的对话">${conversationListHTML()}</nav></aside><div class="chat-main">${heading("项目问答", "回答基于项目资料和已观察到的代码。", action("toggle-history", icon("list") + " 历史对话", "ghost history-toggle"))}<div class="conversation-heading"><span class="current-conversation-title">${escape(workspaceConversations().find((c) => c.id === selectedConversation())?.title || "新会话")}</span>${action("new-conversation", icon("plus") + " 新会话", "ghost mobile-new-conversation")}</div><div id="chat-message-pagination">${selectedConversation()?pagerHTML(listResult(`messages:${selectedConversation()}`),`messages:${selectedConversation()}`):""}</div><div class="chat-feed">${turns.length ? turns.map(chatTurnHTML).join("") : chatIntro()}</div><div id="chat-related-pagination"></div><div class="composer"><form id="chat-form" novalidate><div class="composer-box" id="chat-dropzone"><textarea name="question" rows="3" placeholder="输入问题，也可以粘贴图片或拖入文件…" aria-label="项目问题" aria-describedby="composer-help">${escape(draft.text)}</textarea><div class="draft-attachments" id="draft-attachments" aria-label="待发送附件"></div><div class="composer-bottom"><button type="button" class="ghost attach-button" data-action="attach-files" aria-label="添加图片或文件" title="图片、PDF、DOCX、文本和代码文件">${icon("paperclip")}<span>添加附件</span></button><span class="composer-keyboard">Enter 发送 · Shift+Enter 换行</span><button class="primary send-button" id="chat-send" type="submit">${icon("send")}<span>发送</span></button></div><input type="file" id="chat-files" class="hidden" multiple accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.docx,text/*,.md,.log,.json,.csv,.yaml,.yml,.xml,.html,.css,.js,.ts,.tsx,.jsx,.vue,.go,.py,.sql,.sh,.java,.c,.cpp,.h,.toml,.ini,.conf"><p id="chat-error" class="form-error" role="alert"></p></div></form><p class="composer-note" id="composer-help">支持粘贴或拖入附件 · 单个 10 MB · 最多 6 个，合计 20 MB · ${state.platform.configured ? "图片需使用支持视觉的模型" : "发送前请由平台管理员配置 Agent 模型"}</p></div></div></div>`;
+  return `<div class="page chat-page" data-project-id="${escape(state.project.id)}" data-conversation-id="${escape(selectedConversation())}"><aside class="chat-sidebar" aria-label="对话历史">${action("new-conversation", icon("plus") + " 新会话", "new-conversation-button")}<div class="conversation-list-heading">我的对话</div><nav class="conversation-list" aria-label="我的对话">${conversationListHTML()}</nav></aside><div class="chat-main">${heading("项目问答", "回答基于项目资料和已观察到的代码。", action("toggle-history", icon("list") + " 历史对话", "ghost history-toggle"))}<div class="conversation-heading"><span class="current-conversation-title">${escape(workspaceConversations().find((c) => c.id === selectedConversation())?.title || "新会话")}</span>${action("new-conversation", icon("plus") + " 新会话", "ghost mobile-new-conversation")}</div><div id="chat-message-pagination">${selectedConversation()?pagerHTML(listResult(`messages:${selectedConversation()}`),`messages:${selectedConversation()}`):""}</div><div class="chat-feed">${turns.length ? turns.map(chatTurnHTML).join("") : chatIntro()}</div><div id="chat-related-pagination"></div><div class="composer" ${canAsk()?'':'hidden'}><form id="chat-form" novalidate><div class="composer-box" id="chat-dropzone"><textarea name="question" rows="3" placeholder="输入问题，也可以粘贴图片或拖入文件…" aria-label="项目问题" aria-describedby="composer-help">${escape(draft.text)}</textarea><div class="draft-attachments" id="draft-attachments" aria-label="待发送附件"></div><div class="composer-bottom"><button type="button" class="ghost attach-button" data-action="attach-files" aria-label="添加图片或文件" title="图片、PDF、DOCX、文本和代码文件">${icon("paperclip")}<span>添加附件</span></button><span class="composer-keyboard">Enter 发送 · Shift+Enter 换行</span><button class="primary send-button" id="chat-send" type="submit">${icon("send")}<span>发送</span></button></div><input type="file" id="chat-files" class="hidden" multiple accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.docx,text/*,.md,.log,.json,.csv,.yaml,.yml,.xml,.html,.css,.js,.ts,.tsx,.jsx,.vue,.go,.py,.sql,.sh,.java,.c,.cpp,.h,.toml,.ini,.conf"><p id="chat-error" class="form-error" role="alert"></p></div></form><p class="composer-note" id="composer-help">支持粘贴或拖入附件 · 单个 10 MB · 最多 6 个，合计 20 MB · ${state.platform.configured ? "图片需使用支持视觉的模型" : "发送前请由平台管理员配置 Agent 模型"}</p></div></div></div>`;
 }
 function fileSize(bytes) {
   return bytes < 1024 * 1024
@@ -862,7 +874,7 @@ function updateComposer() {
   if (!form) return;
   const draft = chatDraft();
   const textarea = $("textarea[name=question]", form);
-  textarea.readOnly = draft.sending;
+  textarea.readOnly = draft.sending || !canAsk();
   textarea.style.height = "auto";
   textarea.style.height =
     Math.min(240, Math.max(84, textarea.scrollHeight)) + "px";
@@ -874,12 +886,13 @@ function updateComposer() {
     .join("");
   $("#chat-error").textContent = draft.error;
   $("#chat-send").disabled =
-    draft.sending || chatTurns().some((r) => ["running", "queued"].includes(r.status)) || (!draft.text.trim() && !draft.files.length);
+    !canAsk() || draft.sending || chatTurns().some((r) => ["running", "queued"].includes(r.status)) || (!draft.text.trim() && !draft.files.length);
   $("#chat-send span").textContent = draft.sending ? "发送中…" : "发送";
-  $("[data-action=attach-files]", form).disabled = draft.sending;
-  $("#chat-files").disabled = draft.sending;
+  $("[data-action=attach-files]", form).disabled = draft.sending || !canAsk();
+  $("#chat-files").disabled = draft.sending || !canAsk();
 }
 function addChatFiles(files) {
+  if(!canAsk())return;
   const draft = chatDraft();
   if (draft.sending) return;
   const errors = [];
@@ -926,6 +939,7 @@ function addChatFiles(files) {
   updateComposer();
 }
 async function submitChat() {
+  if(!canAsk())return;
   const projectID = state.project.id;
   const conversation = selectedConversation();
   const viewRevision = chatViewRevision;
@@ -1295,9 +1309,10 @@ async function openRequirementReview(taskID, savedTask, stillCurrent = () => tru
  const task = savedTask || (await api(`/tasks/${taskID}?compact=true`)).task;
  if (!stillCurrent()) return;
  modal(task.requirement_change?.status === "reviewing" ? "本轮需求变更" : task.parent_requirement_id ? "测试 Bug 评审" : (task.status === "aligning" || (task.status === "ready" && task.alignment?.status === "replied")) ? "开发对齐" : task.status === "clarify" ? "需求评审" : "需求讨论",requirementReviewHTML(task),{review:true});
- requirementReview = mountRequirementReview($(".requirement-review"),{task,api,messageID,userID:state.auth?.user?.id || "local-owner",onDetails:id=>openTask(id || taskID).catch(e=>toast(e.message)),onResolve:action=>taskResolutionForm(taskID,action).catch(e=>toast(e.message)),onChange:()=>requirementChangeForm(taskID).catch(e=>toast(e.message)),onFileBug:()=>taskForm(null,null,taskID).catch(e=>toast(e.message)),onConfirmed:()=>{toast("评审状态已更新");void refresh().then(render).catch(e=>toast(e.message));}});
+ requirementReview = mountRequirementReview($(".requirement-review"),{task,api,messageID,userID:state.auth?.user?.id || "local-owner",onDetails:id=>openTask(id || taskID).catch(e=>toast(e.message)),onResolve:action=>taskResolutionForm(taskID,action).catch(e=>toast(e.message)),onChange:canAction('requirement.create')?()=>requirementChangeForm(taskID).catch(e=>toast(e.message)):null,onFileBug:canFileLinkedBug()?()=>taskForm(null,null,taskID).catch(e=>toast(e.message)):null,onConfirmed:()=>{toast("评审状态已更新");void refresh().then(render).catch(e=>toast(e.message));}});
 }
 async function requirementChangeForm(taskID) {
+ if(!canAction('requirement.create'))return;
  const {task}=await api(`/tasks/${taskID}?compact=true`);
  const bug=task.parent_requirement_id ? task : null;
  const parent=bug ? (await api(`/tasks/${bug.parent_requirement_id}?compact=true`)).task : task;
@@ -1327,22 +1342,27 @@ async function taskResolutionForm(taskID, operation) {
 
 }
 async function taskForm(taskID, iterationSourceID, bugParentID,targetVersionID = null) {
-  const projectID = state.project.id;
+  let kinds=taskID?['requirement','bug']:bugParentID?(canFileLinkedBug()?['bug']:[]):iterationSourceID?(canIterate()?['requirement']:[]):creationKinds(state.project_access);
+  if(!kinds.length)throw Error('当前不能发起此操作');
+  const projectID = state.project.id,modalAtStart=modalRevision;
   const source = iterationSourceID ? (await api(`/tasks/${iterationSourceID}?compact=true`)).task : null;
-  if (state.project.id !== projectID) return;
+  if (state.project.id !== projectID || modalAtStart!==modalRevision) return;
   if (source && source.status !== 'done') throw Error('只有已验收的需求才能追加迭代');
   const parent = bugParentID ? (await api(`/tasks/${bugParentID}?compact=true`)).task : null;
   const t = taskID ? (await api(`/tasks/${taskID}?compact=true`)).task : parent ? {kind:"bug"} : {};
-  if (state.project.id !== projectID) return;
-  modal(parent ? (parent.status === "review" ? "提起验收 Bug" : "提起测试 Bug") : source ? "追加迭代" : taskID ? "编辑需求" : "创建需求", requirementFormHTML(t), {document: true});
+  if (state.project.id !== projectID || modalAtStart!==modalRevision) return;
+  kinds=taskID?[...new Set([t.kind||'requirement',...creationKinds(state.project_access)])]:bugParentID?(canFileLinkedBug()?['bug']:[]):iterationSourceID?(canIterate()?['requirement']:[]):creationKinds(state.project_access);
+  if(!kinds.length)return;
+  modal(parent ? (parent.status === "review" ? "提起验收 Bug" : "提起测试 Bug") : source ? "追加迭代" : taskID ? "编辑需求" : creationLabel(state.project_access), requirementFormHTML(t,kinds), {document: true});
   requirementEditor = mountRequirementEditor($("#task-form"), {
-    task: t, projectID, userID: state.auth?.user?.id || "local-owner",
+    task: t, projectID, allowedKinds:kinds, userID: state.auth?.user?.id || "local-owner",
     draftScope: parent ? 'testing-bug:' + parent.id : source ? 'iteration:' + source.id : undefined,
     sourceVersion: source?.version, parentRequirement:parent,
     onDiscard: () => { closeModal(); taskForm(taskID,iterationSourceID,bugParentID,targetVersionID); },
     onUnauthorized: () => { toast("登录已过期，请保存草稿后重新登录"); },
   });
-  const form=$('#task-form'), current=state.context.current_milestone;
+  const form=$('#task-form'), current=state.context.current_milestone;form.dataset.originalKind=t.kind||'requirement';
+  if(!taskID&&kinds.length===1){form.elements.kind.value=kinds[0];if(kinds[0]==='bug'){form.querySelector('button[type=submit]').textContent='提起 Bug';$('.requirement-state-note',form).textContent='Bug 与附件保存后交给开发跟进。';}}
   if (parent) {
     form.dataset.bugParent = parent.id; form.dataset.parentVersion = parent.version;
     form.elements.kind.value = 'bug';
@@ -1418,6 +1438,7 @@ async function startRun(
   attachmentIDs = [],
   projectID = state.project.id,
 ) {
+  if(!runStartAllowed(state.project_access,kind))throw Error('当前不能发起此分析');
   const r = await api(`/projects/${projectID}/runs`, {
     kind,
     task_id: taskID,
@@ -1531,7 +1552,7 @@ async function pollWorkspace() {
  try {
   const access=await api(`/projects/${encodeURIComponent(projectID)}/access`);
   if(state.project?.id!==projectID||state.switchingProject)return;
-  const changed=JSON.stringify(access.pages)!==JSON.stringify(state.project_access?.pages);
+  const changed=JSON.stringify([access.pages,access.actions])!==JSON.stringify([state.project_access?.pages,state.project_access?.actions]);
   state.project_access=access;
   if(changed){
    closeModal();stopRunUpdates();ensurePageAccess();
@@ -1614,6 +1635,7 @@ document.addEventListener("click", async (event) => {
       const item = state.intakes.find(v => v.id === intakeID);
       if (!item) return;
       const actionName = a === "create-intake" ? "create" : "dismiss";
+      if(actionName==='create'&&!canAction((item.kind==='bug'?'bug':'requirement')+'.create'))return;
       let problem = "";
       busyIntakes.add(intakeID); updateChat();
       try {
@@ -1644,6 +1666,7 @@ document.addEventListener("click", async (event) => {
       return;
     }
     if (a === "cancel-collaboration" || a === "retry-collaboration") {
+      if(a==='retry-collaboration'&&!canAsk())return;
       button.disabled = true;
       try {
         await api(`/collaborations/${button.dataset.id}/${a === "cancel-collaboration" ? "cancel" : "retry"}`, { request_id: id() });
@@ -2195,6 +2218,7 @@ document.addEventListener("submit", async (event) => {
     } else if (form.id === "task-form") {
       const payload = requirementEditor.payload(id);
       if (form.dataset.bugParent) payload.kind="bug";
+      if((!form.dataset.id||payload.kind!==form.dataset.originalKind)&&!(payload.kind==='bug'?(form.dataset.bugParent?canFileLinkedBug():canAction('bug.create')):canAction('requirement.create')))throw Error('操作权限已变化，请重新打开表单');
       requirementEditor.setSubmitting(true);
       const result = await api(
         form.dataset.iterationSource ? `/tasks/${form.dataset.iterationSource}/iterations` : form.dataset.id
@@ -2205,8 +2229,13 @@ document.addEventListener("submit", async (event) => {
       );
       requirementEditor.complete();
       afterTask = form.dataset.id ? result.task.id : "";
-      toast(form.dataset.iterationSource ? "迭代需求已保存到目标版本，Agent 将在后台评审" : form.dataset.id ? "需求已保存，历史交付记录保留" : "需求已保存到目标版本，Agent 将在后台评审，有结论后会标记待确认");
+      if(!canReadTasks()&&!form.dataset.id){
+        const saved=result.task||result.creation_receipt||{},taskID=saved.id||saved.task_id;
+        closeModal();await loadBusinessPage();modal(payload.kind==='bug'?'Bug 已保存':'需求已保存',`<p>已交给项目成员跟进。</p><p class="mono task-creation-receipt">${escape(taskID)}</p><div class="modal-actions">${action('close',state.page==='chat'?'返回聊天':'返回项目')}</div>`);return;
+      }
+      toast(payload.kind==='bug'?`Bug 已保存 · ${result.task?.id||result.creation_receipt?.task_id||''}`:form.dataset.iterationSource ? "迭代需求已保存到目标版本，Agent 将在后台评审" : form.dataset.id ? "需求已保存，历史交付记录保留" : "需求已保存到目标版本，Agent 将在后台评审，有结论后会标记待确认");
     } else if (form.id === "requirement-change-form") {
+      if(!canAction('requirement.create'))throw Error('操作权限已变化，请重新打开表单');
       const payload=JSON.parse(form.dataset.payload ||= JSON.stringify({action:'request_change',request_id:id(),expected_task_version:Number(form.dataset.version),body:data.body,source_bug_id:form.dataset.source,source_bug_version:Number(form.dataset.sourceVersion)}));
       try{localStorage.setItem(form.dataset.draftKey,JSON.stringify({body:data.body,payload}))}catch{}
       await api(`/tasks/${form.dataset.id}/requirement-review`,payload);

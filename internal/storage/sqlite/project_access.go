@@ -2,9 +2,118 @@ package sqlite
 
 import (
 	"ai-pm-system/internal/domain"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 )
+
+// Schema 16 materializes only legacy (missing/null) action grants. Work on raw
+// JSON so memberships, explicit empty duties/actions and unrelated extensions
+// retain their values instead of being decoded through a narrower project DTO.
+func (d *DB) migrateProjectActions() error {
+	tx, e := d.db.Begin()
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback()
+	var done int
+	if e = tx.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE version=16").Scan(&done); e != nil {
+		return e
+	}
+	if done != 0 {
+		return nil
+	}
+	rows, e := tx.Query("SELECT id,payload FROM documents WHERE kind='project'")
+	if e != nil {
+		return e
+	}
+	type update struct {
+		id      string
+		payload []byte
+	}
+	updates := []update{}
+	for rows.Next() {
+		var id string
+		var raw []byte
+		if e = rows.Scan(&id, &raw); e != nil {
+			rows.Close()
+			return e
+		}
+		var project map[string]json.RawMessage
+		if e = json.Unmarshal(raw, &project); e != nil {
+			rows.Close()
+			return e
+		}
+		if project == nil {
+			rows.Close()
+			return errors.New("project payload must be an object")
+		}
+		var roles []map[string]json.RawMessage
+		if roleJSON := project["project_roles"]; len(roleJSON) != 0 {
+			if e = json.Unmarshal(roleJSON, &roles); e != nil {
+				rows.Close()
+				return e
+			}
+		}
+		for _, role := range roles {
+			if actions := bytes.TrimSpace(role["actions"]); len(actions) != 0 && !bytes.Equal(actions, []byte("null")) {
+				continue
+			}
+			var pages []string
+			if pageJSON := role["pages"]; len(pageJSON) != 0 {
+				if e = json.Unmarshal(pageJSON, &pages); e != nil {
+					rows.Close()
+					return e
+				}
+			}
+			role["actions"], e = json.Marshal(domain.LegacyProjectActions(pages))
+			if e != nil {
+				rows.Close()
+				return e
+			}
+		}
+		if len(project["project_roles"]) != 0 {
+			project["project_roles"], e = json.Marshal(roles)
+			if e != nil {
+				rows.Close()
+				return e
+			}
+		}
+		var version int
+		if old := project["access_version"]; len(old) != 0 {
+			if e = json.Unmarshal(old, &version); e != nil {
+				rows.Close()
+				return e
+			}
+		}
+		project["access_version"], e = json.Marshal(version + 1)
+		if e != nil {
+			rows.Close()
+			return e
+		}
+		payload, err := json.Marshal(project)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		updates = append(updates, update{id, payload})
+	}
+	e = rows.Err()
+	rows.Close()
+	if e != nil {
+		return e
+	}
+	for _, item := range updates {
+		if _, e = tx.Exec("UPDATE documents SET payload=? WHERE kind='project' AND id=?", string(item.payload), item.id); e != nil {
+			return e
+		}
+	}
+	if _, e = tx.Exec("INSERT INTO schema_migrations(version) VALUES(16)"); e != nil {
+		return e
+	}
+	return tx.Commit()
+}
 
 func (d *DB) migrateProjectAccess() error {
 	tx, err := d.db.Begin()

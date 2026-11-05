@@ -8,6 +8,10 @@ import (
 )
 
 func (s *Service) SaveAttachment(c context.Context, a domain.Actor, project, name string, content []byte) (domain.Attachment, error) {
+	if a.Kind == "platform" && a.ProjectID != project {
+		return domain.Attachment{}, domain.ErrForbidden
+	}
+	a = ActionActor(c, a)
 	if err := s.RequirePages(c, a, project, "tasks", "reviews", "chat"); err != nil {
 		return domain.Attachment{}, err
 	}
@@ -66,6 +70,10 @@ func attachmentUploader(a domain.Actor) (string, string) {
 // AttachmentAs applies the referenced object's current access before returning
 // bytes or allowing an ID to be attached elsewhere. Knowing a URL is no grant.
 func (s *Service) AttachmentAs(c context.Context, a domain.Actor, project, id string) (domain.Attachment, error) {
+	if a.Kind == "platform" && a.ProjectID != project {
+		return domain.Attachment{}, domain.ErrForbidden
+	}
+	a = ActionActor(c, a)
 	var empty domain.Attachment
 	if e := s.RequirePages(c, a, project, "tasks", "reviews", "versions", "chat"); e != nil {
 		return empty, e

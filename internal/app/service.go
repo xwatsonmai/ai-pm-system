@@ -257,7 +257,19 @@ func (s *Service) commit(c context.Context, a domain.Actor, t domain.Task, old i
 			target = destination.Input.ProjectVersionID
 		}
 	}
-	m, e := s.commitWithMilestone(c, a, t, old, ev, key, fp, claim, target)
+	var m domain.Mutation
+	if kind == "created" || kind == "revised" {
+		// Serialize the final grant/attachment check with role edits. Permission
+		// checks performed before validation or repository reads are not enough.
+		s.mu.Lock()
+		e = s.authorizeTaskWrite(c, a, t, old)
+		if e == nil {
+			m, e = s.commitWithMilestone(c, a, t, old, ev, key, fp, claim, target)
+		}
+		s.mu.Unlock()
+	} else {
+		m, e = s.commitWithMilestone(c, a, t, old, ev, key, fp, claim, target)
+	}
 	if e == nil {
 		if a.Kind != "platform" {
 			s.notify(t.ProjectID, t.ID, kind)
@@ -271,7 +283,9 @@ func (s *Service) CreateTask(c context.Context, a domain.Actor, p string, v Task
 	return s.createTask(c, a, p, v, nil)
 }
 func (s *Service) createTask(c context.Context, a domain.Actor, p string, v TaskInput, authorization *domain.TaskActionAuthorization) (domain.Mutation, error) {
-	pages := []string{"tasks"}
+	if e := s.requireTaskCreation(c, a, p, v.Kind, v.ParentRequirementID); e != nil {
+		return domain.Mutation{}, e
+	}
 	if v.Kind == "bug" && v.ParentRequirementID != "" {
 		parent, e := s.Store.GetTask(c, v.ParentRequirementID)
 		if e != nil {
@@ -280,10 +294,6 @@ func (s *Service) createTask(c context.Context, a domain.Actor, p string, v Task
 		if parent.ProjectID != p {
 			return domain.Mutation{}, domain.ErrForbidden
 		}
-		pages = append(pages, "reviews")
-	}
-	if e := s.RequirePages(c, a, p, pages...); e != nil {
-		return domain.Mutation{}, e
 	}
 	if e := s.CheckProject(c, a, p, false); e != nil {
 		return domain.Mutation{}, e
@@ -366,6 +376,11 @@ func (s *Service) editTask(c context.Context, a domain.Actor, id string, v TaskI
 	}
 	if e = s.RequirePages(c, a, t.ProjectID, pages...); e != nil {
 		return domain.Mutation{}, e
+	}
+	if v.Kind != t.Kind {
+		if e = s.requireTaskCreation(c, a, t.ProjectID, v.Kind, t.ParentRequirementID); e != nil {
+			return domain.Mutation{}, e
+		}
 	}
 	if v.RequestID == "" {
 		return domain.Mutation{}, errors.New("缺少 request_id")

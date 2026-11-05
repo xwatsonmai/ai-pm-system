@@ -94,6 +94,9 @@ func (s *Service) requirementIntakeOwner(c context.Context, runID string) (domai
 	if err = s.CheckProject(c, a, r.ProjectID, false); err != nil {
 		return r, a, err
 	}
+	if err = s.RequirePages(c, a, r.ProjectID, "chat"); err != nil {
+		return r, a, err
+	}
 	if users, e := s.Store.ListUsers(c); e == nil {
 		for _, u := range users {
 			if u.ID == a.ID {
@@ -111,7 +114,7 @@ func (s *Service) RequirementIntakes(c context.Context, a domain.Actor, project 
 	if a.Kind != "human" {
 		return nil, domain.ErrForbidden
 	}
-	if err := s.RequirePages(c, a, project, "tasks"); err != nil {
+	if err := s.RequirePages(c, a, project, "tasks", "chat"); err != nil {
 		return nil, err
 	}
 	items, err := s.Store.ListRequirementIntakes(c, project)
@@ -179,6 +182,9 @@ func (s *Service) ProposeRequirement(c context.Context, runID string, in Require
 	}
 	input := TaskInput{Title: in.Title, Kind: in.Kind, Description: intakeDocument(in), Acceptance: in.Acceptance}
 	if err = validateInput(&input); err != nil {
+		return domain.RequirementIntake{}, err
+	}
+	if err = s.requireTaskCreation(c, a, r.ProjectID, input.Kind, ""); err != nil {
 		return domain.RequirementIntake{}, err
 	}
 	if !nonempty(in.Description) || !nonempty(in.Reason) || len(in.Reason) > 3000 {
@@ -259,11 +265,20 @@ func (s *Service) resolveRequirementIntake(c context.Context, a domain.Actor, id
 	if a.Kind != "human" || a.ID != v.OwnerID {
 		return domain.RequirementIntake{}, domain.ErrForbidden
 	}
-	if err = s.RequirePages(c, a, v.ProjectID, "tasks"); err != nil {
+	if err = s.RequirePages(c, a, v.ProjectID, "tasks", "chat"); err != nil {
 		return v, err
 	}
-	if _, err = s.Store.GetRun(c, v.OriginRunID); err != nil {
+	origin, err := s.Store.GetRun(c, v.OriginRunID)
+	if err != nil {
 		return v, err
+	}
+	if origin.ProjectID != v.ProjectID || !OwnsRun(a, origin) {
+		return v, domain.ErrForbidden
+	}
+	if in.Action == "create" {
+		if err = s.requireTaskCreation(c, a, v.ProjectID, v.Kind, ""); err != nil {
+			return v, err
+		}
 	}
 	if in.RequestID == "" {
 		return v, errors.New("缺少 request_id")
@@ -298,6 +313,15 @@ func (s *Service) resolveRequirementIntake(c context.Context, a domain.Actor, id
 	var task *domain.Task
 	var ev *domain.Event
 	if in.Action == "create" {
+		ids := []string{}
+		for _, f := range v.Attachments {
+			ids = append(ids, f.ID)
+		}
+		files, err := s.taskAttachments(c, a, v.ProjectID, ids)
+		if err != nil {
+			return v, err
+		}
+		v.Attachments = files
 		if err := validateIntakeDetails(v.Kind, v.BugDetails, v.MissingDetails); err != nil {
 			return v, err
 		}

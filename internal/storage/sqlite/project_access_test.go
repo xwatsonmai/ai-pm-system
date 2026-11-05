@@ -31,7 +31,7 @@ func TestProjectAccessMigrationRetainsGrantsAndIndependentDuties(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if p.AccessVersion != 1 || len(p.ProjectRoles) != 4 || !slices.Equal(p.Memberships[1].Responsibilities, []string{"developer", "tester"}) {
+	if p.AccessVersion != 2 || len(p.ProjectRoles) != 4 || !slices.Equal(p.Memberships[1].Responsibilities, []string{"developer", "tester"}) {
 		t.Fatal("legacy migration lost membership/duties", p)
 	}
 	for _, role := range p.ProjectRoles {

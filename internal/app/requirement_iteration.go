@@ -69,6 +69,8 @@ func (s *Service) CreateRequirementIterationFromMCP(c context.Context, a domain.
 	return s.createRequirementIteration(c, a, id, in, auth)
 }
 func (s *Service) createRequirementIteration(c context.Context, a domain.Actor, id string, in RequirementIterationInput, auth *domain.TaskActionAuthorization) (domain.Mutation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var out domain.Mutation
 	if a.Kind != "human" && auth == nil {
 		return out, domain.ErrForbidden
@@ -79,6 +81,16 @@ func (s *Service) createRequirementIteration(c context.Context, a domain.Actor, 
 	}
 	if e = s.RequirePages(c, a, source.ProjectID, "tasks"); e != nil {
 		return out, e
+	}
+	// Iteration always starts new requirement work; choosing kind=bug must not
+	// turn it into a bypass of requirement.create.
+	if e = s.RequireAction(c, a, source.ProjectID, domain.ActionCreateRequirement); e != nil {
+		return out, e
+	}
+	if in.Kind == "bug" {
+		if e = s.RequireAction(c, a, source.ProjectID, domain.ActionCreateBug); e != nil {
+			return out, e
+		}
 	}
 	if in.RequestID == "" {
 		return out, errors.New("缺少request_id")

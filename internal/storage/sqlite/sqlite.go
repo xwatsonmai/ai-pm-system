@@ -133,7 +133,10 @@ func (d *DB) migrate() error {
 	if err != nil {
 		return err
 	}
-	return d.migrateProjectAccess()
+	if err = d.migrateProjectAccess(); err != nil {
+		return err
+	}
+	return d.migrateProjectActions()
 }
 func decode[T any](s string) (T, error) { var v T; err := json.Unmarshal([]byte(s), &v); return v, err }
 func get[T any](ctx context.Context, d *DB, kind, id string) (T, error) {

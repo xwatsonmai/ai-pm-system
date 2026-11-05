@@ -15,6 +15,133 @@ func actorUser(a domain.Actor) string {
 	return a.ID
 }
 
+type actionActorKey struct{}
+
+// WithActionActor binds a trusted in-process platform write to its real owner.
+// Request payloads cannot set this context value. The writer identity remains
+// platform (e.g. triage still creates ready Bugs attributed to the Agent).
+func WithActionActor(c context.Context, owner domain.Actor) context.Context {
+	return context.WithValue(c, actionActorKey{}, owner)
+}
+
+func ActionActor(c context.Context, writer domain.Actor) domain.Actor {
+	if writer.Kind != "platform" {
+		return writer
+	}
+	owner, ok := c.Value(actionActorKey{}).(domain.Actor)
+	if !ok {
+		return writer
+	}
+	if owner.ID == "" || (owner.Kind != "human" && owner.Kind != "developer") || writer.ProjectID == "" || (owner.ProjectID != "" && owner.ProjectID != writer.ProjectID) || (owner.Kind == "developer" && owner.ProjectID != writer.ProjectID) {
+		return domain.Actor{}
+	}
+	return owner
+}
+
+func CanPerformAction(a domain.Actor, p domain.Project, action string) bool {
+	if !slices.Contains(domain.ProjectActions, action) {
+		return false
+	}
+	if actorUser(a) == "local-owner" && (a.Kind == "human" || (a.Kind == "developer" && a.ProjectID == p.ID)) {
+		return true
+	}
+	if a.ProjectID == p.ID && (a.Kind == "platform" || (a.Kind == "developer" && a.UserID == "")) {
+		return true
+	}
+	if a.Kind != "human" && (a.Kind != "developer" || a.ProjectID != p.ID) {
+		return false
+	}
+	p = domain.NormalizeProjectAccess(p)
+	for _, member := range p.Memberships {
+		if member.UserID != actorUser(a) {
+			continue
+		}
+		for _, role := range p.ProjectRoles {
+			if !slices.Contains(member.Roles, role.ID) {
+				continue
+			}
+			actions := domain.ProjectRoleActions(role)
+			if slices.Contains(actions, action) || (action == domain.ActionCreateLinkedBug && slices.Contains(actions, domain.ActionCreateBug)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (s *Service) RequireAction(c context.Context, a domain.Actor, project, action string) error {
+	return s.RequireAnyAction(c, a, project, action)
+}
+
+func (s *Service) RequireAnyAction(c context.Context, a domain.Actor, project string, actions ...string) error {
+	if a.Kind == "platform" && a.ProjectID != project {
+		return domain.ErrForbidden
+	}
+	p, e := s.Store.GetProject(c, project)
+	if e != nil {
+		return e
+	}
+	a = ActionActor(c, a)
+	for _, action := range actions {
+		if CanPerformAction(a, p, action) {
+			return nil
+		}
+	}
+	return domain.ErrForbidden
+}
+
+func taskCreationAction(kind, parent string) string {
+	if kind == "bug" {
+		if parent != "" {
+			return domain.ActionCreateLinkedBug
+		}
+		return domain.ActionCreateBug
+	}
+	return domain.ActionCreateRequirement
+}
+
+func (s *Service) requireTaskCreation(c context.Context, a domain.Actor, project, kind, parent string) error {
+	if e := s.RequireAction(c, a, project, taskCreationAction(kind, parent)); e != nil {
+		return e
+	}
+	if parent != "" {
+		return s.RequirePages(c, ActionActor(c, a), project, "tasks", "reviews", "versions")
+	}
+	return nil
+}
+
+// The caller holds Service.mu through the corresponding storage commit.
+func (s *Service) authorizeTaskWrite(c context.Context, a domain.Actor, t domain.Task, old int) error {
+	if old == 0 {
+		if e := s.requireTaskCreation(c, a, t.ProjectID, t.Kind, t.ParentRequirementID); e != nil {
+			return e
+		}
+	} else {
+		current, e := s.Store.GetTask(c, t.ID)
+		if e != nil {
+			return e
+		}
+		pages := []string{"tasks"}
+		if current.ParentRequirementID != "" {
+			pages = append(pages, "reviews")
+		}
+		if e = s.RequirePages(c, ActionActor(c, a), current.ProjectID, pages...); e != nil {
+			return e
+		}
+		if t.Kind != current.Kind {
+			if e = s.requireTaskCreation(c, a, current.ProjectID, t.Kind, current.ParentRequirementID); e != nil {
+				return e
+			}
+		}
+	}
+	ids := []string{}
+	for _, f := range t.Attachments {
+		ids = append(ids, f.ID)
+	}
+	_, e := s.taskAttachments(c, a, t.ProjectID, ids)
+	return e
+}
+
 func CanAccessPage(a domain.Actor, p domain.Project, page string) bool {
 	if !slices.Contains(domain.ProjectPages, page) {
 		return false
@@ -137,6 +264,7 @@ type RoleInput struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
 	Pages       []string `json:"pages"`
+	Actions     []string `json:"actions"`
 	Version     int      `json:"version"`
 }
 
@@ -177,13 +305,29 @@ func (s *Service) SaveProjectRole(c context.Context, a domain.Actor, project, id
 	if id != "" && index < 0 {
 		return p, domain.ErrNotFound
 	}
+	actions := in.Actions
+	if actions == nil {
+		if index < 0 {
+			actions = domain.LegacyProjectActions(pages)
+		} else {
+			actions = slices.Clone(domain.ProjectRoleActions(p.ProjectRoles[index]))
+		}
+	}
+	checked := []string{}
+	for _, action := range actions {
+		if !slices.Contains(domain.ProjectActions, action) || slices.Contains(checked, action) {
+			return p, errors.New("操作权限无效或重复")
+		}
+		checked = append(checked, action)
+	}
 	if index < 0 {
-		p.ProjectRoles = append(p.ProjectRoles, domain.ProjectRole{ID: domain.ID("role_"), Name: name, Description: in.Description, Pages: pages, Version: 1})
+		p.ProjectRoles = append(p.ProjectRoles, domain.ProjectRole{ID: domain.ID("role_"), Name: name, Description: in.Description, Pages: pages, Actions: checked, Version: 1})
 	} else {
 		r := p.ProjectRoles[index]
 		r.Name = name
 		r.Description = in.Description
 		r.Pages = pages
+		r.Actions = checked
 		r.Version++
 		p.ProjectRoles[index] = r
 	}
