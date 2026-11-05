@@ -263,6 +263,9 @@ func (s *Service) commit(c context.Context, a domain.Actor, t domain.Task, old i
 		// checks performed before validation or repository reads are not enough.
 		s.mu.Lock()
 		e = s.authorizeTaskWrite(c, a, t, old)
+		if e == nil && old == 0 {
+			e = s.addCreationProductMention(c, t, &ev)
+		}
 		if e == nil {
 			m, e = s.commitWithMilestone(c, a, t, old, ev, key, fp, claim, target)
 		}

@@ -31,6 +31,10 @@ func (s *Service) requirementTimeline(c context.Context, t domain.Task, messages
 			return nil, err
 		}
 		for _, e := range events {
+			if m, ok := domain.CreatedRequirementProductMention(e); ok && !seen[m.ID] {
+				out = append(out, m)
+				seen[m.ID] = true
+			}
 			verb, ok := verbs[e.Kind]
 			id := "event_" + strconv.FormatInt(e.Seq, 10)
 			if !ok || seen[id] {

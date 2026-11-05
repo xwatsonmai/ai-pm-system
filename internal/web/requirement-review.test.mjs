@@ -3,6 +3,16 @@ import assert from 'node:assert/strict';
 import {answerRows, hasReviewDraft, questionIsActive, questionReplies, sameAnswerSheet, questionCardStatus} from './static/requirement-review-state.mjs';
 import {relationHTML} from './static/requirement-review.mjs';
 
+test('automatic product mentions preserve the original source and stay system events',async()=>{
+  const {chatTimeline}=await import('./static/requirement-review-state.mjs');
+  const mention={id:'product_mention_task',role:'system',action:'notify_product',body:'运营提交需求，请 @产品😀甲 关注',at:1,mentions:[{user_id:'product',name:'产品😀甲',start:9,end:15}]};
+  const snapshot={id:'source',role:'system',body:'原需求内容',source:{revision:1},at:2};
+  const items=chatTimeline({source:{created_at:1,status:'clarify'},messages:[mention,snapshot]});
+  assert.equal(items[0].button.message,'source');
+  assert.equal(items[1].type,'event');assert.equal(items[1].message,mention);
+  assert.equal(items.filter(item=>item.key==='source').length,0);
+});
+
 test('related requirement titles and reasons are escaped, and stale forms cannot be submitted',()=>{
   const html=relationHTML([{task_id:'task-"unsafe',title:'<img src=x onerror=alert(1)>',kind:'conflict',reason:'<script>wrong</script>'}]);
   assert(!html.includes('<img'));

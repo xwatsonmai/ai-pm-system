@@ -336,6 +336,9 @@ func (s *Service) resolveRequirementIntake(c context.Context, a domain.Actor, id
 		v.TaskID, v.Status = task.ID, "created"
 		// Private conversation IDs and unselected dialogue never enter project history.
 		ev = &domain.Event{ProjectID: v.ProjectID, TaskID: task.ID, Kind: "created", Actor: a.Name, Body: "从项目问答创建需求", At: v.UpdatedAt}
+		if err = s.addCreationProductMention(c, *task, ev); err != nil {
+			return v, err
+		}
 	}
 	var batches []domain.MilestoneBatch
 	if task != nil {

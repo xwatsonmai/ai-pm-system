@@ -15,6 +15,7 @@ import (
 // ReviewMentionNotice is recovered from committed messages after a restart.
 // It does not create work in the recipient's to-do list.
 type ReviewMentionNotice struct {
+	Action    string `json:"action,omitempty"`
 	TaskID    string `json:"task_id"`
 	ProjectID string `json:"project_id"`
 	MessageID string `json:"message_id"`
@@ -31,24 +32,36 @@ func mentionDeliveryID(message, user, channel string) string {
 
 func (h *Hub) reconcileMentions(ctx context.Context, t domain.Task) error {
 	v, err := h.Data.GetRequirementReview(ctx, t.ID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return nil
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return err
 	}
+	messages := []domain.RequirementReviewMessage{}
+	for _, m := range v.Messages {
+		if m.Role == "user" && m.ActorKind == "human" && (m.Action == "message" || m.Action == "discuss" || m.Action == "alignment_reply") {
+			messages = append(messages, m)
+		}
+	}
+	// The creation event is in the first chronological task-event window. Its
+	// recipients survive crashes before review startup without changing the room.
+	events, err := h.Data.Events(ctx, t.ProjectID, t.ID, 0)
 	if err != nil {
 		return err
+	}
+	for _, event := range events {
+		if m, ok := domain.CreatedRequirementProductMention(event); ok {
+			messages = append(messages, m)
+		}
 	}
 	p, err := h.Data.GetProject(ctx, t.ProjectID)
 	if err != nil {
 		return err
 	}
-	for _, m := range v.Messages {
-		if m.Role != "user" || m.ActorKind != "human" || (m.Action != "message" && m.Action != "discuss" && m.Action != "alignment_reply") || h.now().Sub(time.UnixMilli(m.At)) >= backfill {
+	for _, m := range messages {
+		if h.now().Sub(time.UnixMilli(m.At)) >= backfill {
 			continue
 		}
 		for _, mention := range m.Mentions {
-			if !slices.ContainsFunc(domain.ProjectMembers(p), func(member domain.ProjectMember) bool {
-				return member.UserID == mention.UserID && domain.MemberHasProjectPage(p, member.UserID, "tasks", "reviews", "versions")
-			}) {
+			if !mentionRecipientAllowed(p, mention.UserID, m.Action) {
 				continue
 			}
 			for _, name := range h.enabled() {
@@ -64,8 +77,11 @@ func (h *Hub) reconcileMentions(ctx context.Context, t domain.Task) error {
 					preview = append(preview[:120], '…')
 				}
 				now := h.now().UnixMilli()
-				d := Delivery{ID: mentionDeliveryID(m.ID, mention.UserID, name), UserID: mention.UserID, Channel: name, ExternalID: b.ExternalID, State: "pending", NextAt: now, UpdatedAt: now,
-					Mention: &ReviewMentionNotice{TaskID: t.ID, ProjectID: t.ProjectID, MessageID: m.ID, Subject: t.Title, Project: p.Name, Sender: m.Actor, Preview: string(preview)}}
+				notice := &ReviewMentionNotice{TaskID: t.ID, ProjectID: t.ProjectID, MessageID: m.ID, Subject: t.Title, Project: p.Name, Sender: m.Actor, Preview: string(preview)}
+				if m.Action == domain.RequirementProductMentionAction {
+					notice.Action = m.Action
+				}
+				d := Delivery{ID: mentionDeliveryID(m.ID, mention.UserID, name), UserID: mention.UserID, Channel: name, ExternalID: b.ExternalID, State: "pending", NextAt: now, UpdatedAt: now, Mention: notice}
 				if e = h.Store.QueueDelivery(ctx, d); e != nil {
 					return e
 				}
@@ -73,6 +89,16 @@ func (h *Hub) reconcileMentions(ctx context.Context, t domain.Task) error {
 		}
 	}
 	return nil
+}
+
+func mentionRecipientAllowed(p domain.Project, user, action string) bool {
+	p = domain.NormalizeProjectAccess(p)
+	if action == domain.RequirementProductMentionAction {
+		return slices.ContainsFunc(p.Memberships, func(m domain.ProjectMember) bool {
+			return m.UserID == user && m.ResponsibleFor("product") && domain.MemberHasProjectPage(p, user, "tasks")
+		})
+	}
+	return domain.MemberHasProjectPage(p, user, "tasks", "reviews", "versions")
 }
 
 func (h *Hub) canDeliverMention(ctx context.Context, d Delivery) (bool, error) {
@@ -83,9 +109,19 @@ func (h *Hub) canDeliverMention(ctx context.Context, d Delivery) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if !slices.ContainsFunc(domain.ProjectMembers(p), func(m domain.ProjectMember) bool {
-		return m.UserID == d.UserID && domain.MemberHasProjectPage(p, m.UserID, "tasks", "reviews", "versions")
-	}) {
+	if !mentionRecipientAllowed(p, d.UserID, d.Mention.Action) {
+		return false, nil
+	}
+	if d.Mention.Action == domain.RequirementProductMentionAction {
+		events, err := h.Data.Events(ctx, p.ID, d.Mention.TaskID, 0)
+		if err != nil {
+			return false, err
+		}
+		for _, event := range events {
+			if m, ok := domain.CreatedRequirementProductMention(event); ok && m.ID == d.Mention.MessageID {
+				return slices.ContainsFunc(m.Mentions, func(mention domain.ReviewMention) bool { return mention.UserID == d.UserID }), nil
+			}
+		}
 		return false, nil
 	}
 	v, err := h.Data.GetRequirementReview(ctx, d.Mention.TaskID)
@@ -103,6 +139,9 @@ func (h *Hub) canDeliverMention(ctx context.Context, d Delivery) (bool, error) {
 func (h *Hub) mentionCard(d Delivery) Card {
 	m := d.Mention
 	link := h.EntryURL(d.Channel, "/?"+url.Values{"task": {m.TaskID}, "review_message": {m.MessageID}}.Encode())
+	if m.Action == domain.RequirementProductMentionAction {
+		return Card{ID: d.ID, Title: "有新需求，请产品协助评审", Subject: m.Subject, Project: m.Project, Fields: []Field{{Label: "提醒", Value: m.Preview}}, URL: link, Buttons: []Button{{Text: "查看需求与提醒", URL: link, Primary: true}}}
+	}
 	return Card{ID: d.ID, Title: m.Sender + " 在需求评审中 @ 了你", Subject: m.Subject, Project: m.Project, Fields: []Field{{Label: "发言人", Value: m.Sender}, {Label: "消息", Value: m.Preview}}, URL: link, Buttons: []Button{{Text: "查看评审消息", URL: link, Primary: true}}}
 }
 

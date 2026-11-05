@@ -154,6 +154,9 @@ func (s *Service) createRequirementIteration(c context.Context, a domain.Actor, 
 			data["authorization"] = auth
 		}
 		plan.event(candidate, "created", "基于已验收需求追加迭代："+source.Title, data)
+		if e = s.addCreationProductMention(c, candidate, &plan.events[len(plan.events)-1]); e != nil {
+			return out, e
+		}
 		plan.event(source, "iteration_created", "追加迭代："+candidate.Title, data)
 		out = domain.Mutation{Task: candidate}
 		body, _ := json.Marshal(out)

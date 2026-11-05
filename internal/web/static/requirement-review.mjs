@@ -228,7 +228,7 @@ export function mountRequirementReview(root, {task,api,userID,messageID = '',onD
     if (item.type === 'event') {
       const b = item.button;
       const button = b ? `<button type="button" class="rc-event-button" data-review-action="${b.action}"${b.message?` data-message="${esc(b.message)}"`:''}>${b.label}</button>` : '';
-      return `<div class="rc-event${item.tone?' '+item.tone:''}"><span class="rc-event-text">${esc(item.text)}</span>${item.note?`<span class="rc-event-note">${esc(item.note)}</span>`:''}${item.at?`<time>${time(item.at)}</time>`:''}${button}</div>`;
+      return `<div class="rc-event${item.tone?' '+item.tone:''}"><span class="rc-event-text">${item.message?.mentions?.length?reviewMessageHTML(item.message):esc(item.text)}</span>${item.note?`<span class="rc-event-note">${esc(item.note)}</span>`:''}${item.at?`<time>${time(item.at)}</time>`:''}${button}</div>`;
     }
     if (item.type === 'typing') {
       const detail = item.activity ? `<div class="rc-activity"><span>${esc(item.activity)}</span>${item.done?.length?`<span class="rc-activity-done">已完成：${item.done.map(esc).join(' · ')}</span>`:''}</div>` : '';
