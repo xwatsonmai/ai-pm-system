@@ -1,5 +1,5 @@
 import { retestVersion, testingRequest } from "./testing-version.mjs";
-import { pagerHTML, pageQuery } from "./pagination.mjs";
+import { moreHTML, pageQuery, readPageWindow, patchKeyedHTML } from "./pagination.mjs";
 import { BASE, appURL } from "./base.mjs";
 // The to-do page: what IM cards and the workspace link to. It works on a
 // phone inside an IM app as well as on a desktop, and every action goes
@@ -54,12 +54,24 @@ function row(t) {
   return `<a class="todo-row${t.open ? "" : " closed"}" href="${escape(appURL("/todo"))}/${escape(t.id)}"><span class="todo-kind">${escape(t.title)}</span><strong>${escape(t.subject)}</strong><span class="hint">${escape(t.project)} · ${date(t.created_at)}${t.open ? "" : " · " + escape(t.done || "已处理")}</span></a>`;
 }
 
-async function list() {
+async function list(page = Number(params.get("page")) || 1) {
   const closed = params.get("tab") === "closed";
-  const query=pageQuery(Number(params.get("page"))||1,Number(params.get("page_size"))||20);if(closed)query.set("status","closed");
-  const [todos, channels] = await Promise.all([api(`/todos?${query}`), api("/me/channels").catch(() => ({ items: [] }))]);
+  const loaded = root.querySelector("#todo-items");
+  const [todos, channels] = await Promise.all([
+    readPageWindow(page, number => {
+      const query = pageQuery(number, Number(params.get("page_size")) || 20);
+      if (closed) query.set("status", "closed");
+      return api(`/todos?${query}`);
+    }),
+    loaded ? null : api("/me/channels").catch(() => ({ items: [] })),
+  ]);
   const tabs = `<nav class="todo-tabs" aria-label="待办筛选"><a href="${escape(appURL("/todo"))}" ${closed ? "" : 'aria-current="page"'}>待处理</a><a href="${escape(appURL("/todo"))}?tab=closed" ${closed ? 'aria-current="page"' : ""}>已处理</a></nav>`;
   const items = todos.items.length ? `<div class="todo-list">${todos.items.map(row).join("")}</div>` : `<section class="todo-card todo-empty"><p>${closed ? "还没有已处理的待办。" : "没有等你处理的事项。"}</p></section>`;
+  const content = items + moreHTML(todos, "todos", "加载更多待办");
+  if (loaded) {
+    patchKeyedHTML(loaded, content);
+    return;
+  }
   const notice = channels.items.length
     ? `<section class="todo-card todo-channels"><h2>消息通知</h2>${channels.items
         .map(
@@ -68,7 +80,7 @@ async function list() {
         )
         .join("")}</section>`
     : "";
-  show(`<h1 class="todo-title">我的待办</h1>${tabs}${items}${pagerHTML(todos,"todos")}${notice}`);
+  show(`<h1 class="todo-title">我的待办</h1>${tabs}<div id="todo-items">${content}</div>${notice}`);
 }
 
 function facts(todo, task) {
@@ -189,9 +201,19 @@ async function detail(todoID) {
   });
 }
 
-root.addEventListener("change",e=>{if(!e.target.matches('[data-page-size="todos"]'))return;params.set('page','1');params.set('page_size',e.target.value);history.replaceState(null,'',`${location.pathname}?${params}`);void list();});
 root.addEventListener("click", async (e) => {
- const pager=e.target.closest('[data-action="list-page"][data-list="todos"]');if(pager){params.set('page',pager.dataset.page);history.replaceState(null,'',`${location.pathname}?${params}`);await list();return;}
+  const more = e.target.closest('[data-action="list-more"][data-list="todos"]');
+  if (more) {
+    more.disabled = true;
+    try {
+      await list(Number(more.dataset.page));
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      more.disabled = false;
+    }
+    return;
+  }
   const button = e.target.closest("[data-unbind]");
   if (!button || !confirm(`解除绑定后，不再向${button.dataset.label}推送待办。确定解除吗？`)) return;
   button.disabled = true;

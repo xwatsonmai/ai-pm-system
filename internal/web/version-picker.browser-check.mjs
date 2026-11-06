@@ -27,7 +27,7 @@ try{
   for(let n=0;n<count;n++)versions.push((await api(`/projects/${project.id}/versions`,{name:count===1?'用于验证长名称仍保持单行且不会撑宽筛选栏的版本名称'.repeat(2):`Version ${String(n).padStart(2,'0')}`,request_id:crypto.randomUUID()})).project_version);
   projects.push({project,versions});await tasks(project);await open(filter());
   await page.waitForFunction(count=>document.querySelector('[data-task-version-picker] [data-version-options]')?.options.length===Math.min(count,20)+1,count);
-  assert.equal(await filter().locator('[data-version-page]').count(),count>20?2:0,`${count} options pagination`);
+  assert.equal(await filter().locator('[data-version-more]').count(),count>20?1:0,`${count} options pagination`);
   assert.equal(await filter().locator('[data-pager],[data-page-size]').count(),0,'version options use the business-list pager');
   assert.equal(await filter().locator('[data-version-pager]').evaluate(node=>node.closest('.version-picker-panel')!==null),true);
   await page.keyboard.press('Escape');assert.equal(await filter().locator('.version-picker-panel').isVisible(),false);
@@ -41,15 +41,16 @@ try{
  for(let n=0;n<43;n++)await api(`/projects/${project.id}/tasks`,{title:`Task ${n}`,description:'picker fixture',request_id:crypto.randomUUID()});
  await tasks(project);await page.locator('[data-list=tasks][data-page="2"]').click();await page.waitForFunction(()=>document.querySelector('[data-pager=tasks]')?.textContent.includes('第 2'));
  const before=await page.locator('[data-task-row]').evaluateAll(nodes=>nodes.map(node=>node.dataset.id));await open(filter());
- await filter().locator('[data-version-page="2"]').click();await filter().locator(`[data-version-options] option[value="${second.id}"]`).waitFor({state:'attached'});
+ await filter().locator('[data-version-more]').click();await filter().locator(`[data-version-options] option[value="${second.id}"]`).waitFor({state:'attached'});
  assert.deepEqual(await page.locator('[data-task-row]').evaluateAll(nodes=>nodes.map(node=>node.dataset.id)),before,'option paging changed task rows');assert((await page.locator('[data-pager=tasks]').innerText()).includes('第 2'));
  await filter().locator('[data-version-options]').selectOption(second.id);assert.equal(await filter().locator('[name=task_version_filter]').inputValue(),second.id);
- await open(filter());await filter().locator('[data-version-page="1"]').click();await page.waitForFunction(()=>document.querySelector('[data-task-version-picker] .version-picker-pages span')?.textContent==='1 / 2');
- assert.equal(await filter().locator('[data-version-options]').inputValue(),second.id,'selected option was lost on another option page');
- await filter().locator('[data-version-search]').fill('Version 03');await filter().locator('[data-version-options] option').filter({hasText:'Version 03'}).waitFor({state:'attached'});await page.waitForFunction(()=>!document.querySelector('[data-task-version-picker] [data-version-page]'));
+ await open(filter());
+ assert.equal(await filter().locator('[data-version-options] option').count(),22,'loading more replaced the previous choices');
+ assert.equal(await filter().locator('[data-version-options]').inputValue(),second.id);
+ await filter().locator('[data-version-search]').fill('Version 03');await filter().locator('[data-version-options] option').filter({hasText:'Version 03'}).waitFor({state:'attached'});await page.waitForFunction(()=>!document.querySelector('[data-task-version-picker] [data-version-more]'));
  assert.equal(await filter().locator('[data-version-options]').inputValue(),second.id,'search lost the selected ID');
  await filter().locator('[data-version-options]').selectOption('');assert.equal(await filter().locator('[name=task_version_filter]').inputValue(),'');
- await page.screenshot({path:join(output,'all-versions-desktop.png')});report.paging='21 options paginate inside the popup; option paging leaves task page 2 unchanged; search and option paging retain the selected ID';
+ await page.screenshot({path:join(output,'all-versions-desktop.png')});report.paging='21 options load progressively inside the popup; the task table stays on page 2; search retains the selected ID';
  // All operations below happen inside the actual requirement dialog.
  await page.locator('#page [data-action=new-task]').click();await formPicker().locator('[data-version-trigger]').waitFor();
  await formPicker().locator('[data-version-trigger]').focus();await page.keyboard.press('Enter');await formPicker().locator('.version-picker-panel').waitFor();await tick();assert.equal(await formPicker().locator('[data-version-search]').evaluate(node=>node===document.activeElement),true);

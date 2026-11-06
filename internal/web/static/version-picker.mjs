@@ -1,9 +1,9 @@
-import {pageQuery} from './pagination.mjs';
+import {hasMore, pageQuery, readPageWindow} from './pagination.mjs';
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let sequence=0;
 const mounts=new WeakMap();
-// A bounded, searchable active-version selector. The selected ID is independent
-// from the current option page and stays in the enclosing form's draft.
+// A bounded, searchable active-version selector. The selected ID stays in the
+// enclosing form's draft even when a search hides it.
 export async function mountVersionPicker(host,{api,projectID,selected='',name='project_version_id',label='目标版本',emptyLabel='使用项目默认版本',exclude='',onChange,status='active',compact=false}={}) {
  if(!host)return;
  const key=`pv-choice-${++sequence}`;
@@ -36,27 +36,41 @@ export async function mountVersionPicker(host,{api,projectID,selected='',name='p
   if(select.disabled||trigger.disabled||hidden.disabled||hidden.readOnly)return;
   hidden.value=select.value;selectedName=select.selectedOptions[0]?.textContent||'';updateLabel();hidden.dispatchEvent(new Event('input',{bubbles:true}));onChange?.(hidden.value);
  }
- async function load(){
-  const epoch=++generation,params=pageQuery(page,20);if(status)params.set('status',status);if(query)params.set('q',query);
+ async function load(requestedPage=1){
+  const epoch=++generation,searchQuery=query;
   try{
-   const result=await api(`/projects/${encodeURIComponent(projectID)}/version-options?${params}`);if(epoch!==generation||!current())return;
+   const result=await readPageWindow(requestedPage, number => {
+    const params = pageQuery(number, 20);
+    if (status) params.set('status', status);
+    if (searchQuery) params.set('q', searchQuery);
+    return api(`/projects/${encodeURIComponent(projectID)}/version-options?${params}`);
+   });
+   if(epoch!==generation||!current())return;
+   const scrollTop = select.scrollTop;
    page=result.page;
    const items=result.items.filter(v=>v.id!==exclude);
    const match=items.find(v=>v.id===hidden.value);if(match)selectedName=match.name;
    const pinned=hidden.value&&!items.some(v=>v.id===hidden.value)?`<option value="${esc(hidden.value)}" selected>${esc(selectedName)}</option>`:'';
    select.innerHTML=`<option value="">${esc(emptyLabel)}</option>${pinned}${items.map(v=>`<option value="${esc(v.id)}">${esc(v.name)}${v.is_default?' · 默认':''}</option>`).join('')}`;select.value=hidden.value;
-   const pages=Math.max(1,Math.ceil(result.total/result.page_size));
-   const pager=host.querySelector('[data-version-pager]');pager.hidden=pages<=1;
-   pager.innerHTML=pages>1?`<div class="version-picker-pages" aria-label="版本选项分页"><span>${page} / ${pages}</span><button type="button" data-version-page="${page-1}" ${page<=1?'disabled':''}>上一页</button><button type="button" data-version-page="${page+1}" ${page>=pages?'disabled':''}>下一页</button></div>`:'';
+   if (requestedPage > 1) select.scrollTop = scrollTop;
+   const more=host.querySelector('[data-version-pager]');more.hidden=!hasMore(result);
+   more.innerHTML=more.hidden?'':'<button type="button" class="ghost list-more" data-version-more>加载更多版本</button>';
    updateLabel();error.hidden=true;error.textContent='';place();
   }catch(e){if(epoch===generation&&current()){error.hidden=false;error.textContent=e.message;place()}}
  }
- search.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(()=>{query=search.value.trim();page=1;void load()},250)});
- search.addEventListener('keydown',event=>{if(event.key==='ArrowDown'){event.preventDefault();select.focus()}else if(event.key==='Enter'){event.preventDefault();clearTimeout(timer);query=search.value.trim();page=1;void load().then(()=>{if(current()&&opened())select.focus()})}});
+ search.addEventListener('input',()=>{generation++;clearTimeout(timer);timer=setTimeout(()=>{query=search.value.trim();void load()},250)});
+ search.addEventListener('keydown',event=>{if(event.key==='ArrowDown'){event.preventDefault();select.focus()}else if(event.key==='Enter'){event.preventDefault();clearTimeout(timer);query=search.value.trim();void load().then(()=>{if(current()&&opened())select.focus()})}});
  select.addEventListener('keydown',event=>{keyboardSelection=['ArrowDown','ArrowUp','Home','End'].includes(event.key);if(event.key==='Enter'){event.preventDefault();commit();close();trigger.focus()}});
  select.addEventListener('keyup',()=>{keyboardSelection=false});
  select.addEventListener('change',()=>{commit();if(!keyboardSelection){close();trigger.focus()}});
- host.addEventListener('click',event=>{const button=event.target.closest('[data-version-page]');if(button&&host.contains(button)){event.preventDefault();event.stopPropagation();if(button.disabled||trigger.disabled)return;page=Number(button.dataset.versionPage);void load()}});
+ host.addEventListener('click',async event=>{
+  const button=event.target.closest('[data-version-more]');
+  if(!button||!host.contains(button))return;
+  event.preventDefault();event.stopPropagation();
+  if(button.disabled||trigger.disabled||hidden.disabled||hidden.readOnly||search.value.trim()!==query)return;
+  button.disabled=true;
+  try{await load(page+1)}finally{button.disabled=false}
+ });
  updateLabel();
  if(selected)try{const v=await api(`/projects/${encodeURIComponent(projectID)}/version-options/${encodeURIComponent(selected)}`);if(current()&&hidden.value===selected){selectedName=v.name;updateLabel()}}catch{}
  await load();return {value:()=>hidden.value};

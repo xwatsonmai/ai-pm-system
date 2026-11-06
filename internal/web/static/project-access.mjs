@@ -1,3 +1,4 @@
+import {hasMore, readPageWindow} from './pagination.mjs';
 import {projectPages} from './navigation.mjs';
 
 export const projectActions=[
@@ -43,14 +44,17 @@ export function mountProjectAccess({api,modal,closeModal,getModalRevision=()=>0,
   const caches = new Map(), pickers = new WeakMap(), roleDrafts=new Map();
   let revision = 0, modalRequest = 0, searchTimer;
   const cache = project => {
-    if (!caches.has(project)) caches.set(project,{rolePage:1,memberPage:1,roleSize:20,memberSize:20,roleQuery:'',memberQuery:'',roles:[],members:[]});
+    if (!caches.has(project)) caches.set(project,{rolePage:1,memberPage:1,roleQuery:'',memberQuery:'',roles:[],members:[]});
     return caches.get(project);
   };
   const dutiesHTML = selected => `<fieldset class="role-checks responsibility-checks"><legend>待办职责</legend>${Object.entries(responsibilities).map(([id,name])=>`<label><input type="checkbox" name="responsibilities" value="${id}" ${selected.includes(id)?'checked':''}>${name}</label>`).join('')}<p class="hint">职责只决定收到哪类待办，与页面访问权限独立。</p></fieldset>`;
-  const pager = (data,kind,project) => {
-    const total = Number(data.total ?? data.items?.length ?? 0), size=Number(data.page_size || 20), page=Number(data.page || 1), pages=Math.max(1,Math.ceil(total/size));
-    return `<div class="pagination access-pagination" aria-label="${kind==='roles'?'角色':'成员'}分页"><span>共 ${total} 项 · 第 ${page} / ${pages} 页</span><div class="row"><label>每页 <select data-access-size="${kind}" data-project="${escape(project)}" aria-label="${kind==='roles'?'角色':'成员'}每页数量">${[20,50,100].map(n=>`<option ${n===size?'selected':''}>${n}</option>`).join('')}</select></label>${action('access-page','上一页','ghost',`data-kind="${kind}" data-project="${escape(project)}" data-page="${page-1}" ${page<=1?'disabled':''}`)}${action('access-page','下一页','ghost',`data-kind="${kind}" data-project="${escape(project)}" data-page="${page+1}" ${page>=pages?'disabled':''}`)}</div></div>`;
-  };
+  const more = (data, kind, project) => hasMore(data)
+    ? action('access-page', kind === 'roles' ? '加载更多角色' : '加载更多成员', 'ghost list-more',
+      `data-kind="${kind}" data-project="${escape(project)}" data-page="${data.page + 1}"`)
+    : '';
+  function readOptions(project, kind, page, query) {
+    return readPageWindow(page, number => api(`/projects/${encodeURIComponent(project)}/${kind}?${new URLSearchParams({page:number,page_size:20,q:query})}`));
+  }
   const accessFor = async project => {
     const data = await api(`/projects/${encodeURIComponent(project)}/access`);
     cache(project).access = data;
@@ -67,23 +71,23 @@ export function mountProjectAccess({api,modal,closeModal,getModalRevision=()=>0,
   async function loadRoles(project=getProject()?.id) {
     const root=document.querySelector('#project-roles'); if(!root || !project)return;
     const c=cache(project), generation=++revision;
-    const data=await api(`/projects/${encodeURIComponent(project)}/roles?${new URLSearchParams({page:c.rolePage,page_size:c.roleSize,q:c.roleQuery})}`);
+    const data=await readOptions(project, 'roles', c.rolePage, c.roleQuery);
     if(!root.isConnected || getProject()?.id!==project || generation!==revision)return;
     c.roles=data.items; c.version=data.version;
-    if(c.rolePage>1 && !data.items.length){c.rolePage--;return loadRoles(project);}
-    root.innerHTML = `<div class="role-list">${data.items.map(role=>`<div class="role-row"><div class="grow"><strong>${escape(role.name)}</strong><p class="hint">${escape(role.description||'未填写说明')}</p><div class="member-badges">${(role.pages||[]).map(id=>`<span class="badge">${escape(projectPages.find(p=>p.id===id)?.title||id)}</span>`).join('')||'<span class="hint">未分配页面权限</span>'}</div><p class="hint">可发起：${(role.actions||[]).map(id=>escape(projectActions.find(a=>a.id===id)?.name||id)).join('、')||'无'}</p></div><div class="row">${action('access-edit-role','编辑','ghost',`data-id="${escape(role.id)}"`)}${action('access-delete-role','删除','ghost danger',`data-id="${escape(role.id)}"`)}</div></div>`).join('')||'<p class="context-note">没有匹配的角色。</p>'}</div>${pager(data,'roles',project)}`;
+    c.rolePage=data.page;
+    root.innerHTML = `<div class="role-list">${data.items.map(role=>`<div class="role-row"><div class="grow"><strong>${escape(role.name)}</strong><p class="hint">${escape(role.description||'未填写说明')}</p><div class="member-badges">${(role.pages||[]).map(id=>`<span class="badge">${escape(projectPages.find(p=>p.id===id)?.title||id)}</span>`).join('')||'<span class="hint">未分配页面权限</span>'}</div><p class="hint">可发起：${(role.actions||[]).map(id=>escape(projectActions.find(a=>a.id===id)?.name||id)).join('、')||'无'}</p></div><div class="row">${action('access-edit-role','编辑','ghost',`data-id="${escape(role.id)}"`)}${action('access-delete-role','删除','ghost danger',`data-id="${escape(role.id)}"`)}</div></div>`).join('')||'<p class="context-note">没有匹配的角色。</p>'}</div>${more(data,'roles',project)}`;
   }
   async function loadMembers(project=getProject()?.id, target='#project-members') {
     const root=document.querySelector(target); if(!root || !project)return;
     const c=cache(project),generation=(c.memberGeneration||0)+1;c.memberGeneration=generation;
     const [data,access]=await Promise.all([
-      api(`/projects/${encodeURIComponent(project)}/members?${new URLSearchParams({page:c.memberPage,page_size:c.memberSize,q:c.memberQuery})}`),accessFor(project),
+      readOptions(project, 'members', c.memberPage, c.memberQuery),accessFor(project),
     ]);
     if(!root.isConnected || generation!==c.memberGeneration)return;
     c.members=data.items; c.version=data.version??access.version;
-    if(c.memberPage>1 && !data.items.length){c.memberPage--;return loadMembers(project,target);}
+    c.memberPage=data.page;
     const names=new Map(access.roles.map(role=>[role.id,role.name]));
-    root.innerHTML=`<div class="member-list">${data.items.map(m=>`<div class="member-row"><div class="grow"><strong>${escape(m.user.name)}</strong><p class="hint">${escape([m.user.login_id,m.department_name].filter(Boolean).join(' · '))}</p><div class="member-badges">${(m.roles||[]).map(id=>`<span class="badge">${escape(names.get(id)||id)}</span>`).join('')}</div><p class="hint">待办职责：${escape((m.responsibilities||[]).map(id=>responsibilities[id]||id).join('、')||'无')}</p></div>${access.can_manage?`<div class="row">${action('access-edit-member','编辑','ghost',`data-project="${escape(project)}" data-user="${escape(m.user.id)}"`)}${action('access-remove-member','移除','ghost danger',`data-project="${escape(project)}" data-user="${escape(m.user.id)}"`)}</div>`:''}</div>`).join('')||'<p class="context-note">没有匹配的成员。</p>'}</div>${pager(data,'members',project)}`;
+    root.innerHTML=`<div class="member-list">${data.items.map(m=>`<div class="member-row"><div class="grow"><strong>${escape(m.user.name)}</strong><p class="hint">${escape([m.user.login_id,m.department_name].filter(Boolean).join(' · '))}</p><div class="member-badges">${(m.roles||[]).map(id=>`<span class="badge">${escape(names.get(id)||id)}</span>`).join('')}</div><p class="hint">待办职责：${escape((m.responsibilities||[]).map(id=>responsibilities[id]||id).join('、')||'无')}</p></div>${access.can_manage?`<div class="row">${action('access-edit-member','编辑','ghost',`data-project="${escape(project)}" data-user="${escape(m.user.id)}"`)}${action('access-remove-member','移除','ghost danger',`data-project="${escape(project)}" data-user="${escape(m.user.id)}"`)}</div>`:''}</div>`).join('')||'<p class="context-note">没有匹配的成员。</p>'}</div>${more(data,'members',project)}`;
   }
   async function load() {
     const project=getProject()?.id; if(!project)return;
@@ -96,7 +100,7 @@ export function mountProjectAccess({api,modal,closeModal,getModalRevision=()=>0,
   async function mountMemberForm(form,project,selected=[],duties=[]) {
     const access=await accessFor(project); if(!form.isConnected)return;
     const available=new Set(access.roles.map(r=>r.id));
-    const s={project,selected:new Set(selected.filter(id=>available.has(id))),page:1,q:'',size:20,version:access.version,names:new Map(access.roles.map(r=>[r.id,r.name])),generation:0};
+    const s={project,selected:new Set(selected.filter(id=>available.has(id))),page:1,q:'',version:access.version,names:new Map(access.roles.map(r=>[r.id,r.name])),generation:0};
     pickers.set(form,s);
     const root=form.querySelector('.member-role-picker');
     root.innerHTML=`<fieldset class="member-role-fieldset"><legend>项目角色</legend><input data-role-search aria-label="搜索可选角色" placeholder="搜索角色名称"><div class="role-selected" aria-live="polite"></div><div class="role-options"></div></fieldset>${dutiesHTML(duties)}`;
@@ -106,11 +110,12 @@ export function mountProjectAccess({api,modal,closeModal,getModalRevision=()=>0,
   async function loadPicker(form) {
     const s=pickers.get(form);if(!s)return;
     const generation=++s.generation;
-    const data=await api(`/projects/${encodeURIComponent(s.project)}/roles?${new URLSearchParams({page:s.page,page_size:s.size,q:s.q})}`);
+    const data=await readOptions(s.project, 'roles', s.page, s.q);
     if(!form.isConnected||generation!==s.generation)return;
+    s.page=data.page;
     for(const r of data.items)s.names.set(r.id,r.name);
     form.querySelector('.role-selected').innerHTML=selectedHTML(s);
-    form.querySelector('.role-options').innerHTML=`<div class="role-checks">${data.items.map(r=>`<label><input type="checkbox" data-role-choice value="${escape(r.id)}" ${s.selected.has(r.id)?'checked':''}>${escape(r.name)}</label>`).join('')||'<p class="hint">没有匹配的角色。</p>'}</div><div class="row between"><span class="hint">第 ${data.page||s.page} / ${Math.max(1,Math.ceil((data.total??data.items.length)/s.size))} 页</span><div class="row">${action('access-picker-page','上一页','ghost',`data-page="${s.page-1}" ${s.page<=1?'disabled':''}`)}${action('access-picker-page','下一页','ghost',`data-page="${s.page+1}" ${(s.page*s.size >= (data.total??data.items.length))?'disabled':''}`)}</div></div>`;
+    form.querySelector('.role-options').innerHTML=`<div class="role-checks">${data.items.map(r=>`<label><input type="checkbox" data-role-choice value="${escape(r.id)}" ${s.selected.has(r.id)?'checked':''}>${escape(r.name)}</label>`).join('')||'<p class="hint">没有匹配的角色。</p>'}</div>${hasMore(data)?action('access-picker-page','加载更多角色','ghost list-more',`data-page="${data.page+1}"`):''}`;
   }
   function memberInput(form) {
     const s=pickers.get(form); if(!s)throw Error('角色仍在读取，请稍后重试');
@@ -177,11 +182,7 @@ export function mountProjectAccess({api,modal,closeModal,getModalRevision=()=>0,
       s.selected=updateSelection(s.selected,event.target.value,event.target.checked);
       form.querySelector('.role-selected').innerHTML=selectedHTML(s);
     }
-    if(event.target.matches('[data-access-size]')){
-      const el=event.target,project=el.dataset.project,c=cache(project);
-      if(el.dataset.accessSize==='roles'){c.roleSize=Number(el.value);c.rolePage=1;loadRoles(project).catch(e=>toast(e.message));}
-      else{c.memberSize=Number(el.value);c.memberPage=1;loadMembers(project).catch(e=>toast(e.message));}
-    }
+
   });
   document.addEventListener('input',event=>{
     const el=event.target;

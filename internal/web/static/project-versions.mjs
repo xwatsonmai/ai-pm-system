@@ -1,7 +1,7 @@
 import { createID } from "./id.mjs";
 import { renderMarkdown } from "./markdown.mjs";
 import { BASE } from "./base.mjs";
-import {pagerHTML,pageQuery,patchKeyedHTML} from "./pagination.mjs";
+import {moreHTML,readPageWindow,pageQuery,patchKeyedHTML} from "./pagination.mjs";
 import {mountVersionPicker} from "./version-picker.mjs";
 const esc = (v) =>
   String(v ?? "").replace(
@@ -107,7 +107,7 @@ function pendingOperations(project, user) {
 const listState={project:'',page:1,size:20,query:'',status:'',result:null,error:'',generation:0};
 function versionRows(result,canAccessPage=()=>true,canCreateRequirement=true) {
  if(!result)return '<p class="context-note" role="status">正在加载版本…</p>';
- return (result.items.map(v=>`<article class="pv-version-row ${v.is_default?'pv-current':''}" data-key="${esc(v.id)}"><div class="pv-version-title"><span class="badge">${v.is_default?'默认版本 · ':''}${versionPhases[v.phase]||v.phase}</span><h2>${button('open',esc(v.name),`data-id="${esc(v.id)}"`,'ghost')}</h2><p>${esc(v.goal||'尚未填写目标')}</p><p class="small muted">${esc(v.owner||'负责人未指定')} · 计划完成 ${esc(v.target_date||'待安排')}</p></div><div class="pv-version-progress"><strong>${v.counts.included} 项需求</strong>${progress(v.counts)}${stageCounts(v.counts)}</div>${button('open','查看里程碑',`data-id="${esc(v.id)}"`)}</article>`).join('')||`<div class="pv-no-current"><h2>暂无匹配的版本</h2><p>可创建版本，独立规划并推进交付。</p>${canCreateRequirement?'<button data-action="new-task" class="primary">创建需求</button>':''}</div>`)+pagerHTML(result,'pv-versions');
+ return (result.items.map(v=>`<article class="pv-version-row ${v.is_default?'pv-current':''}" data-key="${esc(v.id)}"><div class="pv-version-title"><span class="badge">${v.is_default?'默认版本 · ':''}${versionPhases[v.phase]||v.phase}</span><h2>${button('open',esc(v.name),`data-id="${esc(v.id)}"`,'ghost')}</h2><p>${esc(v.goal||'尚未填写目标')}</p><p class="small muted">${esc(v.owner||'负责人未指定')} · 计划完成 ${esc(v.target_date||'待安排')}</p></div><div class="pv-version-progress"><strong>${v.counts.included} 项需求</strong>${progress(v.counts)}${stageCounts(v.counts)}</div>${button('open','查看里程碑',`data-id="${esc(v.id)}"`)}</article>`).join('')||`<div class="pv-no-current"><h2>暂无匹配的版本</h2><p>可创建版本，独立规划并推进交付。</p>${canCreateRequirement?'<button data-action="new-task" class="primary">创建需求</button>':''}</div>`)+moreHTML(result,'pv-versions');
 }
 export function projectVersionsPage(context,user='local-owner',canAccessPage=()=>true,canCreateRequirement=true) {
  const project=context.project.id;
@@ -120,7 +120,7 @@ function taskLine(item) {
   return `<div class="pv-scope-row ${item.removed ? "pv-removed" : ""}" data-key="${esc(t.id)}"><div><span class="badge ${esc(t.status)}">${item.removed ? "已移出" : taskStates[t.status]}</span> <span class="small muted">${t.kind === "bug" ? "Bug 修复" : "迭代需求"} · R${t.revision}</span><h4>${button("task", esc(t.title), `data-id="${esc(t.id)}"`, "ghost")}</h4>${item.detached_revision ? `<p class="small muted">${item.detached_revision > t.revision ? `后续已产生 R${item.detached_revision}；此处保留 R${t.revision} 的交付结果。` : "后续工作已转入当前里程碑，此处保留原交付记录。"}</p>` : ""}${t.blocker && !item.removed ? `<p class="notice">阻塞：${esc(t.blocker)}</p>` : ""}${item.reason ? `<p class="small muted">${esc(item.reason)}</p>` : ""}${t.submission ? `<p class="small mono muted">${esc(t.submission.sha)}</p>` : ""}</div></div>`;
 }
 function releaseTask(t){return `<details class="pv-release-task" data-key="${esc(t.id)}"><summary>${esc(t.title)} · R${t.revision}</summary><p class="mono small">${esc(t.submission?.sha)}</p><div class="markdown-content">${renderMarkdown(t.description)}</div><ul>${(t.acceptance||[]).map(a=>`<li>${esc(a)}</li>`).join('')}</ul>${t.attachments?.length?`<p class="small muted">附件：${t.attachments.map(a=>`<a href="${BASE}/api/projects/${encodeURIComponent(t.project_id)}/attachments/${encodeURIComponent(a.id)}" target="_blank" rel="noopener">${esc(a.name)}</a>`).join('、')}</p>`:''}</details>`}
-function historyRows(result){return result.items.map(h=>`<div class="record" data-key="${esc(h.at)}:${esc(h.action)}:${esc(h.body)}"><div class="record-header"><span>${esc(h.actor)}</span><span>${date(h.at)}</span></div><p class="prewrap">${esc(h.body)}</p>${h.task_ids?.length?`<p class="small muted">涉及 ${h.task_ids.length} 项需求</p>`:''}${h.user_instruction?`<p class="small prewrap">用户原话：${esc(h.user_instruction)}</p>`:''}</div>`).join('')+pagerHTML(result,'pv-history')}
+function historyRows(result){return result.items.map(h=>`<div class="record" data-key="${esc(h.at)}:${esc(h.action)}:${esc(h.body)}"><div class="record-header"><span>${esc(h.actor)}</span><span>${date(h.at)}</span></div><p class="prewrap">${esc(h.body)}</p>${h.task_ids?.length?`<p class="small muted">涉及 ${h.task_ids.length} 项需求</p>`:''}${h.user_instruction?`<p class="small prewrap">用户原话：${esc(h.user_instruction)}</p>`:''}</div>`).join('')+moreHTML(result,'pv-history')}
 export function projectVersionDetail(view,canAccessPage=()=>true,canCreateRequirement=true) {
  const v=view.project_version,c=view.summary.counts,active=v.status==='active',ended=['closed','completed'].includes(v.status);
  const controls=active?button('edit','编辑里程碑',`data-id="${esc(v.id)}"`)+(canCreateRequirement?button('new-requirement','创建需求',`data-id="${esc(v.id)}"`):'')+button('publish','登记本次已上线',`data-id="${esc(v.id)}"`)+(!view.summary.is_default?button('action-form','设为默认版本',`data-id="${esc(v.id)}" data-operation="set_default"`):'')+button('action-form','结束里程碑',`data-id="${esc(v.id)}" data-operation="complete"`,'primary')+button('action-form','关闭里程碑',`data-id="${esc(v.id)}" data-operation="close"`):button('action-form',ended?'重新打开里程碑':'开始里程碑',`data-id="${esc(v.id)}" data-operation="${ended?'reopen':'start'}"`);
@@ -155,15 +155,15 @@ export function mountProjectVersions({
    const root=document.querySelector('.pv-page');if(!root||root.dataset.project!==getProject()?.id)return;
    const project=getProject().id,epoch=++listState.generation,params=pageQuery(listState.page,listState.size);
    if(listState.query)params.set('q',listState.query);if(listState.status)params.set('status',listState.status);
-   try{const result=await api(`/projects/${project}/versions?${params}`);if(epoch!==listState.generation||!root.isConnected||project!==getProject()?.id)return;listState.result=result;listState.error='';patchKeyedHTML(root.querySelector('.pv-version-results'),versionRows(result,canAccessPage,canCreateRequirement()));root.querySelector('[data-version-list-error]').textContent=''}catch(e){if(root.isConnected){listState.error=e.message;root.querySelector('[data-version-list-error]').textContent=e.message}}
+   try{const result=await readPageWindow(listState.page, page=>{params.set('page',String(page));return api(`/projects/${project}/versions?${params}`);});if(epoch!==listState.generation||!root.isConnected||project!==getProject()?.id)return;listState.page=result.page;listState.result=result;listState.error='';patchKeyedHTML(root.querySelector('.pv-version-results'),versionRows(result,canAccessPage,canCreateRequirement()));root.querySelector('[data-version-list-error]').textContent=''}catch(e){if(root.isConnected){listState.error=e.message;root.querySelector('[data-version-list-error]').textContent=e.message}}
   }
   async function detailPart(kind,page=1,size=20){
    const root=document.querySelector('.pv-detail');if(!root||!detailState||root.dataset.version!==detailState.id)return;
    const target=root.querySelector(`[data-version-${kind}]`),generation=beginSection(target),id=detailState.id,params=pageQuery(page,size);if(kind==='scope'&&root.querySelector('[data-version-include-removed]').checked)params.set('include_removed','true');
-   const result=await api(`/project-versions/${encodeURIComponent(id)}/${kind}?${params}`);if(!root.isConnected||detailState?.id!==id||!currentSection(target,generation))return;
+   const result=await readPageWindow(page, number=>{params.set('page',String(number));return api(`/project-versions/${encodeURIComponent(id)}/${kind}?${params}`);});if(!root.isConnected||detailState?.id!==id||!currentSection(target,generation))return;
    detailState[kind]={page,size};let html;
-   if(kind==='scope')html=(result.items.map(taskLine).join('')||'<p class="context-note">暂无需求范围。</p>')+pagerHTML(result,'pv-scope');
-   if(kind==='releases')html=(result.items.map(r=>`<details class="pv-release" data-key="${esc(r.id)}"><summary>${esc(r.environment)} · ${date(r.at)} · ${r.task_count||0} 项</summary><p class="prewrap">${esc(r.body)}</p>${button('release-tasks','查看上线快照',`data-id="${esc(id)}" data-release="${esc(r.id)}"`)}<div data-release-tasks="${esc(r.id)}"></div><p class="small muted">${esc(r.actor)} · 上线时的范围快照，后续修订不会改写。</p></details>`).join('')||'<p class="context-note">暂无发布记录。</p>')+pagerHTML(result,'pv-releases');
+   if(kind==='scope')html=(result.items.map(taskLine).join('')||'<p class="context-note">暂无需求范围。</p>')+moreHTML(result,'pv-scope');
+   if(kind==='releases')html=(result.items.map(r=>`<details class="pv-release" data-key="${esc(r.id)}"><summary>${esc(r.environment)} · ${date(r.at)} · ${r.task_count||0} 项</summary><p class="prewrap">${esc(r.body)}</p>${button('release-tasks','查看上线快照',`data-id="${esc(id)}" data-release="${esc(r.id)}"`)}<div data-release-tasks="${esc(r.id)}"></div><p class="small muted">${esc(r.actor)} · 上线时的范围快照，后续修订不会改写。</p></details>`).join('')||'<p class="context-note">暂无发布记录。</p>')+moreHTML(result,'pv-releases');
    if(kind==='history')html=historyRows(result);
    patchKeyedHTML(target,html);
   }
@@ -175,8 +175,8 @@ export function mountProjectVersions({
   };
   async function releaseTasks(id,release,page=1,size=20){
    const root=document.querySelector(`[data-release-tasks="${CSS.escape(release)}"]`);if(!root)return;
-   const generation=beginSection(root),result=await api(`/project-versions/${encodeURIComponent(id)}/releases/${encodeURIComponent(release)}/tasks?${pageQuery(page,size)}`);if(!currentSection(root,generation))return;
-   root.dataset.version=id;root.dataset.release=release;patchKeyedHTML(root,result.items.map(releaseTask).join('')+pagerHTML(result,'pv-release-tasks'));
+   const generation=beginSection(root),result=await readPageWindow(page, number=>api(`/project-versions/${encodeURIComponent(id)}/releases/${encodeURIComponent(release)}/tasks?${pageQuery(number,size)}`));if(!currentSection(root,generation))return;
+   root.dataset.version=id;root.dataset.release=release;patchKeyedHTML(root,result.items.map(releaseTask).join('')+moreHTML(result,'pv-release-tasks'));
   }
   function attachDraft(form, kind, entity = "") {
     const key = `ai-pm:version-draft:${getUser()}:${getProject().id}:${kind}:${entity}`;
@@ -263,22 +263,43 @@ export function mountProjectVersions({
   function updateSelection(form) {
    const selected=selectedRefs(form),available=new Map(JSON.parse(form.dataset.items||'[]').map(ref=>[ref.id,ref]));
    for(const input of form.querySelectorAll('[name=task_ids]')){if(input.checked&&available.has(input.value))selected.set(input.value,available.get(input.value));else selected.delete(input.value)}
-   form.dataset.selectedRefs=JSON.stringify([...selected.values()]);form.querySelector('[data-selection-count]').textContent=`已选择 ${selected.size} 项（跨页保留）`;form._saveVersionDraft?.();
+   form.dataset.selectedRefs=JSON.stringify([...selected.values()]);form.querySelector('[data-selection-count]').textContent=`已选择 ${selected.size} 项`;form._saveVersionDraft?.();
   }
   async function selectionPage(form,page=1,size=20){
    if(!form?.isConnected)return;updateSelection(form);
-   const generation=beginSection(form),id=form.dataset.id,params=pageQuery(page,size);let result,items;
-   if(form.dataset.payload){const refs=JSON.parse(form.dataset.payload).items||[];result={items:refs.slice((page-1)*size,page*size).map(ref=>({task:{id:ref.id,title:ref.id,version:ref.version,revision:ref.revision,submission:{sha:ref.sha}}})),total:refs.length,page,page_size:size};items=result.items.map(i=>i.task)}
-   else if(form.id==='pv-publish-form'){params.set('status','pending_release');result=await api(`/project-versions/${encodeURIComponent(id)}/scope?${params}`);items=result.items.map(i=>i.task)}
-   else if(form.dataset.fixedIds){const tasks=JSON.parse(form.dataset.fixedTasks);result={items:tasks.slice((page-1)*size,page*size),total:tasks.length,page,page_size:size};items=result.items}
-   else {params.set('status',Object.keys(taskStates).filter(status=>!finished({status})&&status!=='review').join(','));if(form.dataset.origin)params.set('project_version_id',form.dataset.origin);result=await api(`/projects/${getProject().id}/tasks?${params}`);if(Array.isArray(result))result={items:result.slice((page-1)*size,page*size),total:result.length,page,page_size:size};items=result.items.filter(t=>!finished(t)&&t.status!=='review')}
+   const generation = beginSection(form);
+   const {id, payload, fixedIds, fixedTasks, origin} = form.dataset;
+   const project = getProject().id;
+   const result = await readPageWindow(page, async number => {
+     const params = pageQuery(number, size);
+     const pageOf = tasks => ({
+       items: tasks.slice((number - 1) * size, number * size),
+       total: tasks.length, page: number, page_size: size,
+     });
+     if (payload) {
+       return pageOf((JSON.parse(payload).items || []).map(ref => ({
+         id: ref.id, title: ref.id, version: ref.version, revision: ref.revision, submission: {sha: ref.sha},
+       })));
+     }
+     if (form.id === 'pv-publish-form') {
+       params.set('status', 'pending_release');
+       const data = await api(`/project-versions/${encodeURIComponent(id)}/scope?${params}`);
+       return {...data, items: data.items.map(item => item.task)};
+     }
+     if (fixedIds) return pageOf(JSON.parse(fixedTasks));
+     params.set('status', Object.keys(taskStates).filter(status => !finished({status}) && status !== 'review').join(','));
+     if (origin) params.set('project_version_id', origin);
+     const response = await api(`/projects/${project}/tasks?${params}`);
+     const data = Array.isArray(response) ? pageOf(response) : response;
+     return {...data, items: data.items.filter(task => !finished(task) && task.status !== 'review')};
+   });
+   const items = result.items;
    if(!currentSection(form,generation))return;
    const selected=selectedRefs(form),refs=items.map(t=>({id:t.id,version:t.version,revision:t.revision,sha:t.submission?.sha}));form.dataset.items=JSON.stringify(refs);
    const key=form.id==='pv-publish-form'?'pv-publish':'pv-assign';
-   const html=items.map(t=>`<label class="pv-check" data-key="${esc(t.id)}"><input type="checkbox" name="task_ids" value="${esc(t.id)}" ${selected.has(t.id)?'checked':''} ${form.dataset.payload?'disabled':''}><span><strong>${esc(t.title)}</strong><small>${taskStates[t.status]||''} · R${t.revision||1}${form.id==='pv-publish-form'?` · ${esc(t.submission?.sha||'')}`:''}</small></span></label>`).join('')||'<p class="context-note">本页没有可选择的需求。</p>';
-   // Paging is an explicit user action; selected IDs live outside these nodes.
+   const html=items.map(t=>`<label class="pv-check" data-key="${esc(t.id)}"><input type="checkbox" name="task_ids" value="${esc(t.id)}" ${selected.has(t.id)?'checked':''} ${form.dataset.payload?'disabled':''}><span><strong>${esc(t.title)}</strong><small>${taskStates[t.status]||''} · R${t.revision||1}${form.id==='pv-publish-form'?` · ${esc(t.submission?.sha||'')}`:''}</small></span></label>`).join('')||'<p class="context-note">没有可选择的需求。</p>';
    form.querySelector('[data-selection-items]').innerHTML=html;
-   patchKeyedHTML(form.querySelector('[data-selection-pager]'),pagerHTML(result,key));form.dataset.selectionPage=page;form.dataset.selectionSize=size;
+   patchKeyedHTML(form.querySelector('[data-selection-pager]'),moreHTML(result,key));form.dataset.selectionPage=result.page;form.dataset.selectionSize=size;
   }
   const assign=async({taskIDs=[],target='',fromVersion=''})=>{
    const token=beginModalRequest();
@@ -286,7 +307,7 @@ export function mountProjectVersions({
    if(!currentModalRequest(token))return;
    const candidates=tasks.filter(t=>!finished(t)&&t.status!=='review');if(taskIDs.length&&!candidates.length)throw Error('没有可以调整的需求；已上线需求继续在原版本验收');
    target=target||getContext().current_milestone?.id||'';
-   modal('安排目标版本',`<form id="pv-assign-form" data-origin="${esc(fromVersion)}" ${taskIDs.length?`data-fixed-ids="true" data-fixed-tasks="${esc(JSON.stringify(candidates))}"`:''}><div data-assignment-target></div><p class="hint">关联需求与未结束 Bug 会一起调整版本，保留原发布快照。</p><p class="hint" data-selection-count>已选择 0 项（跨页保留）</p><div class="pv-select-list" data-selection-items></div><div data-selection-pager></div>${field('调整原因','<textarea name="body" required rows="2"></textarea>')}${formEnd('确认安排')}</form>`);
+   modal('安排目标版本',`<form id="pv-assign-form" data-origin="${esc(fromVersion)}" ${taskIDs.length?`data-fixed-ids="true" data-fixed-tasks="${esc(JSON.stringify(candidates))}"`:''}><div data-assignment-target></div><p class="hint">关联需求与未结束 Bug 会一起调整版本，保留原发布快照。</p><p class="hint" data-selection-count>已选择 0 项</p><div class="pv-select-list" data-selection-items></div><div data-selection-pager></div>${field('调整原因','<textarea name="body" required rows="2"></textarea>')}${formEnd('确认安排')}</form>`);
    const form=document.querySelector('#pv-assign-form');attachDraft(form,'assign',taskIDs.length?taskIDs.slice().sort().join(','):target);
    if(!form.dataset.selectedRefs&&taskIDs.length)form.dataset.selectedRefs=JSON.stringify(candidates.map(t=>({id:t.id,version:t.version})));
    await mountVersionPicker(form.querySelector('[data-assignment-target]'),{api,projectID:getProject().id,selected:JSON.parse(form.dataset.draftValues||'{}').project_version_id||target});
@@ -298,7 +319,7 @@ export function mountProjectVersions({
    const view=await api(`/project-versions/${encodeURIComponent(id)}?summary=1`),v=view.project_version;
    if(!currentModalRequest(token))return;
    if(v.status!=='active')throw Error('版本尚未开始或已结束');
-   modal('登记版本已上线',`<form id="pv-publish-form" data-id="${esc(id)}" data-version="${v.version}"><div class="notice info">请在实际发布成功后登记。只推进勾选的需求；本操作不会执行部署。待核对的原请求将原样重试。</div><p><strong>${esc(v.name)}</strong></p><p class="hint" data-selection-count>已选择 0 项（跨页保留）</p><div class="pv-select-list" data-selection-items></div><div data-selection-pager></div>${field('实际上线环境','<input name="environment" required placeholder="例如 生产">')}${field('发布结果与证据','<textarea name="body" required rows="3"></textarea>')}${formEnd('确认所选需求已上线')}</form>`);
+   modal('登记版本已上线',`<form id="pv-publish-form" data-id="${esc(id)}" data-version="${v.version}"><div class="notice info">请在实际发布成功后登记。只推进勾选的需求；本操作不会执行部署。待核对的原请求将原样重试。</div><p><strong>${esc(v.name)}</strong></p><p class="hint" data-selection-count>已选择 0 项</p><div class="pv-select-list" data-selection-items></div><div data-selection-pager></div>${field('实际上线环境','<input name="environment" required placeholder="例如 生产">')}${field('发布结果与证据','<textarea name="body" required rows="3"></textarea>')}${formEnd('确认所选需求已上线')}</form>`);
    const form=document.querySelector('#pv-publish-form');attachDraft(form,'publish',id);
    if(form.dataset.payload)form.dataset.selectedRefs=JSON.stringify(JSON.parse(form.dataset.payload).items||[]);
    await selectionPage(form);updateSelection(form);
@@ -504,7 +525,7 @@ export function mountProjectVersions({
   }
   const report=e=>toast(e.message);
   document.addEventListener('click',event=>{
-   const node=event.target.closest('[data-action="list-page"]');if(!node||!node.dataset.list?.startsWith('pv-')||node.dataset.list.startsWith('pv-choice-'))return;
+   const node=event.target.closest('[data-action="list-more"]');if(!node||!node.dataset.list?.startsWith('pv-')||node.dataset.list.startsWith('pv-choice-'))return;
    const key=node.dataset.list,page=Number(node.dataset.page);event.preventDefault();event.stopPropagation();
    if(key==='pv-versions'){listState.page=page;void loadPage().catch(report)}
    else if(['pv-scope','pv-releases','pv-history'].includes(key)){const kind=key.slice(3);void detailPart(kind,page,detailState?.[kind]?.size||20).catch(report)}
@@ -514,14 +535,11 @@ export function mountProjectVersions({
   let searchTimer;
   document.addEventListener('input',event=>{if(event.target.matches('[data-version-list-search]')){clearTimeout(searchTimer);searchTimer=setTimeout(()=>{listState.query=event.target.value.trim();listState.page=1;void loadPage().catch(report)},250)}});
   document.addEventListener('change',event=>{
-   const node=event.target,key=node.dataset.pageSize;
+   const node=event.target;
    if(node.matches('[data-version-list-status]')){listState.status=node.value;listState.page=1;void loadPage().catch(report)}
    if(node.matches('[data-version-include-removed]'))void detailPart('scope').catch(report);
    if(node.name==='task_ids'&&node.closest('#pv-assign-form,#pv-publish-form'))updateSelection(node.closest('form'));
-   if(key==='pv-versions'){listState.size=Number(node.value);listState.page=1;void loadPage().catch(report)}
-   else if(['pv-scope','pv-releases','pv-history'].includes(key))void detailPart(key.slice(3),1,Number(node.value)).catch(report);
-   else if(key==='pv-publish'||key==='pv-assign')void selectionPage(node.closest('form'),1,Number(node.value)).catch(report);
-   else if(key==='pv-release-tasks'){const host=node.closest('[data-release-tasks]');void releaseTasks(host.dataset.version,host.dataset.release,1,Number(node.value)).catch(report)}
+
   });
   return { click, submit, open: detail, loadPage };
 }

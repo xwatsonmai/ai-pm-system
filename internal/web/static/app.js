@@ -4,7 +4,7 @@ import { BASE, appURL } from "./base.mjs";
 import { chatConversations, conversationID } from "./conversations.mjs";
 import { renderMarkdown } from "./markdown.mjs";
 import { mountVersionPicker } from "./version-picker.mjs";
-import { pagerHTML, pageQuery, patchKeyedHTML } from "./pagination.mjs";
+import { pagerHTML, moreHTML, hasMore, readPageWindow, pageQuery, patchKeyedHTML } from "./pagination.mjs";
 import { createTaskHierarchy } from "./task-hierarchy.mjs";
 import { requirementPoolHTML } from "./requirement-pool.mjs";
 import {mountVersionLineage} from './version-lineage.mjs';
@@ -363,6 +363,13 @@ function listParams(key,extra={}) {
  for(const [k,v] of Object.entries(extra))if(v!==''&&v!=null)params.set(k,String(v));
  return params;
 }
+function readList(key, path, extra = {}) {
+  const params = listParams(key, extra);
+  return readPageWindow(Number(params.get('page')), page => {
+    params.set('page', String(page));
+    return api(`${path}?${params}`);
+  });
+}
 function mayReadPage(access,page) { return !access || access.pages?.includes(page); }
 async function readWorkspace(projectID,page=state.page) {
  const revision=++workspaceRevision,scope=projectID,runsAtStart=new Map(state.runs.map(r=>[r.id,r]));
@@ -371,7 +378,8 @@ async function readWorkspace(projectID,page=state.page) {
  let tree=null;
  const [context,access]=await Promise.all([api(`/projects/${projectID}/summary`),api(`/projects/${projectID}/access`)]);
  const lists=new Map();
- const get=async(key,path,extra={})=>{const current=businessLists.get(`${scope}:${key}`)||emptyPage();const params=pageQuery(current.page,current.page_size);for(const [k,v] of Object.entries(extra))if(v!==''&&v!=null)params.set(k,String(v));const result=await api(`${path}?${params}`);lists.set(key,result);return result;};
+ const get=async(key,path,extra={})=>{const current=businessLists.get(`${scope}:${key}`)||emptyPage();const params=pageQuery(current.page,current.page_size);for(const [k,v] of Object.entries(extra))if(v!==''&&v!=null)params.set(k,String(v));const fetchPage=page=>{params.set('page',String(page));return api(`${path}?${params}`);};
+  const result=await (key==='tasks'?fetchPage(current.page):readPageWindow(current.page,fetchPage));lists.set(key,result);return result;};
  const task=async(key,status)=>get(key,`/projects/${projectID}/tasks`,{status,...(key==='tasks'?{q:state.search,kind:state.kind,project_version_id:state.versionFilter}:{})});
  let runs=[],intakes=[],collaborations=[];
  if(page==='tasks'&&current()){
@@ -402,7 +410,7 @@ async function readWorkspace(projectID,page=state.page) {
    const [messages,ints,cols]=await Promise.all([get(`messages:${selected}`,`/projects/${projectID}/runs`,{conversation_id:selected}),get(`intakes:${selected}`,`/projects/${projectID}/requirement-intakes`,{conversation_id:selected}),get(`collaborations:${selected}`,`/projects/${projectID}/collaborations`,{conversation_id:selected})]);
    runs=messages.items;intakes=ints.items;collaborations=cols.items;
   }
-  chatSelections.set(chatScope(projectID),selected);
+  if (current()) chatSelections.set(chatScope(projectID),selected);
  }
  const names=new Map((context.project_versions||[]).map(v=>[v.id,v]));
  for(const result of lists.values())for(const v of result.version_options||[])names.set(v.id,v);
@@ -446,13 +454,13 @@ function updateBusinessPage() {
  updateRepositoryStatus();
 }
 async function refresh() {
- const [projects,auth,platform]=await Promise.all([api(`/projects?${listParams('projects')}`),api('/auth/session'),api('/agent/status')]);
+ const [projects,auth,platform]=await Promise.all([readList('projects','/projects'),api('/auth/session'),api('/agent/status')]);
  state.auth=auth;state.platform=platform;state.projects=projects.items;businessLists.set(listScope('projects'),projects);
  if(isPlatformAdmin()){
-  const profiles=await api(`/profiles?${listParams('profiles')}`);state.profiles=profiles.items;businessLists.set(listScope('profiles'),profiles);
+  const profiles=await readList('profiles','/profiles');state.profiles=profiles.items;businessLists.set(listScope('profiles'),profiles);
  }
  if(state.page==='platform'&&isPlatformAdmin()){
-  const [projects,admins,accounts,channels]=await Promise.all([api(`/platform/projects?${listParams('platform-projects')}`),api(`/platform/admins?${listParams('admins')}`),state.auth?.login==='password'?api(`/platform/accounts?${listParams('accounts')}`):emptyPage(),api('/platform/channels').then(r=>r.items)]);
+  const [projects,admins,accounts,channels]=await Promise.all([readList('platform-projects','/platform/projects'),readList('admins','/platform/admins'),state.auth?.login==='password'?readList('accounts','/platform/accounts'):emptyPage(),api('/platform/channels').then(r=>r.items)]);
   state.platformProjects=projects.items;state.admins=admins.items;state.accounts=accounts.items;state.channels=channels;
   for(const [key,value] of [['platform-projects',projects],['admins',admins],['accounts',accounts]])businessLists.set(listScope(key),value);
  }
@@ -461,10 +469,13 @@ async function refresh() {
  if(state.project){localStorage.setItem('pm-project',state.project.id);applyWorkspace(await readWorkspace(state.project.id));}
  else {state.context=null;state.runs=[];state.collaborations=[];state.intakes=[];state.project_access=null;}
 }
+function projectOptionsHTML() {
+  return state.projects.length ? state.projects.map((p) => `<button type="button" class="project-option" role="menuitemradio" aria-checked="${p.id === state.project?.id}" tabindex="-1" data-action="switch-project" data-id="${escape(p.id)}" title="${escape(p.name)}"><span class="project-symbol" aria-hidden="true">${escape([...p.name][0])}</span><span class="project-option-name">${escape(p.name)}</span>${p.id === state.project?.id ? icon("tick") : ""}</button>`).join("") : '<p class="project-menu-empty" role="presentation">还没有项目</p>';
+}
 function projectSwitcher() {
   const project = state.project;
   const name = project?.name || "选择项目";
-  return `<div class="project-picker"><button type="button" id="project-switch" class="project-switch" data-action="toggle-projects" aria-label="切换项目，当前：${escape(name)}" aria-haspopup="menu" aria-expanded="false" aria-controls="project-menu"><span class="project-symbol" aria-hidden="true">${project ? escape([...name][0]) : icon("folder")}</span><span class="project-switch-label"><small>当前项目</small><strong>${escape(name)}</strong></span>${icon("chevron")}</button><div class="project-menu" id="project-menu" role="menu" aria-label="项目列表" hidden><div class="project-menu-title" role="presentation">切换项目</div><div class="project-options" role="none">${state.projects.length ? state.projects.map((p) => `<button type="button" class="project-option" role="menuitemradio" aria-checked="${p.id === project?.id}" tabindex="-1" data-action="switch-project" data-id="${escape(p.id)}" title="${escape(p.name)}"><span class="project-symbol" aria-hidden="true">${escape([...p.name][0])}</span><span class="project-option-name">${escape(p.name)}</span>${p.id === project?.id ? icon("tick") : ""}</button>`).join("") : '<p class="project-menu-empty" role="presentation">还没有项目</p>'}</div>${pagerHTML(listResult("projects"),"projects")}<div class="project-menu-divider" role="separator"></div><button type="button" class="project-create" role="menuitem" tabindex="-1" data-action="new-project">${icon("plus")}<span>创建新项目</span></button></div></div>`;
+  return `<div class="project-picker"><button type="button" id="project-switch" class="project-switch" data-action="toggle-projects" aria-label="切换项目，当前：${escape(name)}" aria-haspopup="menu" aria-expanded="false" aria-controls="project-menu"><span class="project-symbol" aria-hidden="true">${project ? escape([...name][0]) : icon("folder")}</span><span class="project-switch-label"><small>当前项目</small><strong>${escape(name)}</strong></span>${icon("chevron")}</button><div class="project-menu" id="project-menu" role="menu" aria-label="项目列表" hidden><div class="project-menu-title" role="presentation">切换项目</div><div class="project-options" role="none">${projectOptionsHTML()}</div><div data-project-more>${moreHTML(listResult("projects"),"projects","加载更多项目")}</div><div class="project-menu-divider" role="separator"></div><button type="button" class="project-create" role="menuitem" tabindex="-1" data-action="new-project">${icon("plus")}<span>创建新项目</span></button></div></div>`;
 }
 function projectMenuOpen() {
   return $("#project-switch")?.getAttribute("aria-expanded") === "true";
@@ -655,7 +666,7 @@ function overview() {
     )
     .join(
       "",
-    )}</div><div class="overview-grid"><div><h2 class="section-label">当前工作 ${action("navigate", "查看全部 " + icon("arrow"), "ghost", 'data-page="tasks"')}</h2>${now.length ? now.map(taskRow).join("") : empty("当前没有推进中的需求", "提出一个需求，或记录一个需要处理的问题。", action("new-task", icon("plus") + " 创建需求"))}${pagerHTML(listResult("overview-tasks"),"overview-tasks")}<div class="divider"></div><h2 class="section-label">项目进度解读 ${action("analyze", "更新分析", "ghost", 'data-kind="progress"')}</h2>${evidence ? `<div class="prewrap">${escape(evidence.body)}</div><p class="hint">平台 Agent · ${date(evidence.at)} · 结论依据可在记录中查看</p>` : `<div class="context-note">${state.platform.configured ? "点击更新分析，让平台 Agent 对照需求和 Git 变化解释进度。" : "由平台管理员配置 Agent 模型后，平台 Agent 将结合需求、Git 与开发汇报分析进度。"}</div>`}</div><aside class="context-column"><section><h2 class="section-label">仓库观察</h2><p class="context-note"><strong>${escape(state.project.branch)}</strong><br>${state.project.sha ? `<span class="mono">${state.project.sha.slice(0, 12)}</span>` : "尚未读取代码"}<br>最近同步 ${date(state.project.synced_at)}</p>${action("navigate", "查看代码与变更 " + icon("arrow"), "inline-link", 'data-page="code"')}<p class="page-note">代码状态与上线记录分别记录。<br>按需求确认上线版本和环境。</p></section><section><h2 class="section-label">最近动态</h2>${events.length ? events.map((e) => `<div class="event" data-key="event:${e.seq}"><p>${escape(e.body || e.kind)}</p><time>${escape(e.actor)} · ${date(e.at)}</time></div>`).join("") : '<p class="context-note">项目活动会记录在这里。</p>'}${pagerHTML(listResult('overview-events'),'overview-events')}</section></aside></div></div>`;
+    )}</div><div class="overview-grid"><div><h2 class="section-label">当前工作 ${action("navigate", "查看全部 " + icon("arrow"), "ghost", 'data-page="tasks"')}</h2>${now.length ? now.map(taskRow).join("") : empty("当前没有推进中的需求", "提出一个需求，或记录一个需要处理的问题。", action("new-task", icon("plus") + " 创建需求"))}${moreHTML(listResult("overview-tasks"),"overview-tasks")}<div class="divider"></div><h2 class="section-label">项目进度解读 ${action("analyze", "更新分析", "ghost", 'data-kind="progress"')}</h2>${evidence ? `<div class="prewrap">${escape(evidence.body)}</div><p class="hint">平台 Agent · ${date(evidence.at)} · 结论依据可在记录中查看</p>` : `<div class="context-note">${state.platform.configured ? "点击更新分析，让平台 Agent 对照需求和 Git 变化解释进度。" : "由平台管理员配置 Agent 模型后，平台 Agent 将结合需求、Git 与开发汇报分析进度。"}</div>`}</div><aside class="context-column"><section><h2 class="section-label">仓库观察</h2><p class="context-note"><strong>${escape(state.project.branch)}</strong><br>${state.project.sha ? `<span class="mono">${state.project.sha.slice(0, 12)}</span>` : "尚未读取代码"}<br>最近同步 ${date(state.project.synced_at)}</p>${action("navigate", "查看代码与变更 " + icon("arrow"), "inline-link", 'data-page="code"')}<p class="page-note">代码状态与上线记录分别记录。<br>按需求确认上线版本和环境。</p></section><section><h2 class="section-label">最近动态</h2>${events.length ? events.map((e) => `<div class="event" data-key="event:${e.seq}"><p>${escape(e.body || e.kind)}</p><time>${escape(e.actor)} · ${date(e.at)}</time></div>`).join("") : '<p class="context-note">项目活动会记录在这里。</p>'}${moreHTML(listResult('overview-events'),'overview-events')}</section></aside></div></div>`;
 }
 function filteredTasks() { return state.context?.tasks || []; }
 function tasksPagerHTML(){return pagerHTML(listResult('tasks'),'tasks',{unit:state.taskHierarchy?'组':'项'});}
@@ -684,7 +695,7 @@ function reviewsPage() {
   const artifacts = [...state.context.artifacts, ...state.context.tasks.filter(t => t.deployment).map(t => ({...t.deployment, kind:"deployment", title:`${t.title} · 上线记录 · R${t.deployment.revision}`, source:t.deployment.source === "developer" ? "开发汇报" : t.deployment.actor}))].filter((a) =>
     ["acceptance", "deployment", "test"].includes(a.kind),
   ).sort((a,b) => b.at - a.at);
-  return `<div class="page">${heading("验收与交付", "对照具体版本验证业务结果。", action("navigate", "按项目版本组织上线", "", 'data-page="versions"') + action("package", "建立验收包") + action("evidence", "添加交付证据", "primary"))}${testingQueueHTML()}<h2 class="section-label">等待上线 <span class="muted small">${listResult("releases").total} 个需求</span></h2><div class="review-list">${releases.length ? releases.map(t => `<div class="review-item" data-key="task:${t.id}"><div class="grow"><div class="title">${escape(t.title)}</div><div class="small muted">开发已完成 · ${escape(t.submission?.sha || "")} · R${t.revision}</div></div>${action("mark-deployed", "确认已上线", "", `data-id="${t.id}"`)}</div>`).join("") : empty("暂时没有等待上线的需求", "测试通过后进入这里，确认实际上线后再验收。")}</div>${pagerHTML(listResult("releases"),"releases")}<div class="divider"></div><h2 class="section-label">等待业务验收 <span class="muted small">${listResult("acceptance").total} 个需求</span></h2><div class="review-list">${tasks.length ? tasks.map((t) => `<div class="review-item" data-key="acceptance:${t.id}"><input type="checkbox" class="package-select" value="${t.id}" aria-label="选择 ${escape(t.title)}"><div class="grow"><div class="title">${escape(t.title)}</div><div class="small muted">${escape(t.submission?.sha || "")} · ${escape(t.deployment?.environment || "上线环境未说明")} · R${t.revision}</div></div>${action("review", "开始验收", "", 'data-id="' + t.id + '"')}</div>`).join("") : empty("暂时没有等待验收的需求", "当前版本确认已上线后，会出现在这里。")}</div>${pagerHTML(listResult("acceptance"),"acceptance")}<div class="divider"></div><h2 class="section-label">验收包与交付证据</h2>${
+  return `<div class="page">${heading("验收与交付", "对照具体版本验证业务结果。", action("navigate", "按项目版本组织上线", "", 'data-page="versions"') + action("package", "建立验收包") + action("evidence", "添加交付证据", "primary"))}${testingQueueHTML()}<h2 class="section-label">等待上线 <span class="muted small">${listResult("releases").total} 个需求</span></h2><div class="review-list">${releases.length ? releases.map(t => `<div class="review-item" data-key="task:${t.id}"><div class="grow"><div class="title">${escape(t.title)}</div><div class="small muted">开发已完成 · ${escape(t.submission?.sha || "")} · R${t.revision}</div></div>${action("mark-deployed", "确认已上线", "", `data-id="${t.id}"`)}</div>`).join("") : empty("暂时没有等待上线的需求", "测试通过后进入这里，确认实际上线后再验收。")}</div>${moreHTML(listResult("releases"),"releases")}<div class="divider"></div><h2 class="section-label">等待业务验收 <span class="muted small">${listResult("acceptance").total} 个需求</span></h2><div class="review-list">${tasks.length ? tasks.map((t) => `<div class="review-item" data-key="acceptance:${t.id}"><input type="checkbox" class="package-select" value="${t.id}" aria-label="选择 ${escape(t.title)}"><div class="grow"><div class="title">${escape(t.title)}</div><div class="small muted">${escape(t.submission?.sha || "")} · ${escape(t.deployment?.environment || "上线环境未说明")} · R${t.revision}</div></div>${action("review", "开始验收", "", 'data-id="' + t.id + '"')}</div>`).join("") : empty("暂时没有等待验收的需求", "当前版本确认已上线后，会出现在这里。")}</div>${moreHTML(listResult("acceptance"),"acceptance")}<div class="divider"></div><h2 class="section-label">验收包与交付证据</h2>${
     artifacts.length
       ? artifacts
           .map(
@@ -708,7 +719,7 @@ function reviewsPage() {
           )
           .join("")
       : '<p class="context-note">尚未提供部署证据，环境状态为未知。</p>'
-  }${pagerHTML(listResult('evidence'),'evidence')}</div>`;
+  }${moreHTML(listResult('evidence'),'evidence')}</div>`;
 }
 function runProcessHTML(r, open) {
   const active = ["running", "queued"].includes(r.status);
@@ -774,7 +785,7 @@ function chatIntro() {
 }
 function conversationListHTML() {
   const conversations = workspaceConversations();
-  return conversations.length ? conversations.map((c) => `<div data-key="conversation:${escape(c.id)}" class="conversation-row ${c.id === selectedConversation() ? "selected" : ""}"><button type="button" class="conversation-item" data-action="select-conversation" data-id="${escape(c.id)}" aria-current="${c.id === selectedConversation()}" title="${escape(c.title)}"><span class="conversation-title">${escape(c.title)}${hasUnreadReply(c) ? ' <span class="reply-unread">新结果</span>' : ""}</span><span class="conversation-meta">${c.active ? '<i class="conversation-active" aria-label="正在回答"></i>' : ""}${c.naming ? "正在命名…" : c.legacy ? "历史对话 · " + date(c.updatedAt) : date(c.updatedAt)}</span></button><div class="conversation-actions">${action("rename-conversation", icon("edit"), "ghost icon-only", `data-id="${escape(c.id)}" aria-label="重命名：${escape(c.title)}" title="重命名"`)}${action("delete-conversation", icon("trash"), "ghost icon-only", `data-id="${escape(c.id)}" aria-label="删除：${escape(c.title)}" title="删除对话"`)}</div></div>`).join("") + pagerHTML(listResult("conversations"),"conversations") : '<p class="conversation-empty">发送第一条消息后，<br>对话会出现在这里。</p>';
+  return (conversations.length ? conversations.map((c) => `<div data-key="conversation:${escape(c.id)}" class="conversation-row ${c.id === selectedConversation() ? "selected" : ""}"><button type="button" class="conversation-item" data-action="select-conversation" data-id="${escape(c.id)}" aria-current="${c.id === selectedConversation()}" title="${escape(c.title)}"><span class="conversation-title">${escape(c.title)}${hasUnreadReply(c) ? ' <span class="reply-unread">新结果</span>' : ""}</span><span class="conversation-meta">${c.active ? '<i class="conversation-active" aria-label="正在回答"></i>' : ""}${c.naming ? "正在命名…" : c.legacy ? "历史对话 · " + date(c.updatedAt) : date(c.updatedAt)}</span></button><div class="conversation-actions">${action("rename-conversation", icon("edit"), "ghost icon-only", `data-id="${escape(c.id)}" aria-label="重命名：${escape(c.title)}" title="重命名"`)}${action("delete-conversation", icon("trash"), "ghost icon-only", `data-id="${escape(c.id)}" aria-label="删除：${escape(c.title)}" title="删除对话"`)}</div></div>`).join("") : '<p class="conversation-empty">发送第一条消息后，<br>对话会出现在这里。</p>') + moreHTML(listResult("conversations"),"conversations","加载更多会话");
 }
 function conversationDialog(id, remove) {
   const conversation = workspaceConversations().find((c) => c.id === id);
@@ -815,8 +826,8 @@ function updateChat() {
   const feed = $(".chat-feed", page);
   if (!feed || page.dataset.projectId !== state.project?.id) return;
   patchKeyedHTML($(".conversation-list", page), conversationListHTML());
-  const messageKey=`messages:${selectedConversation()}`;patchKeyedHTML($("#chat-message-pagination",page),pagerHTML(listResult(messageKey),messageKey));
-  patchKeyedHTML($("#chat-related-pagination",page),selectedConversation()?pagerHTML(listResult(`intakes:${selectedConversation()}`),`intakes:${selectedConversation()}`)+pagerHTML(listResult(`collaborations:${selectedConversation()}`),`collaborations:${selectedConversation()}`):'');
+  const messageKey=`messages:${selectedConversation()}`;patchKeyedHTML($("#chat-message-pagination",page),moreHTML(listResult(messageKey),messageKey,"加载更早消息"));
+  patchKeyedHTML($("#chat-related-pagination",page),selectedConversation()?moreHTML(listResult(`intakes:${selectedConversation()}`),`intakes:${selectedConversation()}`,"加载更多需求建议")+moreHTML(listResult(`collaborations:${selectedConversation()}`),`collaborations:${selectedConversation()}`,"加载更多协查"):'');
   const selected = selectedConversation();
   const conversation = workspaceConversations().find((c) => c.id === selected);
   const title = $(".current-conversation-title", page);
@@ -833,6 +844,8 @@ function updateChat() {
   const scroll = feed;
   const follow = scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop < 80;
   const scrollTop = scroll.scrollTop;
+  const firstTurn = $(".chat-turn", feed);
+  const firstTop = firstTurn?.offsetTop;
   const turns = chatTurns();
   const existing = new Map($$(".chat-turn", feed).map((turn) => [turn.dataset.runId, turn]));
   let changed = false;
@@ -869,13 +882,13 @@ function updateChat() {
   const send = $("#chat-send", page);
   const disabled = !canAsk() || chatDraft().sending || Boolean(conversation?.active) || (!chatDraft().text.trim() && !chatDraft().files.length);
   if (send.disabled !== disabled) send.disabled = disabled;
-  if (changed) scroll.scrollTop = follow ? scroll.scrollHeight : scrollTop;
+  if (changed) scroll.scrollTop = follow ? scroll.scrollHeight : scrollTop + (firstTurn?.isConnected ? firstTurn.offsetTop - firstTop : 0);
   if (follow) markVisibleRepliesRead();
 }
 function chatPage() {
   const draft = chatDraft();
   const turns = chatTurns();
-  return `<div class="page chat-page" data-project-id="${escape(state.project.id)}" data-conversation-id="${escape(selectedConversation())}"><aside class="chat-sidebar" aria-label="对话历史">${action("new-conversation", icon("plus") + " 新会话", "new-conversation-button")}<div class="conversation-list-heading">我的对话</div><nav class="conversation-list" aria-label="我的对话">${conversationListHTML()}</nav></aside><div class="chat-main">${heading("项目问答", "回答基于项目资料和已观察到的代码。", action("toggle-history", icon("list") + " 历史对话", "ghost history-toggle"))}<div class="conversation-heading"><span class="current-conversation-title">${escape(workspaceConversations().find((c) => c.id === selectedConversation())?.title || "新会话")}</span>${action("new-conversation", icon("plus") + " 新会话", "ghost mobile-new-conversation")}</div><div id="chat-message-pagination">${selectedConversation()?pagerHTML(listResult(`messages:${selectedConversation()}`),`messages:${selectedConversation()}`):""}</div><div class="chat-feed">${turns.length ? turns.map(chatTurnHTML).join("") : chatIntro()}</div><div id="chat-related-pagination"></div><div class="composer" ${canAsk()?'':'hidden'}><form id="chat-form" novalidate><div class="composer-box" id="chat-dropzone"><textarea name="question" rows="3" placeholder="输入问题，也可以粘贴图片或拖入文件…" aria-label="项目问题" aria-describedby="composer-help">${escape(draft.text)}</textarea><div class="draft-attachments" id="draft-attachments" aria-label="待发送附件"></div><div class="composer-bottom"><button type="button" class="ghost attach-button" data-action="attach-files" aria-label="添加图片或文件" title="图片、PDF、DOCX、文本和代码文件">${icon("paperclip")}<span>添加附件</span></button><span class="composer-keyboard">Enter 发送 · Shift+Enter 换行</span><button class="primary send-button" id="chat-send" type="submit">${icon("send")}<span>发送</span></button></div><input type="file" id="chat-files" class="hidden" multiple accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.docx,text/*,.md,.log,.json,.csv,.yaml,.yml,.xml,.html,.css,.js,.ts,.tsx,.jsx,.vue,.go,.py,.sql,.sh,.java,.c,.cpp,.h,.toml,.ini,.conf"><p id="chat-error" class="form-error" role="alert"></p></div></form><p class="composer-note" id="composer-help">支持粘贴或拖入附件 · 单个 10 MB · 最多 6 个，合计 20 MB · ${state.platform.configured ? "图片需使用支持视觉的模型" : "发送前请由平台管理员配置 Agent 模型"}</p></div></div></div>`;
+  return `<div class="page chat-page" data-project-id="${escape(state.project.id)}" data-conversation-id="${escape(selectedConversation())}"><aside class="chat-sidebar" aria-label="对话历史">${action("new-conversation", icon("plus") + " 新会话", "new-conversation-button")}<div class="conversation-list-heading">我的对话</div><nav class="conversation-list" aria-label="我的对话">${conversationListHTML()}</nav></aside><div class="chat-main">${heading("项目问答", "回答基于项目资料和已观察到的代码。", action("toggle-history", icon("list") + " 历史对话", "ghost history-toggle"))}<div class="conversation-heading"><span class="current-conversation-title">${escape(workspaceConversations().find((c) => c.id === selectedConversation())?.title || "新会话")}</span>${action("new-conversation", icon("plus") + " 新会话", "ghost mobile-new-conversation")}</div><div id="chat-message-pagination">${selectedConversation()?moreHTML(listResult(`messages:${selectedConversation()}`),`messages:${selectedConversation()}`,"加载更早消息"):""}</div><div class="chat-feed">${turns.length ? turns.map(chatTurnHTML).join("") : chatIntro()}</div><div id="chat-related-pagination"></div><div class="composer" ${canAsk()?'':'hidden'}><form id="chat-form" novalidate><div class="composer-box" id="chat-dropzone"><textarea name="question" rows="3" placeholder="输入问题，也可以粘贴图片或拖入文件…" aria-label="项目问题" aria-describedby="composer-help">${escape(draft.text)}</textarea><div class="draft-attachments" id="draft-attachments" aria-label="待发送附件"></div><div class="composer-bottom"><button type="button" class="ghost attach-button" data-action="attach-files" aria-label="添加图片或文件" title="图片、PDF、DOCX、文本和代码文件">${icon("paperclip")}<span>添加附件</span></button><span class="composer-keyboard">Enter 发送 · Shift+Enter 换行</span><button class="primary send-button" id="chat-send" type="submit">${icon("send")}<span>发送</span></button></div><input type="file" id="chat-files" class="hidden" multiple accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.docx,text/*,.md,.log,.json,.csv,.yaml,.yml,.xml,.html,.css,.js,.ts,.tsx,.jsx,.vue,.go,.py,.sql,.sh,.java,.c,.cpp,.h,.toml,.ini,.conf"><p id="chat-error" class="form-error" role="alert"></p></div></form><p class="composer-note" id="composer-help">支持粘贴或拖入附件 · 单个 10 MB · 最多 6 个，合计 20 MB · ${state.platform.configured ? "图片需使用支持视觉的模型" : "发送前请由平台管理员配置 Agent 模型"}</p></div></div></div>`;
 }
 function fileSize(bytes) {
   return bytes < 1024 * 1024
@@ -1169,12 +1182,12 @@ function mcpPage() {
 }
 async function loadMCP() {
   try {
-    const data = await api(`/mcp?${listParams("mcp-grants")}`); if (!$("#mcp-toggle")) return;
+    const data = await readList("mcp-grants", "/mcp"); if (!$("#mcp-toggle")) return;
     businessLists.set(listScope("mcp-grants"),data);
     $("#mcp-status").textContent = data.enabled ? "已开通" : "未开通";
     const button = $("#mcp-toggle");button.textContent = data.enabled ? "关闭个人 MCP" : "开通个人 MCP";button.dataset.enabled = String(data.enabled);button.disabled = false;
     $("#mcp-grants").innerHTML = data.grants.length ? data.grants.map((g) => `<div class="profile-row"><div class="grow"><strong>${escape(state.projects.find((p) => p.id === g.project_id)?.name || "已失去访问权限的项目")}</strong><p class="hint client-id">${escape(g.client_id)}</p><p class="hint">授权于 ${date(g.created_at)}</p></div>${action("revoke-grant", "撤销", "ghost danger", `data-id="${escape(g.id)}"`)}</div>`).join("") : '<p class="context-note">暂无客户端授权。</p>';
-    $('#mcp-grants').insertAdjacentHTML('beforeend',pagerHTML(data,'mcp-grants'));
+    $('#mcp-grants').insertAdjacentHTML('beforeend',moreHTML(data,'mcp-grants'));
   } catch (e) { if ($("#mcp-grants")) $("#mcp-grants").textContent = e.message; }
 }
 function profileOptions(selected=state.platform.profile_id,selectedLabel='') {
@@ -1182,7 +1195,7 @@ function profileOptions(selected=state.platform.profile_id,selectedLabel='') {
  return '<option value="">暂不启用 Agent</option>'+pinned+state.profiles.map(p=>`<option value="${escape(p.id)}" ${selected===p.id?'selected':''}>${escape(p.name)} · ${escape(p.model)}</option>`).join('');
 }
 function platformPage() {
-  return `<div class="page">${heading("平台设置", "统一配置平台 Agent，管理平台管理员和成员项目授权。")}<div class="settings-grid"><section class="settings-section"><h2>平台 Agent</h2><p>所有项目使用同一平台 Agent 模型配置。</p><form id="platform-form">${field("默认模型", `<select name="profile_id">${profileOptions()}</select>`)}<div class="form-error"></div><button type="submit" class="primary">保存平台配置</button></form><div class="divider"></div><div class="row between"><h3>模型配置</h3>${action("new-profile", icon("plus") + " 添加", "ghost")}</div>${state.profiles.map((p) => `<div class="profile-row"><span class="dot ${p.has_key ? "live" : ""}"></span><div class="grow">${escape(p.name)}<p class="hint">${escape(p.provider)} / ${escape(p.model)}</p></div>${action("edit-profile", "编辑", "ghost", `data-id="${escape(p.id)}"`)}</div>`).join("") || '<p class="hint">先添加模型配置，再选为默认模型。</p>'}${pagerHTML(listResult("profiles"),"profiles")}<p class="hint">API Key 仅保存在服务器，不会回显。</p></section><div><section class="settings-section"><div class="row between"><h2>成员项目授权</h2>${state.auth?.directory?.syncable ? action("sync-directory", icon("refresh") + ` 同步 ${escape(state.auth.directory.label)}`, "ghost") : ""}</div><p>选择项目，维护成员、角色和待办职责。</p>${state.platformProjects.map((p) => `<div class="profile-row"><div class="grow"><strong>${escape(p.name)}</strong><p class="hint">${escape(p.description)}</p></div>${action("manage-project-members", "管理成员", "", `data-project="${escape(p.id)}"`)}</div>`).join("") || '<p class="hint">还没有项目。</p>'}${pagerHTML(listResult('platform-projects'),'platform-projects')}</section>${accountsSection()}${channelsSection()}<section class="settings-section"><div class="row between"><h2>平台管理员</h2>${action("add-platform-admin", icon("plus") + " 添加", "ghost")}</div><p>平台管理员可进入此页面、配置 Agent 并管理所有项目成员。</p>${state.admins.map((u) => `<div class="profile-row"><div class="grow">${escape(u.name)}<p class="hint">${escape(u.login_id)}</p></div>${u.id !== "local-owner" ? action("remove-platform-admin", "移除", "ghost danger", `data-user="${escape(u.id)}" data-name="${escape(u.name)}"`) : ""}</div>`).join("")}${pagerHTML(listResult("admins"),"admins")}</section></div></div></div>`;
+  return `<div class="page">${heading("平台设置", "统一配置平台 Agent，管理平台管理员和成员项目授权。")}<div class="settings-grid"><section class="settings-section"><h2>平台 Agent</h2><p>所有项目使用同一平台 Agent 模型配置。</p><form id="platform-form">${field("默认模型", `<select name="profile_id">${profileOptions()}</select>`)}<div class="form-error"></div><button type="submit" class="primary">保存平台配置</button></form><div class="divider"></div><div class="row between"><h3>模型配置</h3>${action("new-profile", icon("plus") + " 添加", "ghost")}</div>${state.profiles.map((p) => `<div class="profile-row"><span class="dot ${p.has_key ? "live" : ""}"></span><div class="grow">${escape(p.name)}<p class="hint">${escape(p.provider)} / ${escape(p.model)}</p></div>${action("edit-profile", "编辑", "ghost", `data-id="${escape(p.id)}"`)}</div>`).join("") || '<p class="hint">先添加模型配置，再选为默认模型。</p>'}${moreHTML(listResult("profiles"),"profiles")}<p class="hint">API Key 仅保存在服务器，不会回显。</p></section><div><section class="settings-section"><div class="row between"><h2>成员项目授权</h2>${state.auth?.directory?.syncable ? action("sync-directory", icon("refresh") + ` 同步 ${escape(state.auth.directory.label)}`, "ghost") : ""}</div><p>选择项目，维护成员、角色和待办职责。</p>${state.platformProjects.map((p) => `<div class="profile-row"><div class="grow"><strong>${escape(p.name)}</strong><p class="hint">${escape(p.description)}</p></div>${action("manage-project-members", "管理成员", "", `data-project="${escape(p.id)}"`)}</div>`).join("") || '<p class="hint">还没有项目。</p>'}${moreHTML(listResult('platform-projects'),'platform-projects')}</section>${accountsSection()}${channelsSection()}<section class="settings-section"><div class="row between"><h2>平台管理员</h2>${action("add-platform-admin", icon("plus") + " 添加", "ghost")}</div><p>平台管理员可进入此页面、配置 Agent 并管理所有项目成员。</p>${state.admins.map((u) => `<div class="profile-row"><div class="grow">${escape(u.name)}<p class="hint">${escape(u.login_id)}</p></div>${u.id !== "local-owner" ? action("remove-platform-admin", "移除", "ghost danger", `data-user="${escape(u.id)}" data-name="${escape(u.name)}"`) : ""}</div>`).join("")}${moreHTML(listResult("admins"),"admins")}</section></div></div></div>`;
 }
 function channelsSection() {
   if (!state.channels?.length) return "";
@@ -1198,7 +1211,7 @@ function channelForm(name) {
 function accountsSection() {
   if (state.auth?.login !== "password") return "";
   const me = state.auth.user?.id;
-  return `<section class="settings-section"><div class="row between"><h2>平台账号</h2>${action("new-account", icon("plus") + " 新建", "ghost")}</div><p>创建账号并把用户名和初始密码告知成员，成员首次登录时改为自己的密码。停用后立即退出登录，并撤销其 MCP 授权。</p>${state.accounts.map((a) => `<div class="profile-row"><div class="grow">${escape(a.name)}${a.disabled ? ' <span class="badge">已停用</span>' : a.must_change_password ? ' <span class="badge">待改密</span>' : ""}<p class="hint">${escape(a.username)}${a.user_id === me ? " · 当前账号" : ""}</p></div>${a.user_id === me ? "" : action("reset-account-password", "重置密码", "ghost", `data-user="${escape(a.user_id)}" data-name="${escape(a.name)}"`) + action("toggle-account", a.disabled ? "启用" : "停用", a.disabled ? "ghost" : "ghost danger", `data-user="${escape(a.user_id)}" data-name="${escape(a.name)}" data-disabled="${a.disabled}"`)}</div>`).join("")}${pagerHTML(listResult("accounts"),"accounts")}</section>`;
+  return `<section class="settings-section"><div class="row between"><h2>平台账号</h2>${action("new-account", icon("plus") + " 新建", "ghost")}</div><p>创建账号并把用户名和初始密码告知成员，成员首次登录时改为自己的密码。停用后立即退出登录，并撤销其 MCP 授权。</p>${state.accounts.map((a) => `<div class="profile-row"><div class="grow">${escape(a.name)}${a.disabled ? ' <span class="badge">已停用</span>' : a.must_change_password ? ' <span class="badge">待改密</span>' : ""}<p class="hint">${escape(a.username)}${a.user_id === me ? " · 当前账号" : ""}</p></div>${a.user_id === me ? "" : action("reset-account-password", "重置密码", "ghost", `data-user="${escape(a.user_id)}" data-name="${escape(a.name)}"`) + action("toggle-account", a.disabled ? "启用" : "停用", a.disabled ? "ghost" : "ghost danger", `data-user="${escape(a.user_id)}" data-name="${escape(a.name)}" data-disabled="${a.disabled}"`)}</div>`).join("")}${moreHTML(listResult("accounts"),"accounts")}</section>`;
 }
 let directoryRevision = 0;
 function departmentOptions(roots, prefix = "") {
@@ -1216,12 +1229,15 @@ async function searchEmployees(page = 1) {
   const data = new FormData(form);const base = form.dataset.platform === "true" ? "/platform" : `/projects/${encodeURIComponent(form.dataset.project)}`;
   const params = new URLSearchParams({q: data.get("q"),department_id:data.get("department_id"),page:String(page)});
   try {
-    const result = await api(`${base}/directory?${params}`);
+    const result = await readPageWindow(page, number => {
+      params.set('page', String(number));
+      return api(`${base}/directory?${params}`);
+    });
     if (revision !== directoryRevision || $("#employee-search") !== form) return;
     const selected = data.get("department_id");$("#department-filter").innerHTML = '<option value="">全部部门</option>' + departmentOptions(result.roots);$("#department-filter").value = selected;$("#department-filter").hidden = !result.roots?.length;
     $("#directory-status").textContent = `${result.label || "成员目录"} · ${result.total} 人${result.synced_at ? " · 同步于 " + date(result.synced_at) : ""}`;
     $("#employee-results").innerHTML = result.items.map((u) => `<button type="button" class="employee-result" data-action="choose-employee" data-user="${escape(u.id)}" data-name="${escape(u.name)}" data-detail="${escape([u.login_id,...(u.org_path?.length ? u.org_path : [u.department_name])].filter(Boolean).join(" · "))}"><strong>${escape(u.name)}</strong><span>${escape([u.login_id,u.department_name,u.job_title].filter(Boolean).join(" · "))}</span>${icon("plus")}</button>`).join("") || '<p class="context-note">未找到匹配成员。</p>';
-    if (result.total > result.page_size) $("#employee-results").innerHTML += `<div class="row between directory-pagination">${page > 1 ? action("directory-page", "上一页", "ghost", `data-page="${page - 1}"`) : "<span></span>"}<span class="hint">第 ${page} / ${Math.ceil(result.total/result.page_size)} 页</span>${page * result.page_size < result.total ? action("directory-page", "下一页", "ghost", `data-page="${page + 1}"`) : "<span></span>"}</div>`;
+    if (hasMore(result)) $("#employee-results").innerHTML += action("directory-page", "加载更多成员", "ghost list-more", `data-page="${result.page + 1}"`);
   } catch (e) { if (revision === directoryRevision && $("#employee-search") === form) {$("#directory-status").textContent = e.message;$("#employee-results").innerHTML = action("retry-directory", "重新读取", "ghost");} }
 }
 function codePage() {
@@ -1229,19 +1245,20 @@ function codePage() {
 }
 async function loadFiles({resetSnapshot=false}={}) {
  const root=$('#file-list'),projectID=state.project?.id;if(!root)return;
- const generation=beginListRequest(root),ref=resetSnapshot?state.project.sha:(root.dataset.sha||state.project.sha),params=listParams('files',{action:'tree',ref});
+ if (resetSnapshot) setListPage('files');
+ const generation=beginListRequest(root),ref=resetSnapshot?state.project.sha:(root.dataset.sha||state.project.sha);
  try{
-  const data=await api(`/projects/${projectID}/code?${params}`);if(projectID!==state.project?.id||!currentListRequest(root,generation))return;
+  const data=await readList("files", `/projects/${projectID}/code`, {action:"tree",ref});if(projectID!==state.project?.id||!currentListRequest(root,generation))return;
   businessLists.set(listScope('files'),data);state.files=data.items;root.dataset.sha=data.sha;
-  patchKeyedHTML(root,data.items.map(path=>`<button type="button" data-key="${escape(path)}" data-action="open-file" data-path="${escape(path)}" data-ref="${escape(data.sha)}" title="${escape(path)}">${escape(path)}</button>`).join('')+pagerHTML(data,'files'));
+  patchKeyedHTML(root,data.items.map(path=>`<button type="button" data-key="${escape(path)}" data-action="open-file" data-path="${escape(path)}" data-ref="${escape(data.sha)}" title="${escape(path)}">${escape(path)}</button>`).join('')+moreHTML(data,'files'));
  }catch(e){if(projectID===state.project?.id&&currentListRequest(root,generation))root.textContent=e.message;}
 }
 let codeResultQuery=null;
 async function loadCodeResults(page=1,size){
  const root=$('#file-content'),query=codeResultQuery;if(!query||!root)return;setListPage('code-results',page,size);
- const generation=beginListRequest(root),projectID=state.project.id,params=listParams('code-results',query),v=await api(`/projects/${projectID}/code?${params}`);
+ const generation=beginListRequest(root),projectID=state.project.id,v=await readList('code-results',`/projects/${projectID}/code`,query);
  if(projectID!==state.project?.id||query!==codeResultQuery||!currentListRequest(root,generation))return;businessLists.set(listScope('code-results'),v);query.ref=v.sha;
- patchKeyedHTML(root,`<div class="mono muted small">${escape(v.path||'')} · ${escape(v.sha.slice(0,12))}</div><div class="divider"></div><pre>${escape(v.text||'没有匹配结果')}</pre>${v.truncated?'<p class="hint">个别行过长，当前仅显示前 64KB；可打开源文件查看。</p>':''}${pagerHTML(v,'code-results')}`);
+ patchKeyedHTML(root,`<div class="mono muted small">${escape(v.path||'')} · ${escape(v.sha.slice(0,12))}</div><div class="divider"></div><pre>${escape(v.text||'没有匹配结果')}</pre>${v.truncated?'<p class="hint">个别行过长，当前仅显示前 64KB；可打开源文件查看。</p>':''}${moreHTML(v,'code-results')}`);
 }
 let taskDetailRevision=0;
 async function openTask(taskID) {
@@ -1252,7 +1269,7 @@ async function openTask(taskID) {
   if (t.project_id !== projectID || !stillCurrent()) return;
   for(const [key,value] of [[`detail-bugs:${t.id}`,ctx.related_bugs],[`detail-artifacts:${t.id}`,ctx.artifact_page],[`detail-events:${t.id}`,ctx.event_page]])if(value)businessLists.set(listScope(key),value);
   const artifacts = ctx.artifacts.filter((a) => a.task_id === t.id);
-  const runKey=`detail-runs:${t.id}`,runPage=await api(`/projects/${t.project_id}/runs?${listParams(runKey,{task_id:t.id,summary:true})}`);
+  const runKey=`detail-runs:${t.id}`,runPage=await readList(runKey,`/projects/${t.project_id}/runs`,{task_id:t.id,summary:true});
   if(!stillCurrent())return;
   businessLists.set(listScope(runKey),runPage);
   const runs=runPage.items;
@@ -1299,14 +1316,14 @@ async function openTask(taskID) {
   buttons=controls.innerHTML;
   modal(
     `<span class="mono muted">${short(t.id)} · ${t.kind === "bug" ? (t.parent_requirement_id ? "需求测试 Bug" : "平台 Bug") : "迭代需求"}</span>`,
-    `<h1 class="detail-title">${escape(t.title)}</h1><div class="detail-meta">${status(t)}<span class="badge">${priorities[t.priority]}</span><span class="badge">修订 R${t.revision}</span><span class="badge">${escape(t.owner || "未认领")}</span>${t.reviewer ? `<span class="badge">验收：${escape(t.reviewer)}</span>` : ""}</div>${t.blocker ? `<div class="notice">阻塞：${escape(t.blocker)}</div>` : ""}${t.status === "ready" && t.alignment?.status === "replied" ? `<div class="notice">产品已回复，等待原开发客户端确认。原客户端无法继续时，可重新开放领取；已有对齐记录会追加进需求正文。</div>` : ""}<div class="detail-actions">${buttons}</div>${t.resolution?`<section class="task-resolution notice"><strong>${states[t.status]} · ${states[t.resolution.from_status]}阶段结束</strong><p class="prewrap">${escape(t.resolution.reason)}</p><span class="small muted">${escape(t.resolution.actor)} · ${date(t.resolution.at)}</span></section>`:""}${testingDetails(t,ctx.tasks)}${iterationContextHTML(t.iteration)}<section class="detail-section"><h3>需求与背景</h3><div class="requirement-description markdown-content">${renderMarkdown(t.description || "尚未补充描述")}</div></section>${t.attachments?.length ? `<section class="detail-section"><h3>附件 · ${t.attachments.length}</h3>${sentAttachments(t)}</section>` : ""}<section class="detail-section"><h3>验收条件</h3>${t.acceptance.length ? `<ul class="acceptance-list">${t.acceptance.map((v) => `<li><i class="square ${t.status === "done" ? "checked" : ""}" aria-hidden="true">${t.status === "done" ? "✓" : ""}</i>${escape(v)}</li>`).join("")}</ul>` : '<p class="context-note">补充预期行为后，再进入待认领队列。</p>'}</section>${t.submission ? `<section class="detail-section"><h3>最近一次提交 · R${t.submission.revision}</h3><div class="prewrap">${escape(t.submission.summary)}</div><p class="mono muted">${escape(t.submission.sha)} · ${escape(t.submission.environment || "环境未说明")}</p><p class="prewrap">${escape(t.submission.tests)}</p>${t.submission.limitations ? `<div class="notice info">未完成或未验证：${escape(t.submission.limitations)}</div>` : ""}<p class="hint">本次提交版本的验证记录；后续测试、实际上线与业务验收分别记录。</p></section>` : ""}${t.deployment ? `<section class="detail-section"><h3>最近一次上线 · R${t.deployment.revision}</h3><p class="mono muted">${escape(t.deployment.sha)} · ${escape(t.deployment.environment)}</p><p class="prewrap">${escape(t.deployment.body)}</p><p class="hint">${escape(t.deployment.actor)} · ${t.deployment.source === "developer" ? "开发汇报" : "人工确认"} · ${date(t.deployment.at)}${t.deployment.revision !== t.revision ? " · 历史版本，当前需求需重新开发和上线" : ""}</p></section>` : ""}${t.review ? `<section class="detail-section"><h3>验收记录</h3><div class="prewrap">${t.review.accepted ? "通过" : "退回"} · ${escape(t.review.environment)} · ${date(t.review.at)}\n${escape(t.review.note)}</div></section>` : ""}${iterationHistoryHTML(ctx.iteration_history,t,state.context.project_versions)}<section class="detail-section"><h3>分析与证据</h3><div id="task-detail-artifacts">${artifacts.map((a) => `<div class="record"><div class="record-header"><span>${escape(a.title)} · ${escape(a.source)}</span><span>${date(a.at)}</span></div><div class="prewrap">${escape(a.body)}</div></div>`).join("") || '<p class="context-note">平台分析和相关证据会保留在这里。</p>'}${pagerHTML(ctx.artifact_page,`detail-artifacts:${t.id}`)}</div><div id="task-detail-runs">${taskRunRows(runs)}${pagerHTML(runPage,runKey)}</div></section><section class="detail-section"><h3>工作记录与决定</h3><form id="report-form" data-id="${t.id}"><textarea name="body" aria-label="新增工作记录" placeholder="记录进展、补充决定或说明阻塞…" required></textarea><div class="row between"><select name="report_kind" aria-label="记录类型"><option value="progress">工作进展</option><option value="decision">确认的决定</option><option value="blocked">遇到阻塞</option><option value="unblocked">解除阻塞</option></select><button type="submit">添加记录</button></div><div class="form-error"></div></form><div id="task-detail-events">${[
+    `<h1 class="detail-title">${escape(t.title)}</h1><div class="detail-meta">${status(t)}<span class="badge">${priorities[t.priority]}</span><span class="badge">修订 R${t.revision}</span><span class="badge">${escape(t.owner || "未认领")}</span>${t.reviewer ? `<span class="badge">验收：${escape(t.reviewer)}</span>` : ""}</div>${t.blocker ? `<div class="notice">阻塞：${escape(t.blocker)}</div>` : ""}${t.status === "ready" && t.alignment?.status === "replied" ? `<div class="notice">产品已回复，等待原开发客户端确认。原客户端无法继续时，可重新开放领取；已有对齐记录会追加进需求正文。</div>` : ""}<div class="detail-actions">${buttons}</div>${t.resolution?`<section class="task-resolution notice"><strong>${states[t.status]} · ${states[t.resolution.from_status]}阶段结束</strong><p class="prewrap">${escape(t.resolution.reason)}</p><span class="small muted">${escape(t.resolution.actor)} · ${date(t.resolution.at)}</span></section>`:""}${testingDetails(t,ctx.tasks)}${iterationContextHTML(t.iteration)}<section class="detail-section"><h3>需求与背景</h3><div class="requirement-description markdown-content">${renderMarkdown(t.description || "尚未补充描述")}</div></section>${t.attachments?.length ? `<section class="detail-section"><h3>附件 · ${t.attachments.length}</h3>${sentAttachments(t)}</section>` : ""}<section class="detail-section"><h3>验收条件</h3>${t.acceptance.length ? `<ul class="acceptance-list">${t.acceptance.map((v) => `<li><i class="square ${t.status === "done" ? "checked" : ""}" aria-hidden="true">${t.status === "done" ? "✓" : ""}</i>${escape(v)}</li>`).join("")}</ul>` : '<p class="context-note">补充预期行为后，再进入待认领队列。</p>'}</section>${t.submission ? `<section class="detail-section"><h3>最近一次提交 · R${t.submission.revision}</h3><div class="prewrap">${escape(t.submission.summary)}</div><p class="mono muted">${escape(t.submission.sha)} · ${escape(t.submission.environment || "环境未说明")}</p><p class="prewrap">${escape(t.submission.tests)}</p>${t.submission.limitations ? `<div class="notice info">未完成或未验证：${escape(t.submission.limitations)}</div>` : ""}<p class="hint">本次提交版本的验证记录；后续测试、实际上线与业务验收分别记录。</p></section>` : ""}${t.deployment ? `<section class="detail-section"><h3>最近一次上线 · R${t.deployment.revision}</h3><p class="mono muted">${escape(t.deployment.sha)} · ${escape(t.deployment.environment)}</p><p class="prewrap">${escape(t.deployment.body)}</p><p class="hint">${escape(t.deployment.actor)} · ${t.deployment.source === "developer" ? "开发汇报" : "人工确认"} · ${date(t.deployment.at)}${t.deployment.revision !== t.revision ? " · 历史版本，当前需求需重新开发和上线" : ""}</p></section>` : ""}${t.review ? `<section class="detail-section"><h3>验收记录</h3><div class="prewrap">${t.review.accepted ? "通过" : "退回"} · ${escape(t.review.environment)} · ${date(t.review.at)}\n${escape(t.review.note)}</div></section>` : ""}${iterationHistoryHTML(ctx.iteration_history,t,state.context.project_versions)}<section class="detail-section"><h3>分析与证据</h3><div id="task-detail-artifacts">${artifacts.map((a) => `<div class="record"><div class="record-header"><span>${escape(a.title)} · ${escape(a.source)}</span><span>${date(a.at)}</span></div><div class="prewrap">${escape(a.body)}</div></div>`).join("") || '<p class="context-note">平台分析和相关证据会保留在这里。</p>'}${moreHTML(ctx.artifact_page,`detail-artifacts:${t.id}`)}</div><div id="task-detail-runs">${taskRunRows(runs)}${moreHTML(runPage,runKey)}</div></section><section class="detail-section"><h3>工作记录与决定</h3><form id="report-form" data-id="${t.id}"><textarea name="body" aria-label="新增工作记录" placeholder="记录进展、补充决定或说明阻塞…" required></textarea><div class="row between"><select name="report_kind" aria-label="记录类型"><option value="progress">工作进展</option><option value="decision">确认的决定</option><option value="blocked">遇到阻塞</option><option value="unblocked">解除阻塞</option></select><button type="submit">添加记录</button></div><div class="form-error"></div></form><div id="task-detail-events">${[
       ...ctx.events,
     ]
       .map(
         (e) =>
           `<div class="record"><div class="record-header"><span>${escape(e.actor)} · ${escape(e.kind)}</span><span>${date(e.at)}</span></div><div class="prewrap">${escape(e.body)}</div></div>`,
       )
-      .join("")}${pagerHTML(ctx.event_page,`detail-events:${t.id}`)}</div></section>`,
+      .join("")}${moreHTML(ctx.event_page,`detail-events:${t.id}`)}</div></section>`,
     { drawer: true },
   );
   $('dialog').dataset.taskId=t.id;
@@ -1628,16 +1645,41 @@ document.addEventListener("click", async (event) => {
       document.getElementById('nav-group-'+group).hidden=!open;
       return;
     }
-    if(a==='list-page'){
-      const key=button.dataset.list;
-      if(key==='files'){setListPage(key,Number(button.dataset.page));await loadFiles();return;}
-      if(key==='code-results'){await loadCodeResults(Number(button.dataset.page));return;}
-      if(key.startsWith('detail-')){await loadDetailPage(key,Number(button.dataset.page));return;}
-      if(!['tasks','testing','releases','acceptance','evidence','overview-tasks','overview-events','projects','profiles','platform-projects','admins','accounts','conversations','mcp-grants'].includes(key)&&!key.startsWith('messages:')&&!key.startsWith('intakes:')&&!key.startsWith('collaborations:'))return;
-      setListPage(key,Number(button.dataset.page));
-      if(['projects','profiles','platform-projects','admins','accounts'].includes(key)){await refresh();if(key==='projects'){patchKeyedHTML($('.project-options'),state.projects.map(p=>`<button type="button" class="project-option" role="menuitemradio" data-action="switch-project" data-id="${escape(p.id)}" aria-checked="${p.id===state.project?.id}"><span class="project-option-name">${escape(p.name)}</span></button>`).join(''));patchKeyedHTML($('[data-pager=projects]'),pagerHTML(listResult('projects'),'projects'));}else updateBusinessPage();}
-      else if(key==='mcp-grants')await loadMCP();
-      else await loadBusinessPage();
+    if (a === 'list-page' && button.dataset.list === 'tasks') {
+      setListPage('tasks', Number(button.dataset.page));
+      await loadBusinessPage();
+      return;
+    }
+    if (a === 'list-more') {
+      const {list: key, page: next} = button.dataset;
+      const page = Number(next);
+      button.disabled = true;
+      try {
+        if (key === 'code-results') {
+          await loadCodeResults(page);
+        } else if (key.startsWith('detail-')) {
+          await loadDetailPage(key, page);
+        } else if (key === 'files') {
+          setListPage(key, page);
+          await loadFiles();
+        } else if (globalLists.has(key)) {
+          setListPage(key, page);
+          if (key === 'mcp-grants') await loadMCP();
+          else {
+            await refresh();
+            if (key === 'projects') {
+              patchKeyedHTML($('.project-options'), projectOptionsHTML());
+              patchKeyedHTML($('[data-project-more]'), moreHTML(listResult('projects'), 'projects', '加载更多项目'));
+            } else updateBusinessPage();
+          }
+        } else if (['testing', 'releases', 'acceptance', 'evidence', 'overview-tasks', 'overview-events', 'conversations'].includes(key)
+          || ['messages:', 'intakes:', 'collaborations:'].some(prefix => key.startsWith(prefix))) {
+          setListPage(key, page);
+          await loadBusinessPage();
+        }
+      } finally {
+        button.disabled = false;
+      }
       return;
     }
     if(a==='task-list-view'){
@@ -2108,7 +2150,11 @@ document.addEventListener("drop", (event) => {
   addChatFiles([...(event.dataTransfer?.files || [])]);
 });
 document.addEventListener("change", async (event) => {
- if(event.target.matches('[data-page-size]')){const key=event.target.dataset.pageSize;if(key==='files'){setListPage(key,1,Number(event.target.value));void loadFiles();return;}if(key==='code-results'){void loadCodeResults(1,Number(event.target.value)).catch(e=>toast(e.message));return;}if(key.startsWith('detail-')){void loadDetailPage(key,1,Number(event.target.value)).catch(e=>toast(e.message));return;}setListPage(key,1,Number(event.target.value));if(['profiles','projects','platform-projects','admins','accounts'].includes(key)){void refresh().then(updateBusinessPage).catch(e=>toast(e.message));}else if(key==='mcp-grants'){void loadMCP();}else void loadBusinessPage().catch(e=>toast(e.message));return;}
+ if(event.target.matches('[data-page-size="tasks"]')){
+  setListPage('tasks',1,Number(event.target.value));
+  await loadBusinessPage().catch(e=>toast(e.message));
+  return;
+ }
 
  if(['tl-end','tl-days','tl-grain'].includes(event.target.id)){await timelineUI.change(event.target);return;}
  if (event.target.id === "department-filter") {await searchEmployees(1);return;}
@@ -2418,9 +2464,9 @@ async function loadDetailPage(key,page,size){
  if(dialog?.dataset.taskId!==taskID||!target)return;
  const generation=beginListRequest(target);setListPage(key,page,size);const params=listParams(key),projectID=state.project.id;
  let path;if(kind==='detail-bugs'){path=`/projects/${projectID}/tasks`;params.set('parent_requirement_id',taskID);}else{path=`/projects/${projectID}/${kind==='detail-events'?'events':kind==='detail-runs'?'runs':'artifacts'}`;params.set('task_id',taskID);if(kind==='detail-runs')params.set('summary','true');}
- const result=await api(`${path}?${params}`);if(state.project?.id!==projectID||dialog!==$('dialog')||dialog.dataset.taskId!==taskID||!currentListRequest(target,generation))return;businessLists.set(listScope(key),result);
+ const result=await readPageWindow(page,number=>{params.set('page',String(number));return api(`${path}?${params}`);});if(state.project?.id!==projectID||dialog!==$('dialog')||dialog.dataset.taskId!==taskID||!currentListRequest(target,generation))return;businessLists.set(listScope(key),result);
  const rows=kind==='detail-bugs'?relatedBugRows(result.items):kind==='detail-events'?detailEventRows(result.items):kind==='detail-runs'?taskRunRows(result.items):detailArtifactRows(result.items);
- patchKeyedHTML(target,rows+pagerHTML(result,key));
+ patchKeyedHTML(target,rows+moreHTML(result,key));
 }
 function testingDetails(t,tasks=[]) {
  let html = '';
@@ -2428,7 +2474,7 @@ function testingDetails(t,tasks=[]) {
  if (t.parent_requirement_id) html += `<section class="detail-section"><h3>需求测试 Bug</h3>${action('open-task',escape(tasks.find(v=>v.id===t.parent_requirement_id)?.title || t.parent_requirement_id),'',`data-id="${escape(t.parent_requirement_id)}"`)}<p class="mono small">${escape(t.bug_context?.branch)} · ${escape(t.bug_context?.sha)}</p><p class="hint">评审基于提起时的需求 R${t.bug_context?.revision} 与提测版本；修复需合回所属需求的开发分支。</p></section>`;
  else if (t.kind === 'bug') html += '<p class="hint">平台 Bug · 不关联某个需求</p>';
  const bugs = tasks.filter(b=>b.parent_requirement_id === t.id),related=listResult(`detail-bugs:${t.id}`);
- if (related.total||bugs.length) html += `<section class="detail-section"><h3>关联 Bug · ${related.open_total??bugs.filter(b=>!taskFinished(b)).length} 个未解决 / 共 ${related.total||bugs.length} 个</h3><p class="hint">全部 Bug 由产品验证解决或明确关闭后，需求进入待复测；测试通过后才能上线。</p><div id="task-detail-bugs">${relatedBugRows(bugs)}${pagerHTML(related,`detail-bugs:${t.id}`)}</div></section>`;
+ if (related.total||bugs.length) html += `<section class="detail-section"><h3>关联 Bug · ${related.open_total??bugs.filter(b=>!taskFinished(b)).length} 个未解决 / 共 ${related.total||bugs.length} 个</h3><p class="hint">全部 Bug 由产品验证解决或明确关闭后，需求进入待复测；测试通过后才能上线。</p><div id="task-detail-bugs">${relatedBugRows(bugs)}${moreHTML(related,`detail-bugs:${t.id}`)}</div></section>`;
  if (t.test_verification) html += `<section class="detail-section"><h3>${t.parent_requirement_id?'修复验证':'测试通过记录'}</h3><p class="mono small">${escape(t.test_verification.sha)} · ${escape(t.test_verification.environment)}</p><p class="prewrap">${escape(t.test_verification.note)}</p><p class="hint">${escape(t.test_verification.actor)} · ${date(t.test_verification.at)}</p></section>`;
  return html;
 }
@@ -2442,5 +2488,5 @@ async function testingForm(taskID,operation) {
 
 function testingQueueHTML() {
  const tasks=(state.context?.tasks || []).filter(t=>['testing','fixing','retest','verifying'].includes(t.status));
- return `<h2 class="section-label">测试与修复 <span class="muted small">${listResult("testing").total} 项</span></h2><div class="review-list">${tasks.length ? tasks.map(t=>`<div class="review-item" data-key="task:${t.id}"><div class="grow"><div class="title">${escape(t.title)}</div><p class="hint">${states[t.status]} · ${t.parent_requirement_id?'需求测试 Bug':'需求 / 平台 Bug'}</p></div>${action('open-task','查看与处理','',`data-id="${escape(t.id)}"`)}</div>`).join('') : '<p class="context-note">暂无等待测试或修复的事项。</p>'}</div>${pagerHTML(listResult('testing'),'testing')}<div class="divider"></div>`;
+ return `<h2 class="section-label">测试与修复 <span class="muted small">${listResult("testing").total} 项</span></h2><div class="review-list">${tasks.length ? tasks.map(t=>`<div class="review-item" data-key="task:${t.id}"><div class="grow"><div class="title">${escape(t.title)}</div><p class="hint">${states[t.status]} · ${t.parent_requirement_id?'需求测试 Bug':'需求 / 平台 Bug'}</p></div>${action('open-task','查看与处理','',`data-id="${escape(t.id)}"`)}</div>`).join('') : '<p class="context-note">暂无等待测试或修复的事项。</p>'}</div>${moreHTML(listResult('testing'),'testing')}<div class="divider"></div>`;
 }

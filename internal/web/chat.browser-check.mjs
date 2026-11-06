@@ -98,6 +98,7 @@ try {
   assert.equal(await page.locator(".answer-content pre code").textContent(), "const project = '<mall_server>';\n");
   assert.equal(await page.locator(".answer-content [href^='javascript:'], .answer-content img[onerror]").count(), 0);
   assert.equal(await page.evaluate(() => window.markdownAttack), undefined);
+  assert.equal(await page.locator(".chat-page [data-pager], .chat-page [data-page-size], .chat-page .list-more").count(), 0);
   report.markdown = "headings, bold, lists, code, table, links and blockquote passed";
   report.unsafe_markup = "removed or escaped";
   const input = page.locator("textarea[name=question]");
@@ -214,6 +215,34 @@ try {
   await page.locator("#run-run_auto").waitFor();
   assert.equal(await page.locator('[data-run-id="run_auto"] .user-question').count(), 0);
   report.collaboration_reload = "assistant-only result restored without page overflow";
+
+  const baseline = Date.now() - 120000;
+  for (let i = 0; i < 22; i++) {
+    runs.push({ ...runs[0], id: `older-${i}`, started_at: baseline - i, prompt: `更早的消息 ${i}` });
+    runs.push({ ...runs[0], id: `separate-${i}`, conversation_id: `separate-${i}`,
+      conversation_title: `其他会话 ${i}`, started_at: baseline - i - 1000 });
+  }
+  await page.reload();
+  await page.getByRole("button", { name: "项目问答", exact: true }).click();
+  const earlier = page.getByRole("button", { name: "加载更早消息", exact: true });
+  const moreConversations = page.getByRole("button", { name: "加载更多会话", exact: true });
+  await earlier.waitFor();
+  await input.fill("加载历史后保留这份草稿");
+  const recent = page.locator('[data-run-id="run_history"]');
+  await recent.waitFor();
+  await earlier.click();
+  await page.locator('[data-run-id="older-21"]').waitFor();
+  assert.equal(await recent.count(), 1);
+  assert.equal(await input.inputValue(), "加载历史后保留这份草稿");
+  assert.equal(await earlier.count(), 0);
+  await moreConversations.click();
+  await page.locator('[data-action="select-conversation"][data-id="separate-21"]').waitFor();
+  assert.equal(await other.count(), 1);
+  assert.equal(await moreConversations.count(), 0);
+  assert.equal(await page.locator(".chat-page [data-pager], .chat-page [data-page-size]").count(), 0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  report.progressive_history = "short chat has no paging controls; loading older messages and conversations keeps existing items and the draft";
   assert.deepEqual(errors, []);
   assert(reads < 32, "multiple concurrent polling loops were started for one run");
   report.browser_errors = errors;

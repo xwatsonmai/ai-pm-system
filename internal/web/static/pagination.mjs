@@ -5,6 +5,44 @@ export function pagerHTML(result, key, {unit='项'}={}) {
  const {total=0,page=1,page_size=20}=result, pages=Math.max(1,Math.ceil(total/page_size));
  return `<nav class="list-pagination" aria-label="列表分页" data-pager="${escape(key)}"><span class="hint">共 ${total} ${escape(unit)} · 第 ${page} / ${pages} 页</span><div class="row"><label class="hint">每页 <select data-page-size="${escape(key)}" aria-label="每页条数">${[20,50,100].map(size=>`<option value="${size}" ${size===page_size?'selected':''}>${size}</option>`).join('')}</select></label><button type="button" data-action="list-page" data-list="${escape(key)}" data-page="${page-1}" ${page<=1?'disabled':''}>上一页</button><button type="button" data-action="list-page" data-list="${escape(key)}" data-page="${page+1}" ${page>=pages?'disabled':''}>下一页</button></div></nav>`;
 }
+
+export function hasMore(result) {
+  return Boolean(result && result.page * result.page_size < result.total);
+}
+
+export function moreHTML(result, key, label = '加载更多') {
+  if (!hasMore(result)) return '';
+  return `<button type="button" class="ghost list-more" data-key="more:${escape(key)}" data-action="list-more" data-list="${escape(key)}" data-page="${result.page + 1}">${escape(label)}</button>`;
+}
+
+// Refresh the records the user has opened, keeping each server request bounded.
+export async function readPageWindow(page, fetchPage) {
+  const first = await fetchPage(1);
+  const last = Math.min(page, Math.max(1, Math.ceil(first.total / first.page_size)));
+  if (!(last > 1)) return first;
+
+  const items = [];
+  const seen = new Set();
+  const text = [];
+  let truncated = false;
+  for (let number = 1; number <= last; number++) {
+    const result = number === 1 ? first : await fetchPage(number);
+    for (const item of result.items || []) {
+      const key = typeof item === 'string' ? item : item.id ?? item.seq ?? item.user_id ?? item.user?.id ?? item.task?.id;
+      if (key != null && seen.has(key)) continue;
+      if (key != null) seen.add(key);
+      items.push(item);
+    }
+    if (result.text) text.push(result.text);
+    truncated ||= Boolean(result.truncated);
+  }
+  return {
+    ...first,
+    items,
+    page: last,
+    ...(typeof first.text === 'string' ? {text: text.join('\n'), truncated} : {}),
+  };
+}
 const markup = new WeakMap();
 const sameKind = (a,b) => a.nodeType===b.nodeType && a.nodeName===b.nodeName && a.namespaceURI===b.namespaceURI;
 function keyOf(node,keyAttribute) {
