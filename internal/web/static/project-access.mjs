@@ -42,7 +42,8 @@ export function updateSelection(selected, id, checked) {
 
 export function mountProjectAccess({api,modal,closeModal,getModalRevision=()=>0,getProject,getAccess,onAccessChange,heading,field,action,escape,toast}) {
   const caches = new Map(), pickers = new WeakMap(), roleDrafts=new Map();
-  let revision = 0, modalRequest = 0, searchTimer;
+  const searchTimers = new WeakMap();
+  let revision = 0, modalRequest = 0;
   const cache = project => {
     if (!caches.has(project)) caches.set(project,{rolePage:1,memberPage:1,roleQuery:'',memberQuery:'',roles:[],members:[]});
     return caches.get(project);
@@ -186,14 +187,23 @@ export function mountProjectAccess({api,modal,closeModal,getModalRevision=()=>0,
   });
   document.addEventListener('input',event=>{
     const el=event.target;
+    let search;
     if(el.matches('[data-role-search]')){
       const form=el.closest('form'),s=pickers.get(form);if(!s)return;
-      s.q=el.value;s.page=1;clearTimeout(searchTimer);searchTimer=setTimeout(()=>loadPicker(form).catch(e=>toast(e.message)),250);
+      s.generation++;s.q=el.value;s.page=1;
+      form.querySelector('[data-action=access-picker-page]')?.remove();
+      search=()=>loadPicker(form);
     }else if(el.matches('[data-access-search]')){
       const project=getProject()?.id,c=cache(project),kind=el.dataset.accessSearch;
-      if(kind==='roles'){c.roleQuery=el.value;c.rolePage=1;}else{c.memberQuery=el.value;c.memberPage=1;}
-      clearTimeout(searchTimer);searchTimer=setTimeout(()=> (kind==='roles'?loadRoles(project):loadMembers(project)).catch(e=>toast(e.message)),250);
-    }
+      if(kind==='roles'){revision++;c.roleQuery=el.value;c.rolePage=1;}
+      else{c.memberGeneration=(c.memberGeneration||0)+1;c.memberQuery=el.value;c.memberPage=1;}
+      el.closest('section').querySelector('[data-action=access-page]')?.remove();
+      search=()=>kind==='roles'?loadRoles(project):loadMembers(project);
+    }else return;
+    clearTimeout(searchTimers.get(el));
+    searchTimers.set(el,setTimeout(()=>{
+      if(el.isConnected)search().catch(e=>toast(e.message));
+    },250));
   });
   return {page,load,loadMembers,memberFields,mountMemberForm,memberInput,click,submit};
 }
