@@ -470,9 +470,6 @@ label {
 .role-options .role-checks { flex-wrap: wrap; max-height: 250px; overflow: auto; }
 .responsibility-checks > .hint { width: 100%; margin-bottom: 0; }
 .role-selected-item { cursor: pointer; }
-.access-pagination { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 14px 0; font-size: 12px; color: var(--muted); }
-.access-pagination label { display: flex; align-items: center; gap: 6px; margin: 0; }
-.access-pagination select { width: auto; padding: 5px; }
 @media (max-width: 600px) {
   .role-row, .access-page .member-row { align-items: flex-start; flex-wrap: wrap; }
   .role-row > .grow, .access-page .member-row > .grow { flex-basis: 100%; }
@@ -3022,9 +3019,9 @@ details.rc-card > summary::-webkit-details-marker { display: none; }
 .version-picker-panel [data-version-search]{width:100%;min-width:0;max-width:none;flex:none;padding:8px 10px;font-size:13px}
 .version-picker-panel [data-version-options]{width:100%;min-width:0;max-width:none;min-height:160px;padding:4px;font-size:13px}
 .version-picker-panel [data-version-options] option{padding:7px 8px}
-.version-picker-pages{display:flex;align-items:center;flex-wrap:wrap;gap:6px;border-top:1px solid var(--line);padding-top:9px}
-.version-picker-pages span{margin-right:auto;color:var(--muted);font-size:12px}
-.version-picker-pages button{padding:5px 9px;font-size:12px}
+.list-more { max-width: 100%; margin-block: 4px; font-size: 12px; }
+.chat-page .list-more { white-space: normal; }
+.conversation-list { overflow-x: hidden; }
 .version-picker-panel [data-version-error]{margin:0;overflow-wrap:anywhere}
 @media(max-width:760px){.toolbar .version-picker--compact{flex:1 1 140px}}
 

@@ -1,4 +1,4 @@
-import {patchKeyedHTML,pageQuery} from './pagination.mjs';
+import {patchKeyedHTML,pageQuery,hasMore,readPageWindow} from './pagination.mjs';
 
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const short=id=>String(id||'').replace(/^\w+_/,'').slice(0,6).toUpperCase();
@@ -97,18 +97,14 @@ export function mountVersionLineage({api,getProject,getDefaultVersion=()=>'',can
  function page(){
   return `<section class="page lineage-page" data-project="${esc(getProject()?.id)}"><header class="ln-heading"><h1>版本谱系</h1><p>看清版本范围与需求演进</p><label class="ln-search">${icon('search')}<input type="search" maxlength="120" placeholder="搜索需求或 Bug" aria-label="搜索谱系需求" data-ln-search></label></header><div class="ln-workspace"><aside class="ln-version-index" aria-label="项目版本目录"><h2>版本</h2><div class="ln-version-list"></div><div class="ln-version-pages"></div></aside><section class="ln-stage" tabindex="0" aria-label="版本谱系画布，方向键移动，加减号缩放，数字 0 适应视图"><div class="ln-message" role="status" aria-live="polite"><span data-ln-message-text>正在加载版本…</span><button type="button" data-ln="retry" hidden>重新读取</button></div><div class="ln-scene"><svg class="ln-edges" aria-hidden="true"></svg><div class="ln-edge-labels"></div><div class="ln-version-root"></div><div class="ln-nodes"></div></div><div class="ln-load-status"></div><footer class="ln-canvas-footer"><div class="ln-legend"><span>关系图例</span><span class="ln-legend-item">包含 / 子需求</span><span class="ln-legend-item is-bug">关联 Bug</span><span class="ln-legend-item is-cross">跨版本引用 · 不计入统计</span></div><div class="ln-zoom">${control('zoom-out','缩小',icon('minus'))}<output aria-label="当前缩放">100%</output>${control('zoom-in','放大',icon('plus'))}${control('fit','适应视图',icon('arrows-maximize'))}</div><button type="button" class="ln-minimap" data-ln="map" aria-label="总览，点击定位画布"><svg aria-hidden="true"></svg></button></footer></section></div></section>`;
  }
- function pager(result,kind){
-  if(result.total<=result.page_size)return '';
-  return `${control(kind,'上一页',icon('chevron-left'),`data-page="${result.page-1}" ${result.page<=1?'disabled':''}`)}<span>${result.page} / ${Math.ceil(result.total/result.page_size)}</span>${control(kind,'下一页',icon('chevron-right'),`data-page="${result.page+1}" ${result.page*result.page_size>=result.total?'disabled':''}`)}`;
- }
  function renderVersions(s){
   if(!active(s))return;
   patchKeyedHTML(s.root.querySelector('.ln-version-list'),s.versions.items.map(v=>`<button type="button" class="ln-version-choice ${v.id===s.version?'is-selected':''}" data-key="${esc(v.id)}" data-ln="version" data-version="${esc(v.id)}" aria-current="${v.id===s.version?'true':'false'}"><span class="ln-version-dot" aria-hidden="true"></span><span><strong>${esc(v.name)}</strong><span class="ln-version-phase ${esc(v.status)}">${esc(versionStatuses[v.status]||v.status)}</span><small>${v.requirements} 需求 · ${v.bugs} Bug</small></span></button>`).join('')||'<p class="ln-empty-index">暂无项目版本</p>');
-  patchKeyedHTML(s.root.querySelector('.ln-version-pages'),pager(s.versions,'versions-page'));
+  patchKeyedHTML(s.root.querySelector('.ln-version-pages'),hasMore(s.versions)?control('versions-page','加载更多版本','加载更多版本',`data-page="${s.versions.page+1}" class="ghost list-more"`):'');
  }
  async function loadVersions(s,page=1){
   const epoch=++s.versionRequest;
-  const result=await api(`/projects/${encodeURIComponent(s.project)}/lineage/versions?${pageQuery(page,12)}`);
+  const result=await readPageWindow(page, number=>api(`/projects/${encodeURIComponent(s.project)}/lineage/versions?${pageQuery(number,12)}`));
   if(!active(s)||epoch!==s.versionRequest)return false;
   s.versions=result;renderVersions(s);return true;
  }

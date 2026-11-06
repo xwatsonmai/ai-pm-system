@@ -37,7 +37,7 @@ try{
  await api(`/tasks/${full.id}`,{title:full.title+' 已更新',description:full.description,kind:full.kind,priority:full.priority,version:full.version,request_id:'edit-poll'},'PUT');
  await page.waitForFunction(()=>document.querySelector('#task-table')?.textContent.includes('已更新'),{timeout:18000});
  assert(await page.evaluate(()=>window.savedShell===document.querySelector('.layout')&&window.savedSearch===document.querySelector('#task-search')&&window.savedRow.isConnected&&window.savedTitle.isConnected&&document.activeElement===window.savedSearch));
- await page.locator(`[data-task-row][data-id="${id}"]`).click();await page.locator('.detail-title').waitFor();assert(await page.locator('#task-detail-events [data-pager]').count());
+ await page.locator(`[data-task-row][data-id="${id}"]`).click();await page.locator('.detail-title').waitFor();assert.equal(await page.locator('#task-detail-events [data-pager], #task-detail-events [data-action=list-more]').count(),0);
  await page.getByRole('button',{name:'关闭',exact:true}).click();
  // A long requirement room starts with a bounded window; older windows retain
  // the actual input node, draft and current workflow state.

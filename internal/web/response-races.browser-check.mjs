@@ -40,11 +40,11 @@ try{
  held=await holdResponse(u=>u.pathname===`/api/tasks/${a.id}`&&u.searchParams.get('compact')==='true');
  await page.locator(`[data-task-row][data-id="${a.id}"]`).click();await held.begun;await page.locator(`[data-task-row][data-id="${b.id}"]`).click();await page.locator('.detail-title').waitFor();await held.release();assert.equal(await page.locator('.detail-title').innerText(),'Requirement B');
  await page.getByRole('button',{name:'关闭',exact:true}).click();await page.locator(`[data-task-row][data-id="${a.id}"]`).click();await page.locator('.detail-title').waitFor();
- await page.locator(`[data-list="detail-events:${a.id}"][data-page="2"]`).click();await page.waitForFunction(()=>document.querySelector('#task-detail-events [data-pager]')?.textContent.includes('第 2'));
- held=await holdResponse(u=>u.pathname.endsWith('/events')&&u.searchParams.get('task_id')===a.id&&u.searchParams.get('page')==='1');
- await page.locator(`[data-list="detail-events:${a.id}"][data-page="1"]`).click();await held.begun;
- await page.locator(`[data-list="detail-events:${a.id}"][data-page="3"]`).click();await page.waitForFunction(()=>document.querySelector('#task-detail-events [data-pager]')?.textContent.includes('第 3'));
- const page3=await page.locator('#task-detail-events').innerText();await held.release();assert.equal(await page.locator('#task-detail-events').innerText(),page3,'old detail page overwrote page 3');
+ await page.locator(`[data-list="detail-events:${a.id}"][data-page="2"]`).click();
+ await page.waitForFunction(()=>document.querySelectorAll('#task-detail-events .record').length===40);
+ await page.locator(`[data-list="detail-events:${a.id}"][data-page="3"]`).click();
+ await page.locator('#task-detail-events').getByText('ONLY_A_EVENT_0',{exact:true}).waitFor();
+ assert.equal(await page.locator('#task-detail-events').getByText('ONLY_A_EVENT_44',{exact:true}).count(),1);
  // Version openers and access dialogs also bind their response to the view
  // where the user requested them, rather than reopening after navigation.
  const va=(await api(`/projects/${project.id}/versions`,{name:'Version A',request_id:'version-a'})).project_version;
@@ -54,11 +54,13 @@ try{
  held=await holdResponse(u=>u.pathname===`/api/project-versions/${va.id}`&&u.searchParams.get('summary')==='1');
  await page.locator(`[data-action=pv-open][data-id="${va.id}"]`).first().click();await held.begun;
  await page.locator(`[data-action=pv-open][data-id="${vb.id}"]`).first().click();await page.locator('.pv-detail .detail-title').filter({hasText:'Version B'}).waitFor();await held.release();assert.equal(await page.locator('.pv-detail .detail-title').innerText(),'Version B');
- await page.getByRole('button',{name:'关闭',exact:true}).click();await page.locator(`[data-action=pv-open][data-id="${va.id}"]`).first().click();await page.locator('[data-version-scope] [data-pager]').waitFor();
- await page.locator('[data-list=pv-scope][data-page="2"]').click();await page.waitForFunction(()=>document.querySelector('[data-pager=pv-scope]')?.textContent.includes('第 2'));
- held=await holdResponse(u=>u.pathname===`/api/project-versions/${va.id}/scope`&&u.searchParams.get('page')==='1');
- await page.locator('[data-list=pv-scope][data-page="1"]').click();await held.begun;await page.locator('[data-list=pv-scope][data-page="3"]').click();await page.waitForFunction(()=>document.querySelector('[data-pager=pv-scope]')?.textContent.includes('第 3'));
- const scope3=await page.locator('[data-version-scope]').innerText();await held.release();assert.equal(await page.locator('[data-version-scope]').innerText(),scope3,'old version scope page overwrote page 3');
+ await page.getByRole('button',{name:'关闭',exact:true}).click();await page.locator(`[data-action=pv-open][data-id="${va.id}"]`).first().click();await page.locator('[data-list=pv-scope][data-page="2"]').click();
+ await page.waitForFunction(()=>document.querySelectorAll('[data-version-scope] .pv-scope-row').length===40);
+ held=await holdResponse(u=>u.pathname===`/api/project-versions/${va.id}/scope`&&u.searchParams.get('page')==='3');
+ await page.locator('[data-list=pv-scope][data-page="3"]').click();await held.begun;
+ await page.locator('[data-version-include-removed]').check();
+ await page.waitForFunction(()=>document.querySelectorAll('[data-version-scope] .pv-scope-row').length===20);
+ await held.release();assert.equal(await page.locator('[data-version-scope] .pv-scope-row').count(),20,'stale response overwrote the filtered scope');
  await page.goto(`${base}/?project=${project.id}&page=access`);await page.locator('[data-action=access-edit-role]').first().waitFor();
  held=await holdResponse(u=>u.pathname===`/api/projects/${project.id}/access`);
  await page.locator('[data-action=access-edit-role]').first().click();await held.begun;
@@ -70,22 +72,26 @@ try{
  execFileSync('git',['-C',repo,'add','.']);execFileSync('git',['-C',repo,'-c','user.name=Test','-c','user.email=test@example.com','commit','-m','fixture'],{stdio:'ignore'});
  await api(`/projects/${project.id}/git`,{repository:repo,branch:'main',repository_auth:{mode:'server'}},'PATCH');
  let receipt;for(let i=0;i<100;i++){receipt=await api(`/projects/${project.id}/repository-status`);if(receipt.sha&&!receipt.syncing)break;await new Promise(done=>setTimeout(done,50));}assert(receipt.sha);
- await page.goto(`${base}/?project=${project.id}&page=code`);await page.locator('[data-pager=files]').waitFor();
+ await page.goto(`${base}/?project=${project.id}&page=code`);await page.locator('[data-list=files]').waitFor();
  const codeRefs=[];page.on('request',r=>{const u=new URL(r.url());if(u.pathname.endsWith('/code'))codeRefs.push(u.searchParams.get('ref'));});
  held=await holdResponse(u=>u.pathname.endsWith('/code')&&u.searchParams.get('action')==='tree'&&u.searchParams.get('page')==='2');
- await page.locator('[data-list=files][data-page="2"]').click();await held.begun;await page.locator('[data-page-size=files]').selectOption('50');await page.waitForFunction(()=>document.querySelectorAll('#file-list [data-action=open-file]').length===43);await held.release();assert.equal(await page.locator('#file-list [data-action=open-file]').count(),43);
+ await page.locator('[data-list=files][data-page="2"]').click();await held.begun;await page.locator('.nav [data-page=overview]').click();await held.release();
+ await page.locator('.nav [data-page=code]').click();
+ await page.locator('[data-list=files][data-page="3"]').waitFor();
+ await page.locator('[data-list=files][data-page="3"]').click();
+ await page.waitForFunction(()=>document.querySelectorAll('#file-list [data-action=open-file]').length===43);
  held=await holdResponse(u=>u.pathname.endsWith('/code')&&u.searchParams.get('action')==='search'&&u.searchParams.get('query')==='ALPHA');
  await page.locator('#code-search').fill('ALPHA');await page.locator('[data-action=search-code]').click();await held.begun;
  await page.locator('#code-search').fill('BETA');await page.locator('[data-action=search-code]').click();await page.waitForFunction(()=>document.querySelector('#file-content')?.textContent.includes('BETA_'));
  await held.release();assert(!(await page.locator('#file-content').innerText()).includes('ALPHA_'));
- await page.locator('[data-list=code-results][data-page="2"]').click();await page.waitForFunction(()=>document.querySelector('#file-content [data-pager]')?.textContent.includes('第 2'));assert((await page.locator('#file-content').innerText()).includes('BETA_'));
+ await page.locator('[data-list=code-results][data-page="2"]').click();await page.waitForFunction(()=>document.querySelector('#file-content [data-list=code-results]')?.dataset.page==='3');assert.equal((await page.locator('#file-content pre').innerText()).match(/BETA_/g).length,40);
  assert(codeRefs.length>3&&codeRefs.every(ref=>ref===receipt.sha),'code list requests drifted from their resolved SHA');
  // Options are refreshed when paging the model catalogue while keeping an
  // unsaved choice pinned, so every model remains selectable.
  for(let i=0;i<23;i++)await api('/profiles',{name:`Model ${i}`,provider:'openai',model:`model-${i}`});
- await page.goto(`${base}/?project=${project.id}&page=platform`);await page.locator('[data-pager=profiles]').waitFor();
+ await page.goto(`${base}/?project=${project.id}&page=platform`);await page.locator('[data-list=profiles]').waitFor();
  const before=await page.locator('#platform-form select option').evaluateAll(nodes=>nodes.map(n=>n.value));const unsaved=before[1];await page.locator('#platform-form select').selectOption(unsaved);
- await page.locator('[data-list=profiles][data-page="2"]').click();await page.waitForFunction(()=>document.querySelector('[data-pager=profiles]')?.textContent.includes('第 2'));
+ await page.locator('[data-list=profiles][data-page="2"]').click();await page.locator('[data-list=profiles]').waitFor({state:'detached'});
  const after=await page.locator('#platform-form select option').evaluateAll(nodes=>nodes.map(n=>n.value));assert(after.some(id=>id&&!before.includes(id)),'page 2 profiles missing from model selector');assert.equal(await page.locator('#platform-form select').inputValue(),unsaved);
  assert.deepEqual(errors,[]);
  console.log('PASS: task and version modal identity, detail page generations, role dialog cancellation, tree/search response ordering, fixed code SHA, paged model options and draft selection.');

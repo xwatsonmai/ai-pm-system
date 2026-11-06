@@ -50,6 +50,51 @@ try{
  await setRole(['chat','tasks'],['collaboration.create']);await operator.locator('.composer').waitFor({state:'hidden',timeout:15000});assert.equal(await operator.locator('[data-action=retry-run]').count(),0);let revokedPosts=0;const revokedListener=request=>{if(request.method()==='POST'&&new URL(request.url()).pathname.endsWith('/runs'))revokedPosts++;};operator.on('request',revokedListener);await operator.locator('#chat-form').evaluate(form=>form.requestSubmit());await operator.evaluate(()=>new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))));operator.off('request',revokedListener);assert.equal(revokedPosts,0);assert((await operator.locator('.chat-feed').innerText()).includes('问答可用'));report.revocation='有任务页仍不能创建需求/迭代/人工分析；撤权后旧建议按钮和已开Bug表单消失，问答停止发起而历史可读';
  // Search and paginate roles without losing the independent action draft.
  for(let n=0;n<22;n++){const access=await api(admin,`/projects/${project.id}/access`);await api(admin,`/projects/${project.id}/roles`,{name:`分页角色${n}`,description:'fixture',pages:[],actions:[],version:access.version});}
+ await nav(admin,'access');
+ const moreRoles=admin.locator('[data-kind=roles][data-page="2"]');
+ const roleSearch=admin.locator('[data-access-search=roles]');
+ const roleList=admin.locator('#project-roles .role-row');
+ await moreRoles.waitFor();
+ const clockStart=new Date('2026-11-06T04:00:00Z');
+ await admin.clock.install({time:clockStart});
+ await admin.clock.pauseAt(new Date(clockStart.getTime()+5000));
+ let completeOldPage;
+ const oldPage=new Promise(resolve=>{completeOldPage=resolve;});
+ let releaseOldPage;
+ const holdPage=new Promise(resolve=>{releaseOldPage=resolve;});
+ const rolePages=/\/api\/projects\/[^/]+\/roles\?/;
+ await admin.route(rolePages,async route=>{
+   const query=new URL(route.request().url()).searchParams;
+   if(query.get('page')==='2'&&!query.get('q')){
+     const response=await route.fetch();
+     completeOldPage();
+     await holdPage;
+     await route.fulfill({response});
+   }else await route.continue();
+ });
+ try{
+   await moreRoles.evaluate(button=>button.click());
+   await oldPage;
+   await roleSearch.evaluate(input=>{
+     input.value='分页';
+     input.dispatchEvent(new Event('input',{bubbles:true}));
+   });
+   const oldResponse=admin.waitForResponse(response=>rolePages.test(response.url())&&new URL(response.url()).searchParams.get('page')==='2');
+   releaseOldPage();
+   await (await oldResponse).finished();
+   assert.equal(await moreRoles.count(),0);
+   const searched=admin.waitForResponse(response=>rolePages.test(response.url())&&new URL(response.url()).searchParams.get('q')==='分页');
+   await admin.clock.runFor(250);
+   await (await searched).finished();
+   await moreRoles.waitFor();
+   assert.equal(await roleList.count(),20);
+   assert((await roleList.allTextContents()).every(text=>text.includes('分页角色')));
+   report.searchRace='延迟的旧分页响应不会覆盖搜索或恢复旧页码';
+ }finally{
+   releaseOldPage();
+   await admin.unroute(rolePages);
+   await admin.clock.resume();
+ }
  await nav(admin,'access');await Promise.all([admin.waitForResponse(response=>{const url=new URL(response.url());return url.pathname.endsWith('/roles')&&url.searchParams.get('q')==='运营'&&response.status()===200;}),admin.locator('[data-access-search=roles]').fill('运营')]);await admin.waitForFunction(()=>document.querySelectorAll('#project-roles .role-row').length===1);await admin.locator('.role-row').filter({hasText:'运营'}).locator('[data-action=access-edit-role]').click();await admin.locator('#access-role-form [name=actions][value="analysis.run"]').check();await admin.getByRole('button',{name:'取消',exact:true}).click();await admin.locator('[data-access-search=roles]').fill('');await admin.locator('[data-kind=roles][data-page="2"]').click();await Promise.all([admin.waitForResponse(response=>{const url=new URL(response.url());return url.pathname.endsWith('/roles')&&url.searchParams.get('q')==='运营'&&response.status()===200;}),admin.locator('[data-access-search=roles]').fill('运营')]);await admin.waitForFunction(()=>document.querySelectorAll('#project-roles .role-row').length===1);await admin.locator('.role-row').filter({hasText:'运营'}).locator('[data-action=access-edit-role]').click();assert.equal(await admin.locator('#access-role-form [name=actions][value="analysis.run"]').isChecked(),true);assert.equal(await admin.locator('#access-role-form').getAttribute('data-project'),project.id);await admin.getByRole('button',{name:'取消',exact:true}).click();
  await operator.setViewportSize({width:390,height:844});await operator.screenshot({path:join(output,'operator-mobile.png')});assert(await operator.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));report.drafts='角色操作权限草稿跨关闭/搜索/分页保留并绑定原项目；390px无溢出';
  assert.deepEqual(errors,[]);await writeFile(join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));

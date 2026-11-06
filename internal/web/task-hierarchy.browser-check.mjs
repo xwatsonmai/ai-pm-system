@@ -55,8 +55,8 @@ for i in range(25):add('tree-other-%02d'%i,'独立需求 %02d'%i)
  const choice=page.locator('#pv-assign-form input[name=task_ids][value=tree-bug-44]');await choice.check();
  assert.match(await page.locator('[data-selection-count]').innerText(),/已选择 1 项/);
  await page.locator('#pv-assign-form [data-list=pv-assign][data-page="2"]').click();await page.waitForFunction(()=>document.querySelector('#pv-assign-form')?.dataset.selectionPage==='2');
- await page.locator('#pv-assign-form input[name=task_ids]').first().check();assert.match(await page.locator('[data-selection-count]').innerText(),/已选择 2 项/);
- await page.locator('#pv-assign-form [data-list=pv-assign][data-page="1"]').click();await page.waitForFunction(()=>document.querySelector('#pv-assign-form')?.dataset.selectionPage==='1');assert(await choice.isChecked());
+ await page.locator('#pv-assign-form input[name=task_ids]').nth(20).check();assert.match(await page.locator('[data-selection-count]').innerText(),/已选择 2 项/);
+ assert(await choice.isChecked());
  await page.getByRole('button',{name:'取消',exact:true}).click();assert.equal(await page.locator('#task-table input[type=checkbox]').count(),0);
  await rootToggle().click();await page.locator('[data-task-row][data-id=tree-bug-44]').waitFor();
  await page.locator('#task-search').focus();
