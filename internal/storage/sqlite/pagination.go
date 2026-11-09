@@ -21,6 +21,15 @@ const pendingReview = `(COALESCE(json_extract(t.payload,'$.change_request_id'),'
 const attentionTask = `(` + taskStatus + ` NOT IN ('done','resolved','closed','rejected','canceled') AND (COALESCE(json_extract(t.payload,'$.blocker'),'')<>'' OR ` + taskStatus + ` IN ('testing','retest','verifying','pending_release','review') OR (` + taskStatus + `='aligning' AND COALESCE(json_extract(t.payload,'$.change_request_id'),'')='') OR (` + taskStatus + `='clarify' AND ` + reviewCurrent + ` AND json_extract(r.payload,'$.status') IN ('ready_to_confirm','needs_input','rejection_pending','failed'))))`
 const taskJoin = ` FROM tasks t LEFT JOIN requirement_reviews r ON r.task_id=t.id `
 
+// Product decisions come first, followed by other actionable work, work in
+// progress and finished records. A background/stale review is not a decision
+// waiting for a person; use the same current-revision rules as the filters.
+const taskListPriority = `CASE
+ WHEN ` + pendingReview + ` OR (` + taskStatus + `='clarify' AND ` + reviewCurrent + ` AND json_extract(r.payload,'$.status')='failed') THEN 0
+ WHEN ` + attentionTask + ` THEN 1
+ WHEN ` + taskStatus + ` IN ('done','resolved','closed','rejected','canceled') THEN 3
+ ELSE 2 END`
+
 // Count and items come from one read transaction, so the pager describes the
 // same snapshot even while another connection writes.
 func queryJSONPage(c context.Context, d *DB, selectSQL, from, where, order string, args []any, q domain.PageQuery) (domain.Page[json.RawMessage], error) {
@@ -123,7 +132,7 @@ func (d *DB) QueryTasks(c context.Context, p string, q domain.TaskListQuery) (do
 	if e != nil {
 		return out, e
 	}
-	raw, e := queryJSONPage(c, d, taskListProjection, taskJoin, where, "COALESCE(json_extract(t.payload,'$.updated_at'),0) DESC,t.id DESC", args, q.PageQuery)
+	raw, e := queryJSONPage(c, d, taskListProjection, taskJoin, where, taskListPriority+" ASC,COALESCE(json_extract(t.payload,'$.updated_at'),0) DESC,t.id DESC", args, q.PageQuery)
 	if e != nil {
 		return out, e
 	}

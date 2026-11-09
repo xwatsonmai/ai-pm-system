@@ -678,7 +678,7 @@ function mountTaskVersionFilter(){
  mountVersionPicker(host,{api,projectID:state.project.id,selected:state.versionFilter,name:'task_version_filter',label:'筛选目标版本',status:'',emptyLabel:'所有版本',compact:true,onChange:value=>{state.versionFilter=value;setListPage('tasks');void loadBusinessPage().catch(e=>toast(e.message));}});
 }
 function tasksPage() {
-  return `<div class="page requirement-pool-page">${heading("需求池", "管理需求、Bug 与追加迭代。", action("new-task", icon("plus") + " 创建需求", "primary"))}<div class="toolbar"><input id="task-search" placeholder="搜索标题、描述或负责人…" aria-label="搜索需求" value="${escape(state.search)}"><select id="task-filter" aria-label="筛选状态"><option value="">所有状态</option><option value="attention" ${state.filter === "attention" ? "selected" : ""}>需要我处理</option><option value="review_pending" ${state.filter === "review_pending" ? "selected" : ""}>待确认${pendingConfirmations() ? `（${pendingConfirmations()}）` : ""}</option>${Object.entries(
+  return `<div class="page requirement-pool-page">${heading("需求池", "待人工处理优先，同类按最近更新时间排序。", action("new-task", icon("plus") + " 创建需求", "primary"))}<div class="toolbar"><input id="task-search" placeholder="搜索标题、描述或负责人…" aria-label="搜索需求" value="${escape(state.search)}"><select id="task-filter" aria-label="筛选状态"><option value="">所有状态</option><option value="attention" ${state.filter === "attention" ? "selected" : ""}>需要我处理</option><option value="review_pending" ${state.filter === "review_pending" ? "selected" : ""}>待确认${pendingConfirmations() ? `（${pendingConfirmations()}）` : ""}</option>${Object.entries(
     states,
   )
     .map(

@@ -35,11 +35,14 @@ nodes AS (
  SELECT n.id,CASE WHEN f.root_id=n.id THEN '' ELSE n.parent_id END parent_id,n.relation
  FROM nodes n JOIN families f ON f.id=n.id
 ), matches AS (
- SELECT t.id,COALESCE(json_extract(t.payload,'$.updated_at'),0) updated_at,CASE WHEN ` + pendingReview + ` THEN 1 ELSE 0 END pending
+ SELECT t.id,COALESCE(json_extract(t.payload,'$.updated_at'),0) updated_at,` + taskListPriority + ` sort_priority,CASE WHEN ` + pendingReview + ` THEN 1 ELSE 0 END pending
  ` + taskJoin + ` WHERE %s
+), branch_matches AS (
+ SELECT tree.id,tree.parent_id,tree.relation,m.updated_at,m.sort_priority,m.pending
+ FROM tree JOIN ancestors a ON a.ancestor_id=tree.id JOIN matches m ON m.id=a.child_id
 ), branches AS (
- SELECT tree.id,tree.parent_id,tree.relation,MAX(m.updated_at) sort_updated,COUNT(*) matching_count,SUM(m.pending) pending_count
- FROM tree JOIN ancestors a ON a.ancestor_id=tree.id JOIN matches m ON m.id=a.child_id GROUP BY tree.id,tree.parent_id,tree.relation
+ SELECT id,parent_id,relation,MIN(sort_priority) sort_priority,COUNT(*) matching_count,SUM(pending) pending_count
+ FROM branch_matches GROUP BY id,parent_id,relation
 ) `
 
 func (d *DB) QueryTaskTree(c context.Context, project string, q domain.TaskTreeQuery) (domain.TaskTreePage, error) {
@@ -81,9 +84,13 @@ func (d *DB) QueryTaskTree(c context.Context, project string, q domain.TaskTreeQ
 		page.Page = (out.Total-1)/page.PageSize + 1
 	}
 	out.Page.Page, out.Page.PageSize = page.Page, page.PageSize
+	// A child needing a decision promotes its whole branch. Only timestamps of
+	// matching items at that priority break ties, so a recently closed sibling
+	// cannot move an older pending decision ahead of a newer one.
 	query := cte + `SELECT ` + taskListProjection + `,b.parent_id,CASE WHEN b.parent_id='' THEN '' ELSE b.relation END,
  EXISTS(SELECT 1 FROM matches m WHERE m.id=b.id),(SELECT COUNT(*) FROM branches children WHERE children.parent_id=b.id),b.matching_count,b.pending_count
- FROM branches b JOIN tasks t ON t.id=b.id WHERE b.parent_id=? ORDER BY b.sort_updated DESC,b.id DESC LIMIT ? OFFSET ?`
+ FROM branches b JOIN tasks t ON t.id=b.id WHERE b.parent_id=? ORDER BY b.sort_priority ASC,
+ (SELECT MAX(m.updated_at) FROM branch_matches m WHERE m.id=b.id AND m.sort_priority=b.sort_priority) DESC,b.id DESC LIMIT ? OFFSET ?`
 	values := append(append([]any{}, base...), q.ParentID, page.PageSize, page.Offset())
 	rows, err := tx.QueryContext(c, query, values...)
 	if err != nil {

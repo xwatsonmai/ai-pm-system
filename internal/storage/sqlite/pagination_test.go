@@ -42,7 +42,7 @@ func TestTaskPaginationSQLFilterSummaryAndStableTies(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if first.Total != 200 || len(first.Items) != 20 || first.Items[0].ID != "t199" || first.Items[0].Description != "" {
+	if first.Total != 200 || len(first.Items) != 20 || first.Items[0].ID != "t198" || first.Items[0].Description != "" {
 		t.Fatal(first)
 	}
 	seen := map[string]bool{}
