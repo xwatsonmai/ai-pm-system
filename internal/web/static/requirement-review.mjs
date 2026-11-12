@@ -113,7 +113,12 @@ export function mountRequirementReview(root, {task,api,userID,messageID = '',onD
   const alignmentDone = () => v?.mode === 'development_alignment' && v.status === 'alignment_completed';
   const closed = () => v?.status==='closed' || taskTerminated(source());
   const changeDone = () => v?.status==='change_canceled' || (v?.mode === 'testing_change' && source().requirement_change?.status !== 'reviewing');
-  const discussing = () => v?.mode !== 'development_alignment' && discussionAvailable(source());
+  const discussing = () => {
+    const current = source();
+    // A submitted requirement can use Q&A while its completed alignment is still in the transcript.
+    const submittedRequirement = current.kind === 'requirement' && Boolean(current.submission?.sha);
+    return discussionAvailable(current) && (v?.mode !== 'development_alignment' || submittedRequirement);
+  };
   const readOnly = () => !discussing() && (closed() || bugReadOnly() || alignmentDone() || changeDone());
   const topicOf = id => (v?.agenda || []).find(t => t.id === id);
   const node = id => [...feed.children].find(child => child.dataset.key === id);
