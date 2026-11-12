@@ -34,7 +34,7 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
   if(fs.existsSync(room)&&fs.readFileSync(room,'utf8')!==m.conversation_id){emit({type:'error',error:'forked requirement session'});finish();return}
   fs.writeFileSync(room,m.conversation_id);
   if(source.mode==='discussion'){
-   if(!source.conversation.some(x=>x.action==='confirm')||!source.conversation.some(x=>x.action==='task_submit')||!m.prompt.includes('日常答疑')){emit({type:'error',error:'missing continuous review/delivery context'});finish();return}
+   if(!['confirm','alignment_reply','task_submit'].every(action=>source.conversation.some(x=>x.action===action))||!m.prompt.includes('日常答疑')){emit({type:'error',error:'missing continuous review/delivery context'});finish();return}
    emit({type:'tool_call',id:'unsafe',name:'create_bug',args:{title:'should never be created'}});return;
   }
   const changing=source.requirement.requirement_change?.status==='reviewing';
@@ -62,6 +62,21 @@ const server=spawn(resolve(process.env.AI_PM_QA_BIN||'bin/ai-pm-requirements-che
 const browser=await chromium.launch({headless:true}),page=await browser.newPage({viewport:{width:1440,height:1050},reducedMotion:'reduce'}),errors=[];
 page.on('pageerror',e=>errors.push(e.message));
 async function api(path,body,method){const r=await fetch(base+'/api'+path,{method:method||(body?'POST':'GET'),headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});const v=await r.json();assert(r.ok,JSON.stringify(v));return v}
+async function mcp(token,name,args){
+ const r=await fetch(base+'/mcp',{
+  method:'POST',
+  headers:{
+   Authorization:`Bearer ${token}`,
+   'Content-Type':'application/json',
+   Accept:'application/json, text/event-stream',
+   'MCP-Protocol-Version':'2025-11-25',
+  },
+  body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}}),
+ });
+ const response=await r.json();
+ assert(r.ok&&!response.error&&!response.result.isError,JSON.stringify(response));
+ return JSON.parse(response.result.content[0].text);
+}
 async function waitReview(id,status){for(let n=0;n<160;n++){const v=await api(`/tasks/${id}/requirement-review`);if(v.status===status)return v;if(v.status==='failed')assert.fail(v.error);await new Promise(done=>setTimeout(done,75))}assert.fail('review never reached '+status)}
 const report={};
 try{
@@ -75,21 +90,34 @@ try{
  const originalSession=room.conversation_id;
  await api(`/tasks/${created.id}/requirement-review`,{action:'confirm',generation:room.generation,request_id:'confirm'});
  const token=(await api(`/projects/${project.id}/tokens`,{name:'本地开发'})).secret;
- const r=await fetch(base+'/mcp',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',Accept:'application/json, text/event-stream','MCP-Protocol-Version':'2025-11-25'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'task_claim',arguments:{task_id:created.id,branch:'feature/location',request_id:'claim'}}})});const claimed=await r.json();assert(!claimed.error&&!claimed.result.isError,JSON.stringify(claimed));
- let task=(await api(`/tasks/${created.id}`)).task;
+ const claimed=await mcp(token,'task_claim',{task_id:created.id,branch:'feature/location',request_id:'claim'});
+ let task=claimed.task;
  await page.goto(base);await page.getByRole('button',{name:'需求池',exact:true}).click();await page.locator('[data-task-row]').filter({hasText:task.title}).click();
  await page.getByRole('button',{name:'问 Agent',exact:true}).click();
  await page.locator('.rc-event').filter({hasText:'认领了开发'}).waitFor();
+ const alignmentArgs={task_id:task.id,claim_id:claimed.claim_id};
+ await mcp(token,'task_request_alignment',{...alignmentArgs,version:String(task.version),revision:String(task.revision),request_id:'ask',body:'请确认本次展示国家还是省市。'});
+ await page.getByText('请确认本次展示国家还是省市。',{exact:true}).waitFor();
+ await page.locator('#review-input').fill('本次只展示国家。');
+ await page.locator('.review-send').click();
+ await page.getByText('回复已提交，等待开发确认',{exact:true}).waitFor();
+ task=(await api(`/tasks/${task.id}`)).task;
+ await mcp(token,'task_resume_development',{...alignmentArgs,version:String(task.version),revision:String(task.revision),request_id:'resume',body:'本次按国家级定位实现。'});
+ const alignmentComplete=page.locator('.rc-event').filter({hasText:'开发代理确认对齐完成'});
+ await alignmentComplete.waitFor();
  await api(`/tasks/${task.id}/actions`,{action:'submit',revision:task.revision,request_id:'submit',submission:{summary:'完成国家级定位',sha:baseline,environment:'本地隔离环境',tests:'定向自测'}});
  task=(await api(`/tasks/${task.id}`)).task;
  await page.locator('.rc-event').filter({hasText:'提交了开发结果'}).waitFor();
+ assert(await page.locator('#review-input').isEditable());
  assert.equal(await page.locator('.rc-status').textContent(),'测试中');
+ assert.equal(await alignmentComplete.count(),1);
  assert.equal(await page.locator('.rc-proposal[data-state=confirmed]').count(),1);
  const png=await page.locator('.rc-title').screenshot();
  await page.locator('.review-file-input').setInputFiles({name:'所在地截图.png',mimeType:'image/png',buffer:png});await page.locator('.review-pending-files').filter({hasText:'所在地截图.png'}).waitFor();
  // Lose the response after saving: retrying the same draft must not duplicate it.
  let lost=false;await page.route(`**/api/tasks/${task.id}/requirement-review*`,async route=>{if(route.request().method()==='POST'&&route.request().postDataJSON()?.action==='discuss'&&!lost){lost=true;await route.fetch();await route.abort('failed')}else await route.continue()});
- await page.locator('#review-input').fill('为什么只显示国家？我不确定是不是 Bug。');await page.locator('.review-send').click();await page.locator('.review-send-error').filter({hasText:'草稿已保留'}).waitFor();await page.locator('.review-send').click();
+ await page.locator('#review-input').fill('当前提测版本把所在地记录到什么粒度？');
+ await page.locator('.review-send').click();await page.locator('.review-send-error').filter({hasText:'草稿已保留'}).waitFor();await page.locator('.review-send').click();
  room=await waitReview(task.id,'answered');await page.locator('.rc-bubble').filter({hasText:'当前提测版本按已确认需求记录到国家级'}).waitFor();
  assert.equal(room.conversation_id,originalSession);assert.equal(room.messages.filter(m=>m.action==='discuss').length,1);assert.equal(room.messages.find(m=>m.action==='discuss').attachments.length,1);
  assert.deepEqual((await api(`/tasks/${task.id}`)).task,task);assert.equal((await api(`/projects/${project.id}/tasks`)).length,1);
@@ -98,7 +126,13 @@ try{
  await page.setViewportSize({width:390,height:844});await page.locator('.review-feed').evaluate(el=>el.scrollTop=el.scrollHeight);await page.screenshot({path:join(output,'discussion-mobile.png')});
  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth&&document.querySelector('.requirement-review').scrollWidth<=innerWidth));
  assert(await page.locator('.review-send').isVisible());assert.equal(await page.locator('#review-input').evaluate(el=>el.readOnly),false);
- report.discussion='原评审/确认/开发/提测均在同一聊天室；图文提问与丢响应重试幂等；任务及交付证据保持一致';
+ const followUp='那页面只显示国家是预期行为吗？';
+ await page.locator('#review-input').fill(followUp);
+ await page.locator('.review-send').click();
+ await page.getByText(followUp,{exact:true}).waitFor();
+ await page.locator('.rc-bubble').filter({hasText:'当前提测版本按已确认需求记录到国家级'}).nth(1).waitFor();
+ assert.deepEqual((await api(`/tasks/${task.id}`)).task,task);
+ report.discussion='原评审、开发对齐和提测后的答疑在同一聊天室；图文提问与丢响应重试幂等；任务及交付证据保持一致';
  report.permissions='真实 worker 调用写工具和正式评审结论均被服务端拒绝；仅保存纠正后的答疑，未新增 Bug';
  report.code='刻意请求 main、开发分支另有未提测提交，实际读取仍固定为原提测 SHA';
  await page.setViewportSize({width:1440,height:1050});await page.getByRole('button',{name:'变更当前需求',exact:true}).click();
