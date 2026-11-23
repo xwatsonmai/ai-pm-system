@@ -42,6 +42,11 @@ let runs = [{ id: "run_history", project_id: project.id, kind: "question", statu
 let reads = 0, contexts = 0, frozen = false, longOutput = false, failRun = false;
 let collaborations = [];
 let activeRun;
+const retries = [];
+const failedQuestion = { id: "run_retry_source", project_id: project.id, kind: "question", status: "failed",
+  conversation_id: "conversation_retry", owner_id: "local-owner", conversation_title: "超时重试",
+  started_at: Date.now(), prompt: "请重新检查这份资料", output: "", error: "模型首次响应超时",
+  attachments: [{ id: "attachment_retry", name: "notes.txt", kind: "text", size: 16 }], steps: [] };
 function currentRun() {
   if (!activeRun) return undefined;
   if (failRun) return { ...activeRun, status: "failed", error: "模拟接口故障", output: markdown };
@@ -70,10 +75,18 @@ await page.route("**/api/**", async (route) => {
     artifacts: [{ id: "external_update", kind: "analysis", body: `外部活动 ${++contexts}` }] };
   else if (path === `/api/projects/${project.id}/runs` && request.method() === "POST") {
     const input = request.postDataJSON();
-    activeRun = { id: "run_stream", project_id: project.id, kind: "question", status: "running",
-      conversation_id: "conversation_fixture", owner_id: "local-owner",
-      started_at: Date.now(), prompt: input.prompt, output: markdown, steps: [] };
-    body = activeRun;
+    if (input.parent_id === failedQuestion.id) {
+      retries.push(input);
+      const run = { ...failedQuestion, id: `run_retried_${retries.length}`, status: "succeeded",
+        started_at: Date.now(), output: "已重新分析", error: "" };
+      runs.push(run);
+      body = { ...run, status: "queued", output: "" };
+    } else {
+      activeRun = { id: "run_stream", project_id: project.id, kind: "question", status: "running",
+        conversation_id: "conversation_fixture", owner_id: "local-owner",
+        started_at: Date.now(), prompt: input.prompt, output: markdown, steps: [] };
+      body = activeRun;
+    }
   } else if (path === `/api/projects/${project.id}/runs`) {
    const selected=url.searchParams.get('conversation_id');let visible=selected?allRuns.filter(r=>(r.conversation_id||r.id)===selected):allRuns;
    visible=visible.slice().sort((a,b)=>b.started_at-a.started_at||b.id.localeCompare(a.id));body=paged(visible);
@@ -81,6 +94,7 @@ await page.route("**/api/**", async (route) => {
   else if (path === "/api/runs/run_stream") { reads++; body = currentRun(); }
   // Exercise compatibility with a server/proxy that cannot stream.
   else if (path.endsWith("/events")) { await route.fulfill({ status: 503, body: "stream unavailable" }); return; }
+  else if (path.startsWith("/api/runs/")) body = runs.find((run) => path === `/api/runs/${run.id}`);
   else throw new Error(`Unexpected fixture request: ${request.method()} ${path}`);
   await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
 });
@@ -223,7 +237,6 @@ try {
       conversation_title: `其他会话 ${i}`, started_at: baseline - i - 1000 });
   }
   await page.reload();
-  await page.getByRole("button", { name: "项目问答", exact: true }).click();
   const earlier = page.getByRole("button", { name: "加载更早消息", exact: true });
   const moreConversations = page.getByRole("button", { name: "加载更多会话", exact: true });
   await earlier.waitFor();
@@ -243,6 +256,27 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   report.progressive_history = "short chat has no paging controls; loading older messages and conversations keeps existing items and the draft";
+
+  runs.push(failedQuestion);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.reload();
+  await page.locator('[data-action="select-conversation"][data-id="conversation_retry"]').click();
+  await input.fill("保留重试时的草稿");
+  const retry = page.locator("#run-run_retry_source").getByRole("button", { name: "重新分析", exact: true });
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 844 });
+    const nextRetry = retries.length + 1;
+    await retry.click();
+    const answer = page.locator(`#run-run_retried_${nextRetry} .answer-content`).getByText("已重新分析");
+    const toast = page.locator("#toast.show");
+    await answer.or(toast).first().waitFor({ timeout: 6000 });
+    assert.equal(await toast.count(), 0, await page.locator("#toast").textContent());
+    assert.deepEqual(retries.at(-1), { kind: "question", task_id: "", prompt: failedQuestion.prompt,
+      parent_id: failedQuestion.id, attachment_ids: ["attachment_retry"] });
+    assert.equal(await input.inputValue(), "保留重试时的草稿");
+    assert.equal(await page.locator(".chat-page").getAttribute("data-conversation-id"), "conversation_retry");
+  }
+  report.retry = "mobile and desktop retried a timed-out question in place with its original prompt and attachment";
   assert.deepEqual(errors, []);
   assert(reads < 32, "multiple concurrent polling loops were started for one run");
   report.browser_errors = errors;
