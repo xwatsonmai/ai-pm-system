@@ -1949,11 +1949,12 @@ document.addEventListener("click", async (event) => {
     }
     if (a === "retry-run") {
       const r = await api(`/runs/${button.dataset.id}`);
+      if (r.project_id !== state.project?.id) return;
       await startRun(
         r.kind,
         r.task_id,
         r.prompt,
-        r.kind === "question" ? workspaceConversations().find((c) => c.id === conversationID(r))?.latest.id || r.id : "",
+        r.kind === "question" ? r.id : "",
         (r.attachments || []).map((a) => a.id),
       );
       return;
