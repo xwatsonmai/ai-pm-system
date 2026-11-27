@@ -18,7 +18,12 @@ const nextTick=()=>page.evaluate(()=>new Promise(done=>requestAnimationFrame(()=
 // Hold an actual HTTP response, then explicitly deliver it after another UI load.
 async function holdResponse(match){
  let release,started,finished;const begun=new Promise(done=>started=done),held=new Promise(done=>release=done),delivered=new Promise(done=>finished=done);
- const handler=async route=>{if(!match(new URL(route.request().url()))){await route.continue();return;}const response=await route.fetch();started();await held;await route.fulfill({response});finished();};
+ let intercepted=false;
+ const handler=async route=>{
+  if(intercepted||!match(new URL(route.request().url()))){await route.fallback();return;}
+  intercepted=true;
+  const response=await route.fetch();started();await held;await route.fulfill({response});finished();
+ };
  await page.route('**/api/**',handler);
  return {begun,async release(){release();await delivered;await nextTick();await page.unroute('**/api/**',handler);}};
 }
@@ -29,6 +34,60 @@ try{
  const b=(await api(`/projects/${project.id}/tasks`,{title:'Requirement B',description:'B',request_id:'b'})).task;
  for(let i=0;i<45;i++)await api(`/tasks/${a.id}/actions`,{action:'report',report_kind:'progress',body:`ONLY_A_EVENT_${i}`,request_id:`hist-a-${i}`});
  const tasksURL=`${base}/?project=${project.id}&page=tasks`;
+ const otherProject=await api('/projects',{name:'Other workspace',branch:'main'});
+ const other=(await api(`/projects/${otherProject.id}/tasks`,{title:'Other requirement',description:'Other',request_id:'other'})).task;
+ const taskRow=id=>page.locator(`[data-task-row][data-id="${id}"]`);
+ const selectProject=async id=>{
+  const mobileMenu=page.getByRole('button',{name:'打开导航'});
+  if(await mobileMenu.isVisible() && !await page.locator('.sidebar.open').count())await mobileMenu.click();
+  await page.locator('#project-switch').click();
+  await page.locator(`[data-action=switch-project][data-id="${id}"]`).click();
+ };
+ const assertWorkspace=async (p,t)=>{
+  await taskRow(t.id).waitFor({timeout:5000});
+  assert.equal(await page.locator('.project-switch-label strong').textContent(),p.name);
+  assert.equal(new URL(page.url()).searchParams.get('project'),p.id);
+  assert.equal(await page.evaluate(()=>localStorage.getItem('pm-project')),p.id);
+ };
+ await page.goto(tasksURL);
+ await assertWorkspace(project,a);
+ const failedSwitch=`${base}/api/projects/${otherProject.id}/summary`;
+ await page.route(failedSwitch,route=>route.fulfill({status:503,json:{error:'切换测试失败'}}),{times:1});
+ await selectProject(otherProject.id);
+ await page.locator('#toast.show').getByText('切换测试失败').waitFor();
+ await assertWorkspace(project,a);
+ // A direct link selects its project even when the saved preference differs.
+ await page.goto(`${base}/?project=${otherProject.id}&page=tasks`);
+ await assertWorkspace(otherProject,other);
+ await page.goto(tasksURL);
+ await assertWorkspace(project,a);
+
+ const staleList=await holdResponse(u=>u.pathname===`/api/projects/${project.id}/tasks`&&u.searchParams.get('q')==='Requirement A');
+ await page.locator('#task-search').fill('Requirement A');
+ await staleList.begun;
+ try {
+  await selectProject(otherProject.id);
+  await assertWorkspace(otherProject,other);
+ } finally {await staleList.release();}
+ assert.equal(await taskRow(a.id).count(),0);
+ assert.equal(await page.locator('#task-search').inputValue(),'');
+ await page.goBack();await assertWorkspace(project,a);
+ await page.goForward();await assertWorkspace(otherProject,other);
+ await page.reload();await assertWorkspace(otherProject,other);
+ await page.setViewportSize({width:390,height:844});
+ await selectProject(project.id);await assertWorkspace(project,a);
+ await page.setViewportSize({width:1440,height:1000});
+ await page.route(`${base}/api/projects/${otherProject.id}/access`,async route=>{
+  const response=await route.fetch();
+  const access=await response.json();
+  await route.fulfill({response,json:{...access,pages:['overview']}});
+ },{times:1});
+ await selectProject(otherProject.id);
+ await page.getByRole('heading',{name:'项目概览',exact:true}).waitFor();
+ assert.equal(new URL(page.url()).searchParams.get('project'),otherProject.id);
+ assert.equal(new URL(page.url()).searchParams.get('page'),'overview');
+ await page.goBack();await assertWorkspace(project,a);
+
  await page.goto(tasksURL);await page.locator(`[data-task-row][data-id="${a.id}"]`).click();await page.locator('.detail-title').waitFor();
  let held=await holdResponse(u=>u.pathname.endsWith('/events')&&u.searchParams.get('task_id')===a.id&&u.searchParams.get('page')==='2');
  await page.locator(`[data-list="detail-events:${a.id}"][data-page="2"]`).click();await held.begun;
@@ -94,5 +153,5 @@ try{
  await page.locator('[data-list=profiles][data-page="2"]').click();await page.locator('[data-list=profiles]').waitFor({state:'detached'});
  const after=await page.locator('#platform-form select option').evaluateAll(nodes=>nodes.map(n=>n.value));assert(after.some(id=>id&&!before.includes(id)),'page 2 profiles missing from model selector');assert.equal(await page.locator('#platform-form select').inputValue(),unsaved);
  assert.deepEqual(errors,[]);
- console.log('PASS: task and version modal identity, detail page generations, role dialog cancellation, tree/search response ordering, fixed code SHA, paged model options and draft selection.');
+ console.log('PASS: project switch on desktop and mobile, history, reload, failed switch and permission fallback, task and version modal identity, detail page generations, role dialog cancellation, tree/search response ordering, fixed code SHA, paged model options and draft selection.');
 }catch(e){console.error('BROWSER',errors,await page.locator('body').innerText());throw e;}finally{await browser.close();server.kill('SIGTERM');await serverExit.catch(()=>{});await rm(data,{recursive:true,force:true});}

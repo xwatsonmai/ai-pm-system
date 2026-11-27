@@ -8,7 +8,7 @@ import { pagerHTML, moreHTML, hasMore, readPageWindow, pageQuery, patchKeyedHTML
 import { createTaskHierarchy } from "./task-hierarchy.mjs";
 import { requirementPoolHTML } from "./requirement-pool.mjs";
 import {mountVersionLineage} from './version-lineage.mjs';
-const taskTree = createTaskHierarchy();
+let taskTree = createTaskHierarchy();
 import { patchHTML, mergeRunRefresh } from "./dom-update.mjs";
 import { requirementFormHTML, mountRequirementEditor } from "./requirement-editor.mjs";
 import { requirementReviewHTML, mountRequirementReview } from "./requirement-review.mjs";
@@ -372,23 +372,38 @@ function readList(key, path, extra = {}) {
 }
 function mayReadPage(access,page) { return !access || access.pages?.includes(page); }
 async function readWorkspace(projectID,page=state.page) {
- const revision=++workspaceRevision,scope=projectID,runsAtStart=new Map(state.runs.map(r=>[r.id,r]));
- const hierarchy=state.taskHierarchy,filters={status:state.filter,q:state.search,kind:state.kind,project_version_id:state.versionFilter},rootPage={...listResult('tasks')};
- const current=()=>revision===workspaceRevision&&state.project?.id===projectID&&state.page===page&&(page!=='tasks'||(hierarchy===state.taskHierarchy&&filters.status===state.filter&&filters.q===state.search&&filters.kind===state.kind&&filters.project_version_id===state.versionFilter&&rootPage.page===listResult('tasks').page&&rootPage.page_size===listResult('tasks').page_size));
+ const revision=++workspaceRevision,sourceProject=state.project?.id,sourcePage=state.page;
+ const changingProject=sourceProject!==projectID;
+ const runsAtStart=new Map(state.runs.map(r=>[r.id,r]));
+ const hierarchy=state.taskHierarchy;
+ const filters={status:changingProject?'':state.filter,q:changingProject?'':state.search,kind:state.kind,project_version_id:changingProject?'':state.versionFilter};
+ const rootPage=businessLists.get(`${projectID}:tasks`)||emptyPage();
+ // A project switch loads the destination while the source stays on screen.
+ const current=()=>{
+  if(revision!==workspaceRevision||state.project?.id!==sourceProject||state.page!==sourcePage)return false;
+  if(page!=='tasks')return true;
+  if(hierarchy!==state.taskHierarchy||filters.kind!==state.kind)return false;
+  if(changingProject)return true;
+  const activePage=listResult('tasks');
+  return filters.status===state.filter&&filters.q===state.search&&filters.project_version_id===state.versionFilter&&
+   rootPage.page===activePage.page&&rootPage.page_size===activePage.page_size;
+ };
  let tree=null;
  const [context,access]=await Promise.all([api(`/projects/${projectID}/summary`),api(`/projects/${projectID}/access`)]);
+ if(changingProject&&!allowedPage(page,access,isPlatformAdmin()))page=firstAccessiblePage(access);
+ const taskView=changingProject?createTaskHierarchy():taskTree;
  const lists=new Map();
- const get=async(key,path,extra={})=>{const current=businessLists.get(`${scope}:${key}`)||emptyPage();const params=pageQuery(current.page,current.page_size);for(const [k,v] of Object.entries(extra))if(v!==''&&v!=null)params.set(k,String(v));const fetchPage=page=>{params.set('page',String(page));return api(`${path}?${params}`);};
+ const get=async(key,path,extra={})=>{const current=key==='tasks'?rootPage:businessLists.get(`${projectID}:${key}`)||emptyPage();const params=pageQuery(current.page,current.page_size);for(const [k,v] of Object.entries(extra))if(v!==''&&v!=null)params.set(k,String(v));const fetchPage=page=>{params.set('page',String(page));return api(`${path}?${params}`);};
   const result=await (key==='tasks'?fetchPage(current.page):readPageWindow(current.page,fetchPage));lists.set(key,result);return result;};
  const task=async(key,status)=>get(key,`/projects/${projectID}/tasks`,{status,...(key==='tasks'?{q:state.search,kind:state.kind,project_version_id:state.versionFilter}:{})});
  let runs=[],intakes=[],collaborations=[];
  if(page==='tasks'&&current()){
-  taskTree.begin(JSON.stringify([projectID,state.auth?.user?.id,hierarchy,filters,rootPage.page,rootPage.page_size]),{project:projectID,user:state.auth?.user?.id||'local-owner',filtered:Object.values(filters).some(Boolean)});
+  taskView.begin(JSON.stringify([projectID,state.auth?.user?.id,hierarchy,filters,rootPage.page,rootPage.page_size]),{project:projectID,user:state.auth?.user?.id||'local-owner',filtered:Object.values(filters).some(Boolean)});
   if(mayReadPage(access,'tasks')){
    const result=await get('tasks',`/projects/${projectID}/tasks`,{...filters,...(hierarchy?{view:'tree'}:{})});
    if(hierarchy&&current()){
-    tree=await taskTree.read(result,(parent,page)=>{const query=pageQuery(page,20);for(const [k,v]of Object.entries({...filters,view:'tree',tree_parent_id:parent}))if(v)query.set(k,v);return api(`/projects/${projectID}/tasks?${query}`);},current);
-    if(tree){const data=taskTree.data(tree);context.tasks=data.nodes;context.requirement_reviews=data.reviews;context.project_versions=[...(context.project_versions||[]),...data.versions];}
+    tree=await taskView.read(result,(parent,page)=>{const query=pageQuery(page,20);for(const [k,v]of Object.entries({...filters,view:'tree',tree_parent_id:parent}))if(v)query.set(k,v);return api(`/projects/${projectID}/tasks?${query}`);},current);
+    if(tree){const data=taskView.data(tree);context.tasks=data.nodes;context.requirement_reviews=data.reviews;context.project_versions=[...(context.project_versions||[]),...data.versions];}
    }else{context.tasks=result.items;context.requirement_reviews=result.requirement_reviews||[];}
   }
  }
@@ -415,10 +430,18 @@ async function readWorkspace(projectID,page=state.page) {
  const names=new Map((context.project_versions||[]).map(v=>[v.id,v]));
  for(const result of lists.values())for(const v of result.version_options||[])names.set(v.id,v);
  context.project_versions=[...names.values()];
- return {revision,projectID,page,context,access,lists,runs,intakes,collaborations,runsAtStart,tree,current};
+ return {projectID,page,context,access,lists,runs,intakes,collaborations,runsAtStart,tree,taskView,current};
 }
 function applyWorkspace(snapshot) {
- if(snapshot.revision!==workspaceRevision||!snapshot.current())return false;
+ if(!snapshot.current())return false;
+ if(state.project?.id!==snapshot.projectID){
+  stopRunUpdates();
+  clearTimeout(taskSearchTimer);
+  state.runs=[];
+  state.versionFilter='';state.search='';state.filter='';
+  state.page=snapshot.page;
+ }
+ taskTree=snapshot.taskView;
  if(snapshot.tree)taskTree.commit(snapshot.tree);
  state.context=snapshot.context;state.project=snapshot.context.project;state.project_access=snapshot.access;
  for(const [key,value] of snapshot.lists)businessLists.set(`${snapshot.projectID}:${key}`,value);
@@ -426,7 +449,7 @@ function applyWorkspace(snapshot) {
  state.intakes=snapshot.intakes;state.collaborations=snapshot.collaborations;return true;
 }
 async function loadBusinessPage() {
- if(!state.project)return;
+ if(!state.project||state.switchingProject)return;
  const projectID=state.project.id,page=state.page,snapshot=await readWorkspace(projectID,page);
  if(state.project?.id!==projectID||state.page!==page)return;
  if(applyWorkspace(snapshot))await updateBusinessPage();
@@ -497,14 +520,15 @@ function openProjectMenu(last = false) {
   const items = $$("button", menu);
   (last ? items.at(-1) : $("[aria-checked=true]", menu) || items[0])?.focus();
 }
-async function switchProject(projectID, {updateURL=true}={}) {
- if(state.switchingProject||state.project?.id===projectID)return;
- closeProjectMenu(true);closeModal();state.switchingProject=true;workspaceRevision++;
+async function switchProject(projectID, {updateURL=true,page=state.page}={}) {
+ if(state.switchingProject||state.project?.id===projectID)return false;
+ closeProjectMenu(true);closeModal();state.switchingProject=true;
  if($('#project-switch'))$('#project-switch').disabled=true;
  try{
-  state.versionFilter='';state.search='';state.filter='';
-  const snapshot=await readWorkspace(projectID);stopRunUpdates();state.runs=[];
-  applyWorkspace(snapshot);localStorage.setItem('pm-project',projectID);expandNavigationGroup();if(updateURL)syncRoute('push');render();pollActiveRuns();$('#project-switch')?.focus();
+  const snapshot=await readWorkspace(projectID,page);
+  if(!applyWorkspace(snapshot))return false;
+  localStorage.setItem('pm-project',projectID);expandNavigationGroup();if(updateURL)syncRoute('push');render();pollActiveRuns();$('#project-switch')?.focus();
+  return true;
  }finally{state.switchingProject=false;if($('#project-switch'))$('#project-switch').disabled=false;}
 }
 function navigationStorageKey() { return `pm-navigation:${state.auth?.user?.id || 'local-owner'}:${state.project?.id || ''}`; }
@@ -1605,7 +1629,7 @@ async function pollWorkspace() {
   if(['settings','git','access','code','mcp','platform'].includes(state.page))return;
   await loadBusinessPage();pollActiveRuns();
  } catch(e) {
-  if((e.status===403||e.status===404)&&state.project?.id===projectID){
+  if((e.status===403||e.status===404)&&state.project?.id===projectID&&!state.switchingProject){
    stopRunUpdates();closeModal();state.project=null;state.project_access=null;state.context=null;
    try {localStorage.removeItem('pm-project');}catch{}
    const url=new URL(location.href);url.searchParams.delete('project');history.replaceState(null,'',url.pathname+url.search);
@@ -2433,7 +2457,10 @@ document.addEventListener("submit", async (event) => {
 window.addEventListener("popstate", async () => {
   try {
     const route=routeFromURL(location.href);
-    if(route.project && route.project!==state.project?.id)await switchProject(route.project,{updateURL:false});
+    if(route.project && route.project!==state.project?.id){
+      if(await switchProject(route.project,{updateURL:false,page:route.page}))syncRoute();
+      return;
+    }
     await navigate(route.page,{historyMode:"none"});syncRoute();
   } catch(e) {toast(e.message);}
 });
